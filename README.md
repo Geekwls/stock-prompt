@@ -2,11 +2,11 @@
 
 本项目是一套专为 **A 股市场** 打造的深度 AI 交易策略、板块分析与日内研判框架。结合大语言模型（如 DeepSeek, Gemini, ChatGPT, Claude）的联网能力与强推理能力，帮助交易者实现深度的市场数据分析与交易决策支持。
 
-项目具备极强的**跨平台兼容性**，支持在 **Antigravity**、**Workbuddy**、**Cursor**、**Dify/Coze**、**ChatGPT Custom GPTs** 及 **Web 网页版** 等各类 AI 工具与平台中使用。
+项目经过全面精简与规范化，消除了模型特定的冗余文件，同时支持 **Antigravity**、**Workbuddy**、**Cursor**、**Dify/Coze**、**ChatGPT Custom GPTs** 及 **Web 网页版** 等各类 AI 工具与平台使用。
 
 ---
 
-## 📂 项目结构
+## 📂 项目结构（精简干净版）
 
 ```text
 stock-prompt/
@@ -14,16 +14,13 @@ stock-prompt/
 │   ├── daily-review/                  # 技能 1: A股每日强势板块与产业链共振分析
 │   ├── sector-rotation/               # 技能 2: A股近5日板块轮动与节奏深度复盘
 │   └── market-prediction/             # 技能 3: A股盘前行情板块预测与日内策略研判
-├── 每天复盘强势板块分析/               # 📄 每日复盘相关 Prompt / Skill 配置文件
+├── 每天复盘强势板块分析/               # 📄 每日复盘通用核心主文档
 │   ├── 每天强势板块产业链共振分析.md
-│   ├── deepseek.md
-│   ├── gemini.md
 │   └── CHANGELOG.md
-├── 5日内板块轮动分析/                  # 📄 板块轮动分析 Prompt
+├── 5日内板块轮动分析/                  # 📄 板块轮动分析通用核心主文档
 │   └── 5日内板块轮动节奏分析.md
-└── 每天行情板块预测/                  # 📄 盘前预测相关 Prompt
-    ├── 每天行情板块预测_结合优化版.md
-    └── chatgpt.md
+└── 每天行情板块预测/                  # 📄 盘前预测通用核心主文档
+    └── 每天行情板块预测_结合优化版.md
 ```
 
 ---
@@ -43,7 +40,7 @@ stock-prompt/
 ### 方式二：在 Workbuddy / Cursor / Windsurf 等 AI 开发工具中使用
 如果你或你的朋友使用 **Workbuddy**、**Cursor** 或 **Windsurf**：
 - **项目级集成**：直接 Clone 本项目作为 Workspace，Workbuddy / Cursor 会自动识别并索引 `.agents/` 目录中的技能与规则。
-- **自定义提示词库**：在 Workbuddy 的 Prompt/Rule 管理面板中，新增自定义提示词，将本项目中对应目录下的 `.md` 文件（如 `每天强势板块产业链共振分析.md`）全文粘贴保存，即可随用随点。
+- **自定义提示词库**：在 Workbuddy 的 Prompt/Rule 管理面板中，新增自定义提示词，将本项目中对应目录下的 `.md` 主文件全文粘贴保存，即可随用随点。
 
 ---
 

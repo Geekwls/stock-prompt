@@ -1,8 +1,8 @@
 # 📈 A股量化分析 AI 提示词与 Skill 体系库 (`stock-prompt`)
 
-本项目是一套专为 **A 股市场** 打造的深度 AI 交易策略、板块分析与日内研判框架。结合大语言模型（如 DeepSeek, Gemini, ChatGPT）的联网能力与强推理能力，帮助交易者实现深度的市场数据分析与交易决策支持。
+本项目是一套专为 **A 股市场** 打造的深度 AI 交易策略、板块分析与日内研判框架。结合大语言模型（如 DeepSeek, Gemini, ChatGPT, Claude）的联网能力与强推理能力，帮助交易者实现深度的市场数据分析与交易决策支持。
 
-项目同时支持 **AI Agent (Antigravity / Cursor / Windsurf) 自动索引** 与 **Web 网页版模型（复制粘贴）** 使用。
+项目具备极强的**跨平台兼容性**，支持在 **Antigravity**、**Workbuddy**、**Cursor**、**Dify/Coze**、**ChatGPT Custom GPTs** 及 **Web 网页版** 等各类 AI 工具与平台中使用。
 
 ---
 
@@ -28,30 +28,44 @@ stock-prompt/
 
 ---
 
-## 🚀 使用指南
+## 🌐 跨平台多场景使用指南
 
-### 方式一：在 Antigravity / AI Agent 中使用（⭐️⭐️⭐️⭐️⭐️ 推荐，零配置）
-
-如果你使用 **Antigravity** 或支持 Agent Skill 规范的 IDE，**无需任何设置**！
-
+### 方式一：在 Antigravity / Agent 客户端中使用（⭐️⭐️⭐️⭐️⭐️ 推荐，零配置）
+如果你使用 **Antigravity** 或支持标准 Agent Skill 的 IDE：
 1. **直接 Clone / 打开本仓库** 作为工作区。
-2. **在对话中直接自然语言提问**，Agent 会自动感知并按需激活对应的技能：
+2. **自然语言提问**，Agent 会自动感知并激活对应技能：
    - 🗣 *"使用 V2.5 框架帮我深度复盘今天的强势板块"* ➡️ 自动激活 `daily-review`
    - 🗣 *"帮我分析近 5 个交易日的板块轮动和主线节奏"* ➡️ 自动激活 `sector-rotation`
    - 🗣 *"根据隔夜外盘和盘后消息，做一份今天的盘前预测"* ➡️ 自动激活 `market-prediction`
 
 ---
 
-### 方式二：在网页版 LLM (ChatGPT / DeepSeek / Kimi / Gemini) 中使用
+### 方式二：在 Workbuddy / Cursor / Windsurf 等 AI 开发工具中使用
+如果你或你的朋友使用 **Workbuddy**、**Cursor** 或 **Windsurf**：
+- **项目级集成**：直接 Clone 本项目作为 Workspace，Workbuddy / Cursor 会自动识别并索引 `.agents/` 目录中的技能与规则。
+- **自定义提示词库**：在 Workbuddy 的 Prompt/Rule 管理面板中，新增自定义提示词，将本项目中对应目录下的 `.md` 文件（如 `每天强势板块产业链共振分析_V2.5.md`）全文粘贴保存，即可随用随点。
 
-如果你在 Web 页面直接使用大模型：
+---
 
-1. **选择场景**：
-   - **盘前（7:00 - 9:15）**：打开 `每天行情板块预测/每天行情板块预测_结合优化版_V3.5.md`
-   - **盘后复盘**：打开 `每天复盘强势板块分析/每天强势板块产业链共振分析_V2.5.md`
-   - **中期节奏分析**：打开 `5日内板块轮动分析/deepseek.md`
-2. **复制完整 Markdown 内容** 粘贴至大模型对话框。
-3. 如果模型没有启用联网，请按照 Prompt 中的提示补充当天的行情/板块数据。
+### 方式三：在 Dify / Coze / FastGPT 等 Agent 工作流平台构建 Bots
+如果你想把这些提示词搭建成飞书/钉钉/微信群里的**自动化复盘机器人**：
+1. **System Prompt**：新建 Bot/Workflow 节点，将 `SKILL.md` 或主 Prompt 文件的文本粘贴到 **系统提示词 (System Prompt)** 中。
+2. **工具集成**：为 Bot 绑定**联网搜索插件**（如 Tavily, Serper 或财经资讯 API），让 Bot 具备获取当日实时行情数据的能力。
+
+---
+
+### 方式四：在 ChatGPT Custom GPTs / Claude Projects 中使用
+- **ChatGPT Custom GPTs**：在 ChatGPT 中“Create a GPT”，将 Prompt 粘贴至 **Instructions**，并确保勾选 **Web Browsing (联网功能)**。
+- **Claude Projects**：在 Claude 中新建 Project，将 Prompt 写入 **Project Instructions**。
+
+---
+
+### 方式五：在网页版 LLM (ChatGPT / DeepSeek / Kimi / Gemini) 中使用
+如果在 Web 页面直接对话：
+1. **盘前（7:00 - 9:15）**：打开 `每天行情板块预测/每天行情板块预测_结合优化版_V3.5.md`
+2. **盘后复盘**：打开 `每天复盘强势板块分析/每天强势板块产业链共振分析_V2.5.md`
+3. **中期节奏分析**：打开 `5日内板块轮动分析/deepseek.md`
+4. 复制完整 Markdown 内容粘贴给大模型。如果模型没有联网功能，请手动附上当天行情数据。
 
 ---
 

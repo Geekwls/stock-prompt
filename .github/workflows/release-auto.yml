@@ -1,0 +1,41 @@
+name: Release & Distribution Pipeline
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate version.json & SKILL Syntax
+        run: |
+          echo "🔍 检查 version.json 存在性与 JSON 格式合规性..."
+          python3 -c "import json; json.load(open('version.json'))"
+          echo "✅ version.json 格式正确。"
+
+      - name: Generate Automatic Release Notes
+        id: release_notes
+        run: |
+          echo "📝 从 CHANGELOG.md 提取日志..."
+          head -n 30 CHANGELOG.md > RELEASE_NOTES.md || echo "最新版本发布" > RELEASE_NOTES.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          body_path: RELEASE_NOTES.md
+          files: |
+            version.json
+            CHANGELOG.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

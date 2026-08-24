@@ -2,31 +2,30 @@
 
 本项目是一套专为 **A 股市场** 打造的深度 AI 交易策略、板块分析与日内研判框架。结合大语言模型（如 DeepSeek, Gemini, ChatGPT, Claude）的联网能力与强推理能力，帮助交易者实现深度的市场数据分析与交易决策支持。
 
-项目经过全面精简与规范化，消除了模型特定的冗余文件与复杂后缀，支持 **Antigravity**、**Workbuddy**、**Cursor**、**Dify/Coze**、**ChatGPT Custom GPTs** 及 **Web 网页版** 等各类 AI 工具与平台使用。
+项目具备极强的**跨平台兼容性**，支持在 **Antigravity**、**Workbuddy**、**Cursor**、**Dify/Coze**、**ChatGPT Custom GPTs** 及 **Web 网页版** 等各类 AI 工具与平台中使用。
 
 ---
 
-## 📂 项目结构（规范工程化版）
+## 📂 项目结构（三大核心交易场景）
 
 ```text
 stock-prompt/
 ├── .agents/skills/                    # 🤖 Antigravity / Agent 专用 Skill 目录
-│   ├── daily-review/                  # 技能 1: A股每日强势板块与产业链共振分析
-│   ├── index-prediction/              # 技能 2: A股四大指数盘前概率推演与路径预测
-│   ├── market-prediction/             # 技能 3: A股盘前行情板块预测与日内策略研判
-│   └── sector-rotation/               # 技能 4: A股近5日板块轮动与节奏深度复盘
-├── prompts/                           # 📄 通用 Markdown 提示词库（与 skills 对齐）
-│   ├── daily-review/                  # 每日强势板块共振分析
+│   ├── market-prediction/             # 🌅 技能 1 (盘前)：大盘点位 + 行业主线 + 竞价全景研判
+│   ├── daily-review/                  # 🌇 技能 2 (盘后)：每日强势板块产业链共振深度复盘
+│   └── sector-rotation/               # 🔄 技能 3 (中期)：近5日板块轮动与节奏深度推演
+│
+├── prompts/                           # 📄 通用 Markdown 提示词库（与 skills 完全对齐）
+│   ├── market-prediction/             # 🌅 盘前全景研判
+│   │   └── A股盘前全景策略研判.md
+│   ├── daily-review/                  # 🌇 盘后共振复盘
 │   │   ├── 每天强势板块产业链共振分析.md
 │   │   └── CHANGELOG.md
-│   ├── index-prediction/              # 四大指数盘前路径预测
-│   │   └── A股四大指数盘前概率推演与路径预测.md
-│   ├── market-prediction/             # 每日行情板块预测
-│   │   └── 每天行情板块预测.md
-│   └── sector-rotation/               # 近5日板块轮动节奏分析
+│   └── sector-rotation/               # 🔄 近5日轮动节奏
 │       └── 5日内板块轮动节奏分析.md
+│
 ├── scripts/                           # 🛠 自动化脚本（update.bat / update.sh）
-├── CHANGELOG.md                       # 项目版本日志
+├── CHANGELOG.md                       # 项目主版本日志
 ├── README.md                          # 项目说明文档
 └── version.json                       # 版本号控制配置
 ```
@@ -39,9 +38,8 @@ stock-prompt/
 如果你使用 **Antigravity** 或支持标准 Agent Skill 的 IDE：
 1. **直接 Clone / 打开本仓库** 作为工作区。
 2. **自然语言提问**，Agent 会自动感知并激活对应技能：
-   - 🗣 *"帮我深度复盘今天的强势板块"* ➡️ 自动激活 `daily-review`
-   - 🗣 *"预测一下今天四大指数的开盘和走势路径"* ➡️ 自动激活 `index-prediction`
-   - 🗣 *"根据隔夜外盘和盘后消息，做一份今天的盘前预测"* ➡️ 自动激活 `market-prediction`
+   - 🗣 *"做一份今天的盘前全景预测（大盘点位+板块机会）"* ➡️ 自动激活 `market-prediction`
+   - 🗣 *"帮我深度复盘今天的强势板块与产业链共振"* ➡️ 自动激活 `daily-review`
    - 🗣 *"帮我分析近 5 个交易日的板块轮动和主线节奏"* ➡️ 自动激活 `sector-rotation`
 
 ---
@@ -68,7 +66,7 @@ stock-prompt/
 
 ### 方式五：在网页版 LLM (ChatGPT / DeepSeek / Kimi / Gemini) 中使用
 如果在 Web 页面直接对话：
-1. **盘前（7:00 - 9:15）**：打开 `prompts/market-prediction/每天行情板块预测.md` 或 `prompts/index-prediction/A股四大指数盘前概率推演与路径预测.md`
+1. **盘前（7:00 - 9:15）**：打开 `prompts/market-prediction/A股盘前全景策略研判.md`
 2. **盘后复盘**：打开 `prompts/daily-review/每天强势板块产业链共振分析.md`
 3. **中期节奏分析**：打开 `prompts/sector-rotation/5日内板块轮动节奏分析.md`
 4. 复制完整 Markdown 内容粘贴给大模型。如果模型没有联网功能，请手动附上当天行情数据。
@@ -78,7 +76,7 @@ stock-prompt/
 ## 🧠 核心分析逻辑与防幻觉机制
 
 1. **严谨的数据降级与防幻觉**：所有提示词均设有严格的**数据缺失处理规则**，当关键数据获取受限时强制按照中性或定性规则推演，防止 AI 编造假数据。
-2. **三维共振理论**：龙头决定方向、中军决定容量、补涨决定扩散、共振决定持续性。
+2. **宏观空间与微观 Alpha 双轮驱动**：大盘四维立体空间点位（ATR波动率 + 筹码POC + 期权对冲墙）界定大盘安全边际，主线强度打分引擎（0-100分）精选日内暴利机会。
 3. **情绪与量价结构**：结合市场总量环境（增量做多、存量轮动、减量退潮）动态匹配仓位建议与开仓盈亏比评估。
 
 ---

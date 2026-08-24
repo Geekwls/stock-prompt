@@ -138,7 +138,11 @@ $$\text{综合外力总分 } F = S_{\text{A50}} + S_{\text{US}} + S_{\text{CN}} 
 - **Probability Score**：计算 **Brier Score** 评估概率校准能力。
 - **Path Hit**：实际路径是否符合主/次/风险场景。
 
-每次预测输出标准 JSON Log：
+每次预测输出标准 JSON Log（需包裹在 `<details>` 折叠标签中，保证普通用户阅读界面干净整洁）：
+```html
+<details>
+<summary>📄 点击展开量化结构日志 (Prediction Log Schema)</summary>
+
 ```json
 {
   "date": "YYYY-MM-DD",
@@ -158,6 +162,8 @@ $$\text{综合外力总分 } F = S_{\text{A50}} + S_{\text{US}} + S_{\text{CN}} 
   },
   "result_1500": { "status": "PENDING" }
 }
+```
+</details>
 ```
 
 ---
@@ -230,10 +236,13 @@ $$\text{综合外力总分 } F = S_{\text{A50}} + S_{\text{US}} + S_{\text{CN}} 
 ## ⑧ 数据来源
 - A股 / 富时A50 / 美股 / 中概 / CNH / 黄金原油 / 宏观政策
 
-## ⑨ Prediction Log
+<details>
+<summary>📄 点击展开量化结构日志 (Prediction Log Schema)</summary>
+
 ```json
 {标准JSON记录}
 ```
+</details>
 ```
 
 ---
@@ -271,10 +280,13 @@ $$\text{综合外力总分 } F = S_{\text{A50}} + S_{\text{US}} + S_{\text{CN}} 
 ## ④ 更新后的日内路径
 {重新给出主场景、次场景、风险场景}
 
-## ⑤ Updated Prediction Log
+<details>
+<summary>📄 点击展开更新后的结构日志 (Updated Log Schema)</summary>
+
 ```json
 {更新后的JSON}
 ```
+</details>
 ```
 
 ---

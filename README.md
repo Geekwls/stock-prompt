@@ -66,7 +66,7 @@ stock-prompt/
 
 ### 方式五：在网页版 LLM (ChatGPT / DeepSeek / Kimi / Gemini) 中使用
 如果在 Web 页面直接对话：
-1. **盘前（7:00 - 9:15）**：打开 `prompts/market-prediction/A股盘前全景策略研判.md`
+1. **盘前（8:30 - 9:15）**：打开 `prompts/market-prediction/A股盘前全景策略研判.md`
 2. **盘后复盘**：打开 `prompts/daily-review/每天强势板块产业链共振分析.md`
 3. **中期节奏分析**：打开 `prompts/sector-rotation/5日内板块轮动节奏分析.md`
 4. 复制完整 Markdown 内容粘贴给大模型。如果模型没有联网功能，请手动附上当天行情数据。

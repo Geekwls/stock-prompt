@@ -11,7 +11,7 @@
 ```text
 stock-prompt/
 ├── .agents/skills/                    # 🤖 Antigravity / Agent 专用 Skill 目录
-│   ├── market-prediction/             # 🌅 技能 1 (盘前)：大盘点位 + 行业主线 + 竞价全景研判
+│   ├── market-prediction/             # 🌅 技能 1 (盘前)：大盘点位 + 行业主线 + 竞价全景研判 (V3.0)
 │   ├── daily-review/                  # 🌇 技能 2 (盘后)：每日强势板块产业链共振深度复盘
 │   └── sector-rotation/               # 🔄 技能 3 (中期)：近5日板块轮动与节奏深度推演
 │
@@ -19,15 +19,31 @@ stock-prompt/
 │   ├── market-prediction/             # 🌅 盘前全景研判
 │   │   └── A股盘前全景策略研判.md
 │   ├── daily-review/                  # 🌇 盘后共振复盘
-│   │   ├── 每天强势板块产业链共振分析.md
-│   │   └── CHANGELOG.md
+│   │   └── 每天强势板块产业链共振分析.md
 │   └── sector-rotation/               # 🔄 近5日轮动节奏
 │       └── 5日内板块轮动节奏分析.md
 │
-├── scripts/                           # 🛠 自动化脚本（update.bat / update.sh）
+├── scripts/                           # 🛠 自动化工具库
+│   ├── generate_report_card.py        # 🎨 高清深色科技风战报长图自动生成脚本
+│   ├── update.bat                     # 🔄 Windows 自动更新脚本
+│   └── update.sh                      # 🔄 Linux/Mac 自动更新脚本
 ├── CHANGELOG.md                       # 项目主版本日志
 ├── README.md                          # 项目说明文档
 └── version.json                       # 版本号控制配置
+```
+
+---
+
+## 🎨 自动化战报长图生成器 (Report Card Generator)
+
+本项目内置了高分辨率深色科技风战报长图渲染脚本 `scripts/generate_report_card.py`，支持将研判与复盘数据一键渲染为精美卡片（适配微信、小红书、朋友圈）：
+
+```bash
+# 生成示例战报长图
+python scripts/generate_report_card.py --demo
+
+# 根据自定义 JSON 数据生成长图
+python scripts/generate_report_card.py --json my_report.json --output today_report.png
 ```
 
 ---
@@ -76,8 +92,8 @@ stock-prompt/
 ## 🧠 核心分析逻辑与防幻觉机制
 
 1. **严谨的数据降级与防幻觉**：所有提示词均设有严格的**数据缺失处理规则**，当关键数据获取受限时强制按照中性或定性规则推演，防止 AI 编造假数据。
-2. **宏观空间与微观 Alpha 双轮驱动**：大盘四维立体空间点位（ATR波动率 + 筹码POC + 期权对冲墙）界定大盘安全边际，主线强度打分引擎（0-100分）精选日内暴利机会。
-3. **情绪与量价结构**：结合市场总量环境（增量做多、存量轮动、减量退潮）动态匹配仓位建议与开仓盈亏比评估。
+2. **贝叶斯先验与机会函数双解耦**：大盘四维立体空间点位（ATR波动率 + 筹码POC + 期权对冲墙）界定安全边际，机会评分 (Opportunity Score) 解耦方向与盈亏比。
+3. **多维闭环自检**：引入 Brier Score、校准度 (Calibration) 与锐度 (Sharpness) 持续追踪模型效能。
 
 ---
 

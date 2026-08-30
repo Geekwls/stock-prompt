@@ -34,16 +34,22 @@ stock-prompt/
 
 ---
 
-## 🎨 自动化战报长图生成器 (Report Card Generator)
+## 🎨 📊 自动生成超高清研报长图 (战报卡片引擎)
 
-本项目内置了高分辨率深色科技风战报长图渲染脚本 `scripts/generate_report_card.py`，支持将研判与复盘数据一键渲染为精美卡片（适配微信、小红书、朋友圈）：
+项目内置了全自动 Python 研报长图生成器 (`scripts/generate_report_card.py`)，支持将三大核心场景的全量量化数据一键渲染为极简金融研报风长图（支持浅色/深色主题）：
 
 ```bash
-# 生成示例战报长图
-python scripts/generate_report_card.py --demo
+# 1. 每日收盘强势板块与产业链复盘长图 (15:00 收盘后使用)
+python scripts/generate_report_card.py --type daily
 
-# 根据自定义 JSON 数据生成长图
-python scripts/generate_report_card.py --json my_report.json --output today_report.png
+# 2. 5 日板块轮动与主线节奏复盘长图 (周五/周末/月末使用)
+python scripts/generate_report_card.py --type rotation
+
+# 3. 盘前全景量化推演战报长图 (08:30-09:15 使用)
+python scripts/generate_report_card.py --type prediction
+
+# 4. 深色科技风卡片 (末尾加上 --theme dark)
+python scripts/generate_report_card.py --type daily --theme dark
 ```
 
 ---

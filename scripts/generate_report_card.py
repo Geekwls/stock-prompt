@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 A股量化战报长图渲染引擎 (stock-prompt Report Card Generator)
-支持将【盘前全景推演】、【5日板块轮动深度复盘】、【每日产业链复盘】的全量数据渲染为高清极简金融研报长图。
+支持将【盘前全景推演】、【每日收盘产业链复盘】、【5日板块轮动深度复盘】的三大场景全量数据渲染为高清极简金融研报长图。
 """
 
 import os
@@ -43,6 +43,280 @@ def draw_badge(draw, text, xy, bg_color="#e0f2fe", text_color="#0369a1", font=No
     draw.rounded_rectangle([x, y, x + w, y + h], radius=5, fill=bg_color)
     draw.text((x + 8, y + 3), text, fill=text_color, font=font)
     return w, h
+
+def render_daily_review_card(data=None, output_path="daily_review_card.png", theme="light"):
+    """
+    专门渲染【A股每日强势板块与产业链共振深度复盘】全量长图 (宽幅 1220px 版)
+    """
+    is_light = (theme == "light")
+
+    if is_light:
+        BG_PAGE = "#f8fafc"
+        BG_CARD = "#ffffff"
+        BG_INNER = "#f1f5f9"
+        BG_ROW_ALT = "#f8fafc"
+        BORDER_CARD = "#e2e8f0"
+        BORDER_INNER = "#cbd5e1"
+        TEXT_TITLE = "#0f172a"
+        TEXT_H2 = "#1d4ed8"
+        TEXT_BODY = "#1e293b"
+        TEXT_MUTED = "#64748b"
+        DIVIDER = "#e2e8f0"
+        TOP_BAR = "#059669"
+        BADGE_BG1 = "#dcfce7"
+        BADGE_TXT1 = "#15803d"
+        BADGE_BG2 = "#f1f5f9"
+        BADGE_TXT2 = "#475569"
+        COLOR_UP = "#dc2626"
+        COLOR_DOWN = "#16a34a"
+        COLOR_ACCENT = "#059669"
+        COLOR_WARN = "#d97706"
+    else:
+        BG_PAGE = "#0b0f19"
+        BG_CARD = "#131c2e"
+        BG_INNER = "#0f172a"
+        BG_ROW_ALT = "#111827"
+        BORDER_CARD = "#1e293b"
+        BORDER_INNER = "#1e293b"
+        TEXT_TITLE = "#f8fafc"
+        TEXT_H2 = "#34d399"
+        TEXT_BODY = "#f8fafc"
+        TEXT_MUTED = "#64748b"
+        DIVIDER = "#1e293b"
+        TOP_BAR = "#34d399"
+        BADGE_BG1 = "#065f46"
+        BADGE_TXT1 = "#d1fae5"
+        BADGE_BG2 = "#1e293b"
+        BADGE_TXT2 = "#94a3b8"
+        COLOR_UP = "#f43f5e"
+        COLOR_DOWN = "#4ade80"
+        COLOR_ACCENT = "#34d399"
+        COLOR_WARN = "#fbbf24"
+
+    W = 1220
+    H = 2600
+    img = Image.new("RGBA", (W, H), BG_PAGE)
+    draw = ImageDraw.Draw(img)
+
+    for i in range(10):
+        draw.line([(0, i), (W, i)], fill=TOP_BAR, width=1)
+
+    font_title = get_font(34, bold=True)
+    font_h2 = get_font(21, bold=True)
+    font_h3 = get_font(18, bold=True)
+    font_body = get_font(16)
+    font_small = get_font(15)
+    font_micro = get_font(13)
+
+    if data is None:
+        data = {}
+
+    date_str = data.get("date", datetime.now().strftime("%Y-%m-%d"))
+
+    # 1. 标题区
+    draw.text((50, 42), "A股每日强势板块与产业链共振复盘报告", fill=TEXT_TITLE, font=font_title)
+    draw_badge(draw, f"复盘时点: {date_str} 15:00 收盘", (W - 320, 46), bg_color=BADGE_BG2, text_color=BADGE_TXT2, font=font_small)
+    draw_badge(draw, "收盘全景复盘", (W - 470, 46), bg_color=BADGE_BG1, text_color=BADGE_TXT1, font=font_small)
+    draw.line([(50, 100), (W - 50, 100)], fill=DIVIDER, width=2)
+
+    # 2. 30秒核心速览五宫格
+    top_metrics = [
+        ("Market Regime", data.get("regime", "S3 趋势启动 (过渡)"), COLOR_ACCENT),
+        ("市场情绪总分", f"{data.get('sentiment_score', 78)}/100", COLOR_UP),
+        ("第一核心主线", data.get("top_sector", "半导体/算力 [强化期]"), COLOR_ACCENT),
+        ("资金留存率", f"{data.get('retention', '88%')} [高锁仓]", COLOR_WARN),
+        ("综合机会评分", f"{data.get('opportunity_score', 86)}/100 [优良]", COLOR_UP),
+    ]
+
+    card_w = (W - 100 - 40) // 5
+    card_y = 120
+    for i, (label, val, col) in enumerate(top_metrics):
+        cx = 50 + i * (card_w + 10)
+        draw.rounded_rectangle([cx, card_y, cx + card_w, card_y + 95], radius=8, fill=BG_CARD, outline=BORDER_CARD, width=1)
+        draw.text((cx + 12, card_y + 14), label, fill=TEXT_MUTED, font=font_micro)
+        draw.text((cx + 12, card_y + 42), str(val), fill=col, font=get_font(19, bold=True))
+
+    curr_y = 235
+
+    # 3. 模块一：【市场情绪与资金总量定调】
+    sec1_h = 320
+    draw.rounded_rectangle([50, curr_y, W - 50, curr_y + sec1_h], radius=10, fill=BG_CARD, outline=BORDER_CARD, width=1)
+    draw.text((70, curr_y + 16), "01 / 市场情绪打分、量能环境与 Market Regime 状态定调", fill=TEXT_H2, font=font_h2)
+
+    col_w = (W - 140 - 20) // 2
+
+    # 左栏：情绪明细五项打分
+    draw.rounded_rectangle([70, curr_y + 55, 70 + col_w, curr_y + 295], radius=8, fill=BG_INNER, outline=BORDER_INNER, width=1)
+    draw.text((90, curr_y + 70), "[情绪引擎评分拆解] 标准 0-100 量纲", fill=TEXT_H2, font=font_h3)
+
+    sent_items = [
+        ("• 涨跌家数比 (25分)", "上涨 3320 家 / 下跌 1850 家 (涨跌比 6.4:3.6) -> 得分: 18 / 25"),
+        ("• 昨日涨停溢价 (20分)", "昨日涨停个股今日平均红盘率 74.2% -> 得分: 20 / 20"),
+        ("• 连板晋级率 (20分)", "首板进二板晋级率 61.54% (接力健康) -> 得分: 20 / 20"),
+        ("• 炸板率得分 (20分)", "全市场涨停 77 家，炸板 17 家 (炸板率 18.0%) -> 得分: 12 / 20"),
+        ("• 两市总成交量 (15分)", "全天 2.12 万亿，较 5 日均量放量 +14.8% -> 得分: 8 / 15")
+    ]
+    for s_idx, (t, d) in enumerate(sent_items):
+        sy = curr_y + 102 + s_idx * 37
+        draw.text((90, sy), t, fill=COLOR_ACCENT, font=font_small)
+        draw.text((90, sy + 18), d, fill=TEXT_BODY, font=font_micro)
+
+    # 右栏：Market Regime 定调与量能
+    rx = 70 + col_w + 20
+    draw.rounded_rectangle([rx, curr_y + 55, rx + col_w, curr_y + 295], radius=8, fill=BG_INNER, outline=BORDER_INNER, width=1)
+    draw.text((rx + 20, curr_y + 70), "[总量环境与 Regime 定调] 仓位指引", fill=TEXT_H2, font=font_h3)
+
+    regime_details = [
+        ("【Market Regime 定调】", "处于 S2 存量震荡 向 S3 趋势启动 过渡态"),
+        ("【两市量价健康度】", "成交额突破 2.1 万亿，属于放量良性攻坚，无缩量诱多背离"),
+        ("【主线资金集中度】", "前 3 大热点行业成交占比达 24.5%，主力做多合力高度聚焦"),
+        ("【一日游风险体检】", "[低风险] 未触发偷尾盘、无连板等 6 大一日游刹车规则"),
+        ("【条件化仓位导向】", "建议总仓位维持在 6 ～ 8 成 区间，积极参与核心主线低吸")
+    ]
+    for r_idx, (t, d) in enumerate(regime_details):
+        ry = curr_y + 102 + r_idx * 37
+        draw.text((rx + 20, ry), t, fill=COLOR_UP if "仓位" in t else (COLOR_ACCENT if "Regime" in t else COLOR_WARN), font=font_small)
+        draw.text((rx + 20, ry + 18), d, fill=TEXT_BODY, font=font_micro)
+
+    curr_y += sec1_h + 20
+
+    # 4. 模块二：【强势板块主线定位与资金留存率 (Capital Retention)】
+    sec2_h = 320
+    draw.rounded_rectangle([50, curr_y, W - 50, curr_y + sec2_h], radius=10, fill=BG_CARD, outline=BORDER_CARD, width=1)
+    draw.text((70, curr_y + 16), "02 / 强势板块定位、资金留存率 (Capital Retention) 与梯队质量", fill=TEXT_H2, font=font_h2)
+
+    sec_headers = ["排名", "强势板块名称", "板块涨幅", "涨停家数", "成交额占比", "资金留存率 (Retention)", "驱动等级", "板块定位", "吸血与跷跷板判定"]
+    sec_col_x = [70, 130, 290, 390, 490, 610, 780, 870, 990]
+    th_y = curr_y + 54
+    for h, x in zip(sec_headers, sec_col_x):
+        draw.text((x, th_y), h, fill=TEXT_MUTED, font=font_micro)
+    draw.line([(65, th_y + 22), (W - 65, th_y + 22)], fill=DIVIDER, width=1)
+
+    sectors_daily = [
+        ("1", "半导体/算力硬件", "+4.22%", "14 家", "11.5%", "88% [强沉淀锁仓]", "S 级 (行业革命)", "[核心主线]", "强吸血医药生物与新能源"),
+        ("2", "农林牧渔/粮食安全", "+3.85%", "8 家", "6.2%", "92% [资金高留存]", "A 级 (国家战略)", "[独立防守]", "与大盘形成良性逆势对冲"),
+        ("3", "基础化工/化肥农化", "+2.95%", "6 家", "4.8%", "72% [良性换手]", "B 级 (旺季催化)", "[结构补涨]", "承接高位科技分流溢出资金"),
+        ("4", "医药生物/创新药", "-1.40%", "1 家", "3.1%", "42% [大幅流出]", "C 级 (常规轮动)", "[边缘退潮]", "受主线吸血严重失血阴跌")
+    ]
+
+    for row_idx, row in enumerate(sectors_daily):
+        ry = th_y + 28 + row_idx * 52
+        if row_idx % 2 == 1:
+            draw.rectangle([65, ry - 6, W - 65, ry + 42], fill=BG_ROW_ALT)
+        draw.text((sec_col_x[0], ry), row[0], fill=COLOR_ACCENT, font=font_small)
+        draw.text((sec_col_x[1], ry), row[1], fill=TEXT_BODY, font=font_small)
+        draw.text((sec_col_x[2], ry), row[2], fill=COLOR_UP if "+" in row[2] else COLOR_DOWN, font=font_small)
+        draw.text((sec_col_x[3], ry), row[3], fill=TEXT_BODY, font=font_micro)
+        draw.text((sec_col_x[4], ry), row[4], fill=COLOR_ACCENT, font=font_micro)
+        draw.text((sec_col_x[5], ry), row[5], fill=COLOR_WARN, font=font_small)
+        draw.text((sec_col_x[6], ry), row[6], fill=COLOR_UP, font=font_micro)
+        draw.text((sec_col_x[7], ry), row[7], fill=COLOR_DOWN if "主线" in row[7] else (COLOR_WARN if "补涨" in row[7] else COLOR_UP), font=font_small)
+        draw.text((sec_col_x[8], ry), row[8], fill=TEXT_MUTED, font=font_micro)
+
+    curr_y += sec2_h + 20
+
+    # 5. 模块三：【产业链深度共振质量与上中下游全景穿透】
+    sec3_h = 390
+    draw.rounded_rectangle([50, curr_y, W - 50, curr_y + sec3_h], radius=10, fill=BG_CARD, outline=BORDER_CARD, width=1)
+    draw.text((70, curr_y + 16), "03 / 产业链深度共振评分 (0-100) 与上中下游全景穿透", fill=TEXT_H2, font=font_h2)
+
+    res_w = (W - 140 - 30) // 4
+    res_items = [
+        ("细分上涨占比", "23 / 25 分", "92% 细分板块飘红", COLOR_UP),
+        ("细分涨停广度", "32 / 35 分", "上中下游皆有涨停封板", COLOR_UP),
+        ("放量扩散度", "22 / 25 分", "各环节成交量同步放大", COLOR_ACCENT),
+        ("共振质量总分", "92 / 100 分", "【强产业链深度共振】", COLOR_UP)
+    ]
+    for r_i, (l, v, sub, c) in enumerate(res_items):
+        rx_pos = 70 + r_i * (res_w + 10)
+        draw.rounded_rectangle([rx_pos, curr_y + 55, rx_pos + res_w, curr_y + 150], radius=8, fill=BG_INNER, outline=BORDER_INNER, width=1)
+        draw.text((rx_pos + 12, curr_y + 68), l, fill=TEXT_MUTED, font=font_micro)
+        draw.text((rx_pos + 12, curr_y + 92), v, fill=c, font=get_font(20, bold=True))
+        draw.text((rx_pos + 12, curr_y + 122), sub, fill=TEXT_BODY, font=font_micro)
+
+    sub_y = curr_y + 170
+    draw.rounded_rectangle([70, sub_y, W - 70, sub_y + 195], radius=8, fill=BG_INNER, outline=BORDER_INNER, width=1)
+    draw.text((90, sub_y + 14), "[产业链穿透全景] 核心主线 [半导体/算力] 资金扩散映射", fill=TEXT_H2, font=font_h3)
+
+    chain_details = [
+        ("• 上游 (材料/EDA/设备)", "北方华创、中微公司、雅克科技 -> 资金温和放量布局，机构席位逆势净加仓，奠定底层基本面"),
+        ("• 中游 (芯片/PCB/光模块)", "中际旭创 (成交280亿)、胜宏科技、新易盛 -> 产业链绝对爆发核心，资金留存率 88%，机构重仓锁仓"),
+        ("• 下游 (算力服务器/AI应用)", "工业富联、浪潮信息、金山办公 -> 细分扩散良好，跟随中军放量共振，无单点一日游衰竭迹象")
+    ]
+    for c_i, (c_name, c_desc) in enumerate(chain_details):
+        cy = sub_y + 45 + c_i * 48
+        draw.text((90, cy), c_name, fill=COLOR_ACCENT, font=font_small)
+        draw.text((90, cy + 20), c_desc, fill=TEXT_BODY, font=font_micro)
+
+    curr_y += sec3_h + 20
+
+    # 6. 模块四：【龙虎榜席位品质、筹码结构与核心股池矩阵】
+    sec4_h = 320
+    draw.rounded_rectangle([50, curr_y, W - 50, curr_y + sec4_h], radius=10, fill=BG_CARD, outline=BORDER_CARD, width=1)
+    draw.text((70, curr_y + 16), "04 / 龙虎榜席位品质、筹码结构体检与核心股池交易结构", fill=TEXT_H2, font=font_h2)
+
+    stock_headers = ["角色定位", "标的代码/名称", "今日涨跌幅", "筹码结构/换手特征", "龙虎榜席位品质", "交易结构建议 (优先/等待/避免)"]
+    stock_col_x = [70, 220, 390, 520, 710, 930]
+    th_y = curr_y + 54
+    for h, x in zip(stock_headers, stock_col_x):
+        draw.text((x, th_y), h, fill=TEXT_MUTED, font=font_micro)
+    draw.line([(65, th_y + 22), (W - 65, th_y + 22)], fill=DIVIDER, width=1)
+
+    stocks_data = [
+        ("领航龙头", "寒武纪 (688256)", "+12.45%", "充分换手板，放量突破前期平台", "知名游资席位锁仓加持", "【优先】观察龙头封单，做先锋确认"),
+        ("容量中军", "中际旭创 (300308)", "+8.65%", "全天成交280亿，机构锁仓良好", "机构净买入 2.53 亿元", "【等待】早盘分歧均线放量承接时低吸"),
+        ("低位弹性", "胜宏科技 (300476)", "+15.20%", "20cm 放量突破，细分扩散弹性", "量化与机构混合合力", "【等待】逢回踩均线分歧低吸弹性先锋"),
+        ("防守中军", "万向德农 (600371)", "+10.02%", "8天5板强势涨停，筹码高锁仓", "游资合力坚决封死涨停", "【避免】一致性大幅高开盲目无脑追涨")
+    ]
+
+    for row_idx, row in enumerate(stocks_data):
+        ry = th_y + 28 + row_idx * 52
+        if row_idx % 2 == 1:
+            draw.rectangle([65, ry - 6, W - 65, ry + 42], fill=BG_ROW_ALT)
+        draw.text((stock_col_x[0], ry), row[0], fill=COLOR_ACCENT, font=font_small)
+        draw.text((stock_col_x[1], ry), row[1], fill=COLOR_WARN, font=font_small)
+        draw.text((stock_col_x[2], ry), row[2], fill=COLOR_UP if "+" in row[2] else COLOR_DOWN, font=font_small)
+        draw.text((stock_col_x[3], ry), row[3], fill=TEXT_BODY, font=font_micro)
+        draw.text((stock_col_x[4], ry), row[4], fill=COLOR_DOWN, font=font_micro)
+        draw.text((stock_col_x[5], ry), row[5], fill=COLOR_UP if "优先" in row[5] else (COLOR_ACCENT if "等待" in row[5] else COLOR_WARN), font=font_small)
+
+    curr_y += sec4_h + 20
+
+    # 7. 模块五：【综合机会评分仪表盘 & 次日推演三大情景】
+    sec5_h = 330
+    draw.rounded_rectangle([50, curr_y, W - 50, curr_y + sec5_h], radius=10, fill=BG_CARD, outline=BORDER_CARD, width=1)
+    draw.text((70, curr_y + 16), "05 / 综合机会评分仪表盘 (Opportunity) 与次日推演三大情景", fill=TEXT_H2, font=font_h2)
+
+    # 仪表盘总结栏
+    dash_y = curr_y + 55
+    draw.rounded_rectangle([70, dash_y, W - 70, dash_y + 80], radius=8, fill=BG_INNER, outline=BORDER_INNER, width=1)
+    draw.text((90, dash_y + 15), "[综合机会评分] Opportunity Score: 86 / 100 分  |  当前生命周期: [强化期]  |  建议总仓位: 6 ～ 8 成", fill=TEXT_H2, font=font_h3)
+    draw.text((90, dash_y + 45), "[核心策略定调] 主线资金留存率极高，量价配合健康，明日策略以【核心中军分歧放量承接时低吸】为主，禁止追高开。", fill=TEXT_BODY, font=font_small)
+
+    # 三大情景推演卡片
+    scenarios = [
+        ("[情景 A] 强势主升延续", "触发条件：领航龙头竞价高开 > 3% 且 30 分钟内放量封板 -> 操作：积极持股做多核心中军"),
+        ("[情景 B] 分歧转一致低吸", "触发条件：早盘微幅低开回踩 MA5 均线获大单放量承接 -> 操作：于分时均线附近分批逢低介入中军"),
+        ("[情景 C] 退潮冲高回落防守", "触发条件：板块放量但后排大面积炸板，中军遭大额卖单砸盘 -> 操作：坚决逢高减仓，严禁逆势补仓")
+    ]
+    for sc_i, (sc_title, sc_desc) in enumerate(scenarios):
+        sc_y = curr_y + 150 + sc_i * 48
+        draw.rounded_rectangle([70, sc_y, W - 70, sc_y + 40], radius=6, fill=BG_ROW_ALT, outline=BORDER_INNER, width=1)
+        draw.text((90, sc_y + 12), sc_title, fill=COLOR_DOWN if "A" in sc_title else (COLOR_ACCENT if "B" in sc_title else COLOR_UP), font=font_small)
+        draw.text((290, sc_y + 12), sc_desc, fill=TEXT_BODY, font=font_micro)
+
+    draw.text((70, curr_y + 300), "[风控纪律底线] 单票止损位严格锚定 MA5 均线或 -5%，严禁在一致性高潮日追涨跟风杂毛。", fill=COLOR_UP, font=font_micro)
+
+    curr_y += sec5_h + 30
+
+    # 8. 底部版权与免责声明
+    draw.line([(50, curr_y), (W - 50, curr_y)], fill=DIVIDER, width=1)
+    draw.text((50, curr_y + 15), "由 stock-prompt 每日产业链复盘引擎自动生成 | GitHub: Geekwls/stock-prompt", fill=TEXT_MUTED, font=font_small)
+    draw.text((W - 380, curr_y + 15), "免责声明：仅供量化研究参考，不构成任何投资建议", fill=COLOR_UP, font=font_small)
+
+    img.save(output_path, "PNG")
+    print(f"Daily review report card generated: {os.path.abspath(output_path)}")
+    return output_path
 
 def render_sector_rotation_card(data=None, output_path="sector_rotation_card.png", theme="light"):
     """
@@ -108,13 +382,11 @@ def render_sector_rotation_card(data=None, output_path="sector_rotation_card.png
     font_small = get_font(15)
     font_micro = get_font(13)
 
-    # 1. 标题区
     draw.text((50, 42), "A股近 5 日板块轮动与节奏深度复盘", fill=TEXT_TITLE, font=font_title)
     draw_badge(draw, "分析区间: 8月24日(T-4) ~ 8月28日(T日)", (W - 380, 46), bg_color=BADGE_BG2, text_color=BADGE_TXT2, font=font_small)
     draw_badge(draw, "中期轮动推演", (W - 510, 46), bg_color=BADGE_BG1, text_color=BADGE_TXT1, font=font_small)
     draw.line([(50, 100), (W - 50, 100)], fill=DIVIDER, width=2)
 
-    # 2. 核心定调五宫格
     top_metrics = [
         ("总量环境定性", "【存量轮动】", COLOR_WARN),
         ("当前轮动状态", "State 2 畏高切低", COLOR_ACCENT),
@@ -133,14 +405,12 @@ def render_sector_rotation_card(data=None, output_path="sector_rotation_card.png
 
     curr_y = 235
 
-    # 3. 模块一：【5日成交额走势与主力资金流动】
     sec1_h = 320
     draw.rounded_rectangle([50, curr_y, W - 50, curr_y + sec1_h], radius=10, fill=BG_CARD, outline=BORDER_CARD, width=1)
     draw.text((70, curr_y + 16), "01 / 5 日成交额走势与主力资金行业流向定调", fill=TEXT_H2, font=font_h2)
 
     col_w = (W - 140 - 20) // 2
 
-    # 左栏：5日两市量能
     draw.rounded_rectangle([70, curr_y + 55, 70 + col_w, curr_y + 295], radius=8, fill=BG_INNER, outline=BORDER_INNER, width=1)
     draw.text((90, curr_y + 70), "[5日量能走向] 近 5 个交易日两市成交额及环比", fill=TEXT_H2, font=font_h3)
 
@@ -165,7 +435,6 @@ def render_sector_rotation_card(data=None, output_path="sector_rotation_card.png
         draw.text((vol_x[3], vy), r[3], fill=TEXT_MUTED, font=font_micro)
         draw.text((vol_x[4], vy), r[4], fill=COLOR_WARN if "分化" in r[4] or "地量" in r[4] else TEXT_BODY, font=font_micro)
 
-    # 右栏：主力资金净流入 vs 净流出
     rx = 70 + col_w + 20
     draw.rounded_rectangle([rx, curr_y + 55, rx + col_w, curr_y + 295], radius=8, fill=BG_INNER, outline=BORDER_INNER, width=1)
     draw.text((rx + 20, curr_y + 70), "[主力资金流向] 近 5 日净流入 Top3 vs 净流出 Top3", fill=TEXT_H2, font=font_h3)
@@ -185,7 +454,6 @@ def render_sector_rotation_card(data=None, output_path="sector_rotation_card.png
 
     curr_y += sec1_h + 20
 
-    # 4. 模块二：【主线角逐、资金博弈与跷跷板吸血效应】
     sec2_h = 320
     draw.rounded_rectangle([50, curr_y, W - 50, curr_y + sec2_h], radius=10, fill=BG_CARD, outline=BORDER_CARD, width=1)
     draw.text((70, curr_y + 16), "02 / 主线角逐与资金博弈 (机构趋势 vs 游资连板 & 跷跷板吸血)", fill=TEXT_H2, font=font_h2)
@@ -222,7 +490,6 @@ def render_sector_rotation_card(data=None, output_path="sector_rotation_card.png
 
     curr_y += sec2_h + 20
 
-    # 5. 模块三：【产业链传导与核心主线 SEI 衰竭指数拆解】
     sec3_h = 390
     draw.rounded_rectangle([50, curr_y, W - 50, curr_y + sec3_h], radius=10, fill=BG_CARD, outline=BORDER_CARD, width=1)
     draw.text((70, curr_y + 16), "03 / 产业链传导与核心主线衰竭指数 (SEI) 深度量化", fill=TEXT_H2, font=font_h2)
@@ -258,7 +525,6 @@ def render_sector_rotation_card(data=None, output_path="sector_rotation_card.png
 
     curr_y += sec3_h + 20
 
-    # 6. 模块四：【5日情绪指标走势 & 机构中军/游资龙头锚点】
     sec4_h = 330
     draw.rounded_rectangle([50, curr_y, W - 50, curr_y + sec4_h], radius=10, fill=BG_CARD, outline=BORDER_CARD, width=1)
     draw.text((70, curr_y + 16), "04 / 5 日情绪指标走向与中军/龙头盘前观察锚点", fill=TEXT_H2, font=font_h2)
@@ -296,7 +562,6 @@ def render_sector_rotation_card(data=None, output_path="sector_rotation_card.png
 
     curr_y += sec4_h + 20
 
-    # 7. 模块五：【次日盘前重点跟踪矩阵与验证坐标 (Next Day Watchlist)】
     sec5_h = 320
     draw.rounded_rectangle([50, curr_y, W - 50, curr_y + sec5_h], radius=10, fill=BG_CARD, outline=BORDER_CARD, width=1)
     draw.text((70, curr_y + 16), "05 / 次日盘前重点跟踪矩阵与验证坐标 (Next Day Watchlist)", fill=TEXT_H2, font=font_h2)
@@ -327,7 +592,6 @@ def render_sector_rotation_card(data=None, output_path="sector_rotation_card.png
 
     curr_y += sec5_h + 30
 
-    # 8. 底部版权与免责声明
     draw.line([(50, curr_y), (W - 50, curr_y)], fill=DIVIDER, width=1)
     draw.text((50, curr_y + 15), "由 stock-prompt 量化研判引擎自动生成 | GitHub: Geekwls/stock-prompt", fill=TEXT_MUTED, font=font_small)
     draw.text((W - 380, curr_y + 15), "免责声明：仅供量化研究参考，不构成任何投资建议", fill=COLOR_UP, font=font_small)
@@ -651,7 +915,7 @@ def render_report_card(data=None, output_path="report_card.png", theme="light"):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="生成 A 股全量量化战报长图")
     parser.add_argument("--demo", action="store_true", help="生成全量示例长图")
-    parser.add_argument("--type", type=str, default="prediction", choices=["prediction", "rotation"], help="卡片类型 (prediction/rotation)")
+    parser.add_argument("--type", type=str, default="prediction", choices=["prediction", "rotation", "daily"], help="卡片类型 (prediction/rotation/daily)")
     parser.add_argument("--theme", type=str, default="light", choices=["light", "dark"], help="卡片主题 (默认浅色 light)")
     parser.add_argument("--json", type=str, help="传入 JSON 结果数据文件路径")
     parser.add_argument("--output", type=str, help="输出图片路径")
@@ -659,10 +923,17 @@ if __name__ == "__main__":
 
     out_file = args.output
     if not out_file:
-        out_file = "demo_sector_rotation_card.png" if args.type == "rotation" else "demo_report_card.png"
+        if args.type == "rotation":
+            out_file = "demo_sector_rotation_card.png"
+        elif args.type == "daily":
+            out_file = "demo_daily_review_card.png"
+        else:
+            out_file = "demo_report_card.png"
 
     if args.type == "rotation":
         render_sector_rotation_card(output_path=out_file, theme=args.theme)
+    elif args.type == "daily":
+        render_daily_review_card(output_path=out_file, theme=args.theme)
     else:
         if args.demo or not args.json:
             render_report_card(output_path=out_file, theme=args.theme)

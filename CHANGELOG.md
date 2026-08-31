@@ -1,5 +1,17 @@
 # CHANGELOG (更新日志)
 
+## [v4.3.0] - 2026-08-31
+### 🔧 更新链闭环与战报脚本全面数据驱动 (Pipeline Integrity & Data-Driven Cards)
+- **战报长图全类型接入 JSON 输入**：`generate_report_card.py` 的 `--json` 此前仅对 `--type prediction` 生效，daily / rotation 会静默渲染内置演示数据；现已修复为三种类型全量数据驱动（缺省字段自动回退演示值），并补齐 Linux 中文字体候选（Noto CJK / AR PL）。
+- **SKILL.md 与捆绑脚本正式接线**：三大技能文档新增"战报长图渲染"章节，写明调用命令与逐字段 JSON 契约（此前捆绑脚本在文档中零引用）。
+- **盘前资金留存率可计算化**：market-prediction 的 Capital Retention 由"盘前不可知的 T 日预估成交额"重构为"T-1 收盘留存基准 + 9:25 竞价承接修正"双段口径。
+- **贝叶斯引擎补齐似然体系**：4 大独立证据簇新增定性判档指引与似然倍率表，杜绝凭感觉出数；新增 Z_ATR 五档 → 三态归并评估规则。
+- **新增评估台账工具 `eval_tracker.py`**：盘前预测与收盘实际落盘至 `eval/predictions.jsonl`，滚动输出多分类 Brier / 方向命中率 / 概率校准 / 锐度 / 主线命中率 / 点位有效率。
+- **更新链闭环**：`update.sh` / `update.bat` 拉取最新代码后自动执行全局副本同步与一致性校验，使用者一条命令完成更新。
+- **`install_skills.py` 新增 `--check`**：比对母本与全部工作区 / 全局副本的 md5，漂移即报错退出。
+
+---
+
 ## [v4.2.0] - 2026-08-24
 ### 🏛️ 机构级·四维立体空间点位引擎升级 (Institutional Space Engine)
 - **彻底告别单薄算术**：引入统计学波动率带 (ATR/IV)、筹码分布密集峰 (Volume Profile & POC)、衍生品期权做市商对冲防线 (Call/Put Wall) 及微观流动性猎杀区 (Liquidity Sweep)。

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
 # =================================================================
-# stock-prompt Skill 一键同步与版本检查脚本 (Linux / macOS)
+# stock-prompt Skill 一键更新脚本 (Linux / macOS)
+# 拉取最新代码 -> 同步全局技能副本 -> 防漂移校验
 # =================================================================
 
 set -e
@@ -32,4 +33,16 @@ else
     else
         echo "🎉 成功更新至最新版本！"
     fi
+fi
+
+echo ""
+echo "🛠 正在同步技能到本机全局环境 (Antigravity / Gemini)..."
+if command -v python3 >/dev/null 2>&1; then
+    if python3 scripts/install_skills.py && python3 scripts/install_skills.py --check; then
+        echo "✅ 全局技能副本已同步并通过一致性校验。"
+    else
+        echo "[WARN] 全局同步未完全成功，可稍后手动运行: python3 scripts/install_skills.py"
+    fi
+else
+    echo "[WARN] 未检测到 python3，跳过全局同步（仓库内技能已是最新）。"
 fi

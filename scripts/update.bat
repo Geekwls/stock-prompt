@@ -1,7 +1,8 @@
 @echo off
 chcp 65001 >nul
 :: =================================================================
-:: stock-prompt Skill 一键同步与版本检查脚本 (Windows)
+:: stock-prompt Skill 一键更新脚本 (Windows)
+:: 拉取最新代码 -> 同步全局技能副本 -> 防漂移校验
 :: =================================================================
 
 set "REPO_DIR=%~dp0.."
@@ -20,10 +21,23 @@ echo 🔄 正在从 GitHub (main 分支) 拉取最新 Skill 代码...
 
 git pull origin main
 
-if %ERRORLEVEL% EQU 0 (
-    echo ✅ 成功更新至最新版本！
-) else (
+if not %ERRORLEVEL% EQU 0 (
     echo ❌ 更新失败，请检查网络设置或 Git 配置。
+    pause
+    exit /b 1
+)
+
+echo ✅ 成功更新至最新版本！
+echo.
+echo 🛠 正在同步技能到本机全局环境 (Antigravity / Gemini)...
+
+where python >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+    python scripts\install_skills.py
+    python scripts\install_skills.py --check
+    echo ✅ 全局技能副本已同步并通过一致性校验。
+) else (
+    echo [WARN] 未检测到 Python，跳过全局同步（仓库内技能已是最新）。
 )
 
 pause

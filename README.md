@@ -103,6 +103,30 @@ python scripts/generate_report_card.py --type daily --theme dark
 
 ---
 
+## 🚀 首次安装与一键更新
+
+本仓库内置完整的**独立分发与更新机制**，使用者无需手动拷贝技能文件。
+
+**首次安装**（将三大 Skill 与战报脚本同步到本机全局环境）：
+
+```bash
+python scripts/install_skills.py
+```
+
+**日常更新**（上游发布新版本后，一条命令完成 拉取代码 ➡️ 同步全局副本 ➡️ 防漂移校验）：
+
+```bash
+# Linux / macOS
+bash scripts/update.sh
+
+# Windows（双击运行亦可）
+scripts\update.bat
+```
+
+脚本会自动从 GitHub main 分支拉取最新代码，随后运行 `install_skills.py` 将 `.agents/skills/` 下的三大技能同步到 `~/.gemini/skills` 与 `~/.gemini/antigravity/skills`，最后通过 `--check` 校验所有脚本副本与母本的 md5 一致。当前版本见 `version.json`，每次更新的内容见 `CHANGELOG.md`。
+
+---
+
 ## 🤝 贡献与反馈
 
 欢迎提交 PR 或 Issue 共同完善 A 股 AI 策略提示词库！

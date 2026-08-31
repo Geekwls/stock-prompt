@@ -8,7 +8,10 @@ Thumbs.db
 .vscode/
 .idea/
 
-# 凭据（切勿提交）
-.env
-*.token
-credentials*
+# Python
+__pycache__/
+*.pyc
+
+# 临时生成文件
+demo_*.png
+*.png

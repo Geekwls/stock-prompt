@@ -39,11 +39,12 @@ REQUIRED_FIELDS = {
     },
     "stock": {
         "stock_name", "stock_code", "date", "price", "coverage",
-        "market_wind", "sector_role", "rs_rank", "wyckoff_phase",
-        "position_status", "risk_reward_ratio", "research_status",
-        "core_logic", "market_details", "sector_details", "rs_details",
-        "wyckoff_details", "position_table", "rr_details",
-        "evidence_map", "trade_strategy", "falsification_rule",
+        "market_wind", "sector_role", "catalyst_level", "rs_rank",
+        "wyckoff_phase", "position_status", "risk_reward_ratio",
+        "confidence_level", "research_status", "core_logic", "market_details", "sector_details",
+        "catalyst_details", "rs_details", "wyckoff_details", "position_table",
+        "rr_details", "evidence_map", "fusion_scores",
+        "trade_strategy", "exit_plan", "falsification_rule",
     },
 }
 
@@ -126,7 +127,15 @@ def draw_metric_cards(draw, metrics, width, y, bg_color, border_color, muted_col
             fill=bg_color, outline=border_color, width=1,
         )
         draw.text((x + 14, y + 12), label, fill=muted_color, font=font_label)
-        draw.text((x + 14, y + 38), str(value), fill=color, font=get_font(19, bold=True))
+        # 数值自适应缩放：多卡布局下长值先降字号，避免溢出卡片
+        value_text = str(value)
+        font_value = get_font(19, bold=True)
+        for size in (19, 17, 15, 13):
+            font_value = get_font(size, bold=True)
+            bbox = font_value.getbbox(value_text)
+            if bbox[2] - bbox[0] <= card_width - 24:
+                break
+        draw.text((x + 14, y + 38), value_text, fill=color, font=font_value)
         draw_score_bar(draw, x + 14, y + 77, card_width - 28, value, color, border_color)
 
 
@@ -929,7 +938,7 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
         COLOR_WARN = "#fbbf24"
 
     W = 1200
-    H = 2650
+    H = 3200
     img = Image.new("RGBA", (W, H), BG_PAGE)
     draw = ImageDraw.Draw(img)
 
@@ -959,14 +968,15 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
     draw_pill(draw, f"Coverage: {coverage_str}", (W - 500, 40), bg_color="#ecfdf5" if is_light else "#064e3b", text_color=COLOR_DOWN, font=font_micro)
     draw.line([(60, 85), (W - 60, 85)], fill=BORDER_DIVIDER, width=1)
 
-    # 2. 6大核心速览卡片
+    # 2. 7大核心速览卡片
     top_metrics = [
         ("市场大势", data.get("market_wind", "顺风驱动 [顺]"), PRIMARY),
         ("板块主线", data.get("sector_role", "核心主线 [中军]"), COLOR_DOWN),
-        ("RS 相对强度", data.get("rs_rank", "Top 12% [极强]"), COLOR_UP),
-        ("威科夫阶段", data.get("wyckoff_phase", "Markup 主升推进"), PRIMARY),
-        ("位置过热状态", data.get("position_status", "安全低吸位 [优]"), COLOR_DOWN),
-        ("综合赔率 (R/R)", data.get("risk_reward_ratio", "3.4 : 1 [优良]"), COLOR_WARN),
+        ("催化等级", data.get("catalyst_level", "S级 [长周期]"), COLOR_UP),
+        ("RS 强度", data.get("rs_rank", "Top 12% [极强]"), COLOR_UP),
+        ("威科夫阶段", data.get("wyckoff_phase", "Markup 主升"), PRIMARY),
+        ("位置状态", data.get("position_status", "安全支撑区 [优]"), COLOR_DOWN),
+        ("赔率空间", data.get("risk_reward_ratio", "3.8 : 1 [优]"), COLOR_WARN),
     ]
 
     draw_metric_cards(
@@ -984,7 +994,7 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
     curr_y = 215
     draw.rounded_rectangle([60, curr_y, W - 60, curr_y + 54], radius=6, fill=BG_SECTION, outline=BORDER_LIGHT, width=1)
     status_tag = data.get("research_status", "【值得重点跟踪】")
-    core_logic_text = data.get("core_logic", "算力中军放量突破吸筹区间，缩量良性回踩 MA20 支撑，相对强度持续走强，具备非对称赔率。")
+    core_logic_text = data.get("core_logic", "算力中军放量突破吸筹区间，缩量良性回踩 MA20 支撑，相对强度持续走强，具备非对称赔率空间。")
     draw.text((75, curr_y + 16), f"[研究状态] {status_tag}  |  [核心逻辑] {core_logic_text}", fill=PRIMARY, font=font_small)
     curr_y += 72
 
@@ -995,7 +1005,7 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
         return y + 45
 
     # 3. 模块 01：市场环境与板块共振
-    curr_y = draw_section_header("01  市场环境大势与板块主线共振 (顺逆风与合力穿透)", curr_y)
+    curr_y = draw_section_header("01  市场环境、板块主线与驱动催化剂 (顺逆风·合力·驱动)", curr_y)
     col_w = (W - 120 - 40) // 2
 
     # 左侧：市场环境
@@ -1025,7 +1035,23 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
         sy = curr_y + 24 + s_i * 20
         draw.text((rx, sy), f"• {t}: {d}", fill=TEXT_SUB, font=font_micro)
 
-    curr_y += 140
+    # 驱动催化剂（全宽区块）
+    catalyst_details = data.get("catalyst_details", [
+        ("驱动类型", "产业趋势 + 政策驱动"),
+        ("驱动等级", "S级 (国家算力战略，持续数周至数月)"),
+        ("时效状态", "发酵中 (订单与业绩持续验证)"),
+        ("交叉验证", "催化 + 量价共振，真主线特征"),
+        ("证伪信号", "北美云厂商资本开支下修"),
+    ]) or []
+    if catalyst_details:
+        cat_y = curr_y + 128
+        draw.text((60, cat_y), "[驱动催化剂等级] 催化-量价交叉验证与时效状态", fill=PRIMARY, font=font_h3)
+        for c_i, item in enumerate(catalyst_details):
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                draw.text((60, cat_y + 22 + c_i * 18), f"• {item[0]}: {item[1]}", fill=TEXT_SUB, font=font_micro)
+        curr_y = cat_y + 22 + len(catalyst_details) * 18 + 16
+    else:
+        curr_y += 140
 
     # 4. 模块 02：相对强度 (RS) 与动量引擎
     curr_y = draw_section_header("02  相对强度 (RS Engine) 与动量加速度深度量化", curr_y)
@@ -1050,17 +1076,22 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
 
     # 5. 模块 03：量价行为与威科夫结构
     curr_y = draw_section_header("03  量价行为与威科夫结构深度解析 (Wyckoff & VSA 供求机制)", curr_y)
-    draw.text((60, curr_y), "[宏观结构阶段] Markup 主升推进阶段 (突破蓄势中继)", fill=PRIMARY, font=font_h3)
-    draw.text((60, curr_y + 24), "• 关键事件识别: 前期完成 Spring (假跌破诱空洗盘) 与 Test (缩量二次测试)，随后放量大阳线打出 SOS 强势信号", fill=TEXT_MAIN, font=font_micro)
-    draw.text((60, curr_y + 44), "• 努力与结果 (VSA): 突破阻力位时成交量显著放大(努力有结果)，随后回踩 MA20 极度缩量(供应枯竭，浮筹锁定)", fill=TEXT_MAIN, font=font_micro)
-    draw.text((60, curr_y + 64), "• 市场行为叙事: 当前结构属于标准的突破后 LPS (最终支撑点) 良性回踩蓄势，未见 UT 假突破或派发迹象", fill=COLOR_DOWN, font=font_micro)
+    wyckoff = data.get("wyckoff_details", {}) or {}
+    phase = wyckoff.get("phase", "Markup 主升推进阶段 (突破蓄势中继)")
+    events = wyckoff.get("events", "前期完成 Spring (Confirmed) 与 Test (Confirmed)，随后放量大阳线打出 SOS (Confirmed)")
+    vsa = wyckoff.get("vsa", "突破阻力位时成交量显著放大(努力有结果)，随后回踩 MA20 极度缩量(供应枯竭，浮筹锁定)")
+    narrative = wyckoff.get("narrative", "当前结构属于标准的突破后 LPS (Confirmed) 良性回踩蓄势，未见 UT 假突破或派发迹象")
+    draw.text((60, curr_y), f"[宏观结构阶段] {phase}", fill=PRIMARY, font=font_h3)
+    draw.text((60, curr_y + 24), f"• 关键事件识别 (证据等级): {events}", fill=TEXT_MAIN, font=font_micro)
+    draw.text((60, curr_y + 44), f"• 努力与结果 (VSA): {vsa}", fill=TEXT_MAIN, font=font_micro)
+    draw.text((60, curr_y + 64), f"• 市场行为叙事: {narrative}", fill=COLOR_DOWN, font=font_micro)
 
     curr_y += 100
 
     # 6. 模块 04：价格位置与过热惩罚体检
-    curr_y = draw_section_header("04  价格位置、均线偏离度与过热惩罚体检 (Position & Overheat)", curr_y)
+    curr_y = draw_section_header("04  价格位置与动态过热惩罚体检 (Position & Dynamic Overheat)", curr_y)
     pos_col_x = [60, 240, 420, 600, 800, 970]
-    pos_headers = ["评估指标", "实际数值", "安全/过热阈值", "状态定性", "过热惩罚判定", "介入指导建议"]
+    pos_headers = ["评估指标", "实际数值", "安全/过热阈值", "状态定性", "过热惩罚判定", "跟踪指引建议"]
     for h, x in zip(pos_headers, pos_col_x):
         draw.text((x, curr_y), h, fill=TEXT_MUTED, font=font_micro)
     curr_y += 24
@@ -1068,7 +1099,7 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
     curr_y += 10
 
     position_table = data.get("position_table", [
-        ("MA20 偏离度 (Bias)", "+4.2%", "< 15.0%", "[正常低吸区]", "未触发过热惩罚", "均线支撑强劲，适合低吸"),
+        ("MA20 偏离度 (Bias)", "+4.2%", "< 15.0%", "[正常支撑区]", "未触发过热惩罚", "均线支撑强劲，适合跟踪"),
         ("MA50 偏离度 (Bias)", "+11.8%", "< 25.0%", "[稳健推进]", "未触发过热惩罚", "中期趋势健康"),
         ("近 5 日累计涨幅", "+6.5%", "< 20.0%", "[温和换手]", "未触发过热惩罚", "无高位加速风险"),
         ("距前高 / POC 距离", "-18.5%", "空间充沛", "[阻力较远]", "上方空间广阔", "具备较高潜在上升弹性")
@@ -1087,9 +1118,9 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
     curr_y += 15
 
     # 7. 模块 05：风险收益结构与赔率测算
-    curr_y = draw_section_header("05  风险收益结构与赔率测算 (Risk / Reward & Odds Asymmetry)", curr_y)
+    curr_y = draw_section_header("05  风险收益结构与空间不对称性测算 (Risk / Reward & Asymmetry)", curr_y)
     rr_col_x = [60, 240, 420, 600, 800, 970]
-    rr_headers = ["关键确认位", "关键失效位 (止损)", "潜在上升空间", "潜在下行风险", "赔率 (R / R)", "盈亏比定性"]
+    rr_headers = ["结构确认位", "假设失效位", "潜在上升空间", "潜在下行风险", "赔率 (R / R)", "盈亏比定性"]
     for h, x in zip(rr_headers, rr_col_x):
         draw.text((x, curr_y), h, fill=TEXT_MUTED, font=font_micro)
     curr_y += 24
@@ -1110,13 +1141,107 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
         draw.line([(60, curr_y), (W - 60, curr_y)], fill=BORDER_LIGHT, width=1)
         curr_y += 8
 
+    # 情景置信度评估
+    conf_level = str(data.get("confidence_level", "High Confidence"))
+    draw.text((60, curr_y + 6), f"[情景置信度] Scenario Confidence: {conf_level}   (基于 7 维同向证据、无一票否决与数据覆盖度综合裁定)", fill=COLOR_DOWN if "High" in conf_level else COLOR_WARN, font=font_small)
+    curr_y += 32
+
     curr_y += 15
 
-    # 8. 模块 06：全景证据看板与证伪假设
-    curr_y = draw_section_header("06  个股全景证据看板与可证伪退出假设 (Falsification Rule)", curr_y)
-    draw.text((60, curr_y), "[交易结构建议] 【优先】早盘回踩 MA20 均线附近缩量企稳分批介入；【避免】一致性大幅高开无脑追涨。", fill=PRIMARY, font=font_small)
-    curr_y += 26
-    draw.text((60, curr_y), data.get("falsification_rule", "[可证伪退出纪律] 若后市价格放量跌破关键失效位 27.10 元，表明威科夫支撑假设失效，必须坚决止损离场。"), fill=COLOR_UP, font=font_small)
+    # 8. 模块 06：7层证据采集与1层融合裁决
+    curr_y = draw_section_header("06  7层证据采集与1层融合裁决 (7+1 Decision & Tiered Exit)", curr_y)
+
+    # 左右两栏布局：左侧加权融合评分表，右侧全景证据看板
+    fusion_scores = data.get("fusion_scores", [
+        ["L1 市场环境", "15%", "100 (顺风)", "15.0"],
+        ["L2 板块主线", "20%", "100 (主线)", "20.0"],
+        ["L3 催化剂驱动", "15%", "100 (S级)", "15.0"],
+        ["L4 RS 强度", "10%", "100 (极强)", "10.0"],
+        ["L5 威科夫量价", "20%", "100 (供需健康)", "20.0"],
+        ["L6 位置过热", "10%", "60 (温和偏离)", "6.0"],
+        ["L7 赔率空间", "10%", "100 (空间优良)", "10.0"],
+        ["加权融合总分", "100%", "综合评级", "96.0 分 [重点跟踪]"]
+    ])
+    evidence_map = data.get("evidence_map", [
+        ["市场环境", "顺风共振 [顺]"],
+        ["板块主线", "核心主线 [中军]"],
+        ["催化剂驱动", "S级发酵中 [强]"],
+        ["相对强度", "极强 Top 12% [强]"],
+        ["威科夫阶段", "Markup 主升推进"],
+        ["量价特征", "供需健康 [健康]"],
+        ["位置与过热", "安全支撑位 [优]"],
+        ["赔率评估", "高赔率 >=3:1 [优]"]
+    ])
+
+    col_w = (W - 120 - 40) // 2
+
+    # 左侧：7层加权融合评分表
+    draw.text((60, curr_y), "[7 层加权融合评分] (优=100 / 中=60 / 差=20)", fill=PRIMARY, font=font_h3)
+    fu_y = curr_y + 22
+    fu_col_x = [60, 200, 310, 440]
+    for h, x in zip(["研判层级", "权重", "得分(定性)", "加权分"], fu_col_x):
+        draw.text((x, fu_y), h, fill=TEXT_MUTED, font=font_micro)
+    fu_y += 18
+    for row in fusion_scores:
+        if isinstance(row, (list, tuple)) and len(row) >= 4:
+            is_total = "总分" in str(row[0])
+            row_label_color = PRIMARY if is_total else TEXT_MAIN
+            draw.text((fu_col_x[0], fu_y), str(row[0]), fill=row_label_color, font=font_micro)
+            draw.text((fu_col_x[1], fu_y), str(row[1]), fill=TEXT_MUTED, font=font_micro)
+            draw.text((fu_col_x[2], fu_y), str(row[2]), fill=TEXT_SUB, font=font_micro)
+            draw.text((fu_col_x[3], fu_y), str(row[3]), fill=PRIMARY if is_total else TEXT_MAIN, font=font_micro)
+        fu_y += 18
+
+    # 右侧：8 维全景证据看板
+    rx = 60 + col_w + 40
+    draw.text((rx, curr_y), "[8 维全景证据看板]", fill=PRIMARY, font=font_h3)
+    ev_y = curr_y + 22
+    for ev in evidence_map:
+        if isinstance(ev, (list, tuple)) and len(ev) >= 2:
+            draw.text((rx, ev_y), str(ev[0]), fill=TEXT_MUTED, font=font_micro)
+            draw.text((rx + 160, ev_y), str(ev[1]), fill=COLOR_DOWN, font=font_micro)
+        ev_y += 18
+
+    curr_y = max(fu_y, ev_y) + 15
+
+    # 交易跟踪执行条件
+    trade = data.get("trade_strategy", {
+        "priority": "早盘回踩 MA20 均线附近缩量企稳分批介入",
+        "trigger": "放量突破关键确认位 29.20 元且 30 分钟不破分时均线",
+        "avoid": "一致性大幅高开盲目追涨跟风"
+    })
+    priority = trade.get("priority", "早盘回踩 MA20 均线附近缩量企稳分批介入")
+    trigger = trade.get("trigger", "放量突破关键确认位且 30 分钟不破分时均线")
+    avoid = trade.get("avoid", "一致性大幅高开盲目追涨跟风")
+    draw.text((60, curr_y), f"[执行条件] 【优先观察】{priority}", fill=PRIMARY, font=font_small)
+    curr_y += 24
+    draw.text((60, curr_y), f"[确认触发] {trigger}", fill=TEXT_MAIN, font=font_small)
+    curr_y += 24
+    draw.text((60, curr_y), f"[规避动作] {avoid}", fill=COLOR_WARN, font=font_small)
+    curr_y += 28
+
+    # 分级退出纪律（预警/失效/时间止损/浮盈保护）
+    exit_plan = data.get("exit_plan", {
+        "warning": "跌破 MA5 (28.10元) 或自高点回撤 2.5% -> 风险暴露削减 1/3~1/2",
+        "invalidation": "放量跌破 27.10 元 (MA20/Spring低点) -> 假设失效退出跟踪",
+        "time_stop": "S级催化窗口 10-15 个交易日，未放量突破 29.20 则退出",
+        "profit_protection": "浮盈达 +1R (约 +4.9%) 后失效位上移至成本价"
+    })
+    if exit_plan:
+        draw.text((60, curr_y), "[分级退出纪律]", fill=PRIMARY, font=font_h3)
+        curr_y += 22
+        for label, key, color in [
+            ("预警观察位(风险削减1/3~1/2)", "warning", COLOR_WARN),
+            ("假设失效位(退出跟踪)", "invalidation", COLOR_UP),
+            ("时间退出窗口(未推进即退出)", "time_stop", TEXT_MAIN),
+            ("浮盈保护(+1R上移止损)", "profit_protection", TEXT_MAIN),
+        ]:
+            if exit_plan.get(key):
+                draw.text((60, curr_y), f"• {label}: {exit_plan[key]}", fill=color, font=font_micro)
+                curr_y += 18
+        curr_y += 10
+
+    draw.text((60, curr_y), data.get("falsification_rule", "[逻辑证伪底线] 若后市价格放量跌破关键失效位 27.10 元，表明威科夫支撑假设失效，必须坚决执行退出。"), fill=COLOR_UP, font=font_small)
 
     curr_y += 35
     draw.line([(60, curr_y), (W - 60, curr_y)], fill=BORDER_DIVIDER, width=1)

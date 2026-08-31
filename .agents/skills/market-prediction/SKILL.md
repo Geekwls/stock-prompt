@@ -1,7 +1,7 @@
 ---
 name: market-prediction
 description: >-
-  A股盘前全景研判与概率推演引擎 (V3.0贝叶斯机会推演版)。基于Market Regime条件先验、4大独立证据簇似然更新、ATR空间盈亏比、机会函数(Opportunity Score)、主线时间序列状态机与资金留存率、09:25竞价贝叶斯更新及多维Brier/Calibration/Sharpness评估闭环，解耦市场预测与机会探测。
+  A股盘前全景研判与概率推演引擎 (V3.0贝叶斯机会推演版)。基于Market Regime条件先验、4大独立证据簇似然更新、ATR空间盈亏比、机会函数(Opportunity Score)、主线时间序列状态机与资金留存率、09:25竞价贝叶斯更新及多维Brier/Calibration/Sharpness评估闭环，解耦市场预测与机会探测。仅适用于交易日盘前 8:30-9:15 及 9:25 竞价窗口的预测任务；收盘后的当日复盘请用 daily-review，近5日板块轮动复盘请用 sector-rotation。
 ---
 
 # A股盘前全景研判与概率推演引擎 (V3.0 贝叶斯机会推演版)
@@ -109,8 +109,27 @@ description: >-
 - **震荡态 (Side)**：$-0.3 < Z_{\text{ATR}} < +0.3$
 - **偏空态 (Down)**：$-0.8 \le Z_{\text{ATR}} \le -0.3$
 - **强空态 (Strong Down)**：$Z_{\text{ATR}} < -0.8$
+- **评估归并规则**：五档归并为三态参与后验与评估——强多+偏多 → 涨；震荡 → 震；偏空+强空 → 跌。与 $P(\text{Up/Side/Down})$、Brier 评估、`eval_tracker.py` 台账口径保持一致。
 
-#### B. 贝叶斯后验更新 (Bayesian Posterior)
+#### B. 证据簇定性档位与似然倍率表
+
+每一证据簇先按下方判档指引归入五档之一，再查表取得似然倍率参与更新（**禁止跳过判档直接凭感觉给数字**）：
+
+| 档位 | $L(E_i\mid\text{Up})$ | $L(E_i\mid\text{Side})$ | $L(E_i\mid\text{Down})$ |
+|:---:|:---:|:---:|:---:|
+| 🟢🟢 强偏多 | 1.6 | 0.9 | 0.5 |
+| 🟢 偏多 | 1.25 | 1.0 | 0.8 |
+| ⚪ 中性 | 1.0 | 1.0 | 1.0 |
+| 🔴 偏空 | 0.8 | 1.0 | 1.25 |
+| 🔴🔴 强偏空 | 0.5 | 0.9 | 1.6 |
+
+**各簇判档指引**：
+- **$E_1$ 全球科技偏好**：纳指与 SOX 同涨 >1% 且日韩半导体高开 → 偏多；隔夜纳指大跌 >1.5% 且 SOX 领跌 → 强偏空；方向不一致或幅度微弱 → 中性。
+- **$E_2$ 宏观流动性**：A50 实时涨 >0.5% 且离岸人民币升值/企稳 → 偏多；A50 跌 >0.8% 或人民币急贬 >200 点 → 强偏空。
+- **$E_3$ 产业催化**：国家级重大政策/产业突破落地 → 按利多利空方向取偏多/偏空；无重大催化或仅媒体观点 → 中性（普通小作文不作为证据）。
+- **$E_4$ 内生量价**：以 T-1 的 Z_ATR 归并三态与量能偏离度共同判档——量价齐升 → 偏多；缩量滞涨/炸板率 >35% → 偏空；梯队断裂+大跌 → 强偏空。
+
+#### C. 贝叶斯后验更新 (Bayesian Posterior)
 $$P(\text{State} | E_1, E_2, E_3, E_4) \propto P(\text{Regime Prior}) \times \prod_{i=1}^4 L(E_i | \text{State})$$
 - 归一化后输出：$P(\text{Up}) + P(\text{Side}) + P(\text{Down}) = 100\%$。
 - **极端概率约束**：单项后验概率默认上限 **80%**；仅当满足 **$\ge 3$ 个独立证据簇同向强似然支持** 时，允许突破至 85%～90%。
@@ -133,7 +152,7 @@ $$P(\text{State} | E_1, E_2, E_3, E_4) \propto P(\text{Regime Prior}) \times \pr
 
 ### 4. 机会函数模型 (Opportunity Score)
 
-解耦“方向判断”与“交易价值”，量化当日真实期望值：
+解耦“方向判断”与“交易价值”，量化当日真实期望值（**本技能为乘法模型，与 daily-review 收盘复盘的加权平均口径不同，属有意设计：盘前重空间与风险的相乘约束，任一因子坍塌则机会坍塌**）：
 
 $$\text{Opportunity Score} = \frac{\text{Directional Space Score} \times \text{Mainline Quality Score} \times \text{Capital Retention Score}}{\text{Risk Factor}} \times 100$$
 
@@ -145,11 +164,17 @@ $$\text{Opportunity Score} = \frac{\text{Directional Space Score} \times \text{M
 
 ### 5. 主线时间序列状态机与资金留存率 (Capital Retention)
 
-#### A. 资金留存率模型 (Capital Retention Ratio)
-评估昨天涌入主线的资金今天是否沉淀留存：
-$$\text{Capital Retention} = \frac{T\text{日板块预估成交额}}{T-1\text{日板块全天成交额}} \times (1 - \text{昨日获利盘抛压率}) \times 100$$
-- $\ge 80\%$：资金高锁仓与高承接，主线具备强持续性。
-- $< 50\%$：资金快速出逃抽血，一日游风险极高。
+#### A. 资金留存率模型 (Capital Retention, 盘前口径)
+
+盘前 8:30 **无法得知 T 日实际成交额**，因此留存率以 **T-1 收盘留存为基准、9:25 竞价承接为修正**：
+
+$$\text{Retention}_{\text{基准}} = \frac{(T-1)\text{日板块成交额}}{(T-2)\text{日板块成交额}} \times (1 - \text{T-1日炸板率}) \times 100$$
+
+- **9:25 竞价修正规则**（对第一主线板块）：
+  * 竞价成交额 ≥ 昨日同期 ×1.5 且高开 → 留存基准 **上调 10 个百分点**（封顶 95%）；
+  * 竞价平量或缩量且平开 → 维持基准；
+  * 竞价缩量低开 >2% → **下调 15 个百分点**。
+- **阈值判定**（与 daily-review 收盘口径一致）：≥80% 强留存；50%~79% 良性换手；<50% 资金出逃、一日游风险极高。
 
 #### B. 主线生命周期状态机转移
 $$\text{Yesterday State} \xrightarrow{\text{Today Evidence + Capital Retention}} \text{Today State}$$
@@ -216,11 +241,11 @@ $$\text{Yesterday State} \xrightarrow{\text{Today Evidence + Capital Retention}}
 ### 三、【空间与盈亏比】四维点位与空间剩余测算
 
 | 指数名称 | 强压力 ($R_2$) | 压力位 ($R_1$) | 核心中枢 ($P$) | 支撑位 ($S_1$) | 强支撑 ($S_2$) | 距 POC 偏离 | 上方空间(距R1) | 下方空间(距S1) | 空间决策建议 |
-|:---|:---|:---|:---|:---|:---|:---:|:---:|:---:|:---|
-| **上证指数** | 点位 | 点位 | **点位** | 点位 | 点位 | $\pm X.X\%$ | $+X.X\%$ | $-X.X\%$ | [空间充裕 / 空间受压] |
-| **深证成指** | 点位 | 点位 | **点位** | 点位 | 点位 | $\pm X.X\%$ | $+X.X\%$ | $-X.X\%$ | [空间充裕 / 空间受压] |
-| **创业板指** | 点位 | 点位 | **点位** | 点位 | 点位 | $\pm X.X\%$ | $+X.X\%$ | $-X.X\%$ | [空间充裕 / 空间受压] |
-| **中证1000** | 点位 | 点位 | **点位** | 点位 | 点位 | $\pm X.X\%$ | $+X.X\%$ | $-X.X\%$ | [空间充裕 / 空间受压] |
+|:---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---|
+| **上证指数** | [XXXX.XX] | [XXXX.XX] | **[XXXX.XX]** | [XXXX.XX] | [XXXX.XX] | ±X.X% | +X.X% | -X.X% | [空间充裕 / 空间受压] |
+| **深证成指** | [XXXX.XX] | [XXXX.XX] | **[XXXX.XX]** | [XXXX.XX] | [XXXX.XX] | ±X.X% | +X.X% | -X.X% | [空间充裕 / 空间受压] |
+| **创业板指** | [XXXX.XX] | [XXXX.XX] | **[XXXX.XX]** | [XXXX.XX] | [XXXX.XX] | ±X.X% | +X.X% | -X.X% | [空间充裕 / 空间受压] |
+| **中证1000** | [XXXX.XX] | [XXXX.XX] | **[XXXX.XX]** | [XXXX.XX] | [XXXX.XX] | ±X.X% | +X.X% | -X.X% | [空间充裕 / 空间受压] |
 
 ---
 
@@ -275,7 +300,21 @@ $$\text{Yesterday State} \xrightarrow{\text{Today Evidence + Capital Retention}}
 ---
 
 ### 八、【闭环自检】多维模型量化评估体系 (Evaluation Engine)
-*（用于每日收盘后记录并量化评估模型预测效能，计算 Brier Score、校准度与锐度）*
+*（预测与实际结果必须落盘到台账文件，滚动指标由脚本计算，禁止口头估算）*
+
+```bash
+# 盘前 8:30-9:15：记录当日预测（写入 ./eval/predictions.jsonl）
+python scripts/eval_tracker.py record --date YYYY-MM-DD --regime S3 \
+    --p-up 55 --p-side 30 --p-down 15 --opportunity 78 \
+    --top-sector 半导体 --r1 3850 --s1 3800
+
+# 15:00 收盘后：记录实际结果（Z_ATR 五档自动归并三态）
+python scripts/eval_tracker.py result --date YYYY-MM-DD --z-atr 0.62 \
+    --top-sectors 半导体,农业,化工 --close 3842 --high 3855 --low 3805
+
+# 任意时点：输出 20 日滚动评估
+python scripts/eval_tracker.py report
+```
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -289,14 +328,46 @@ $$\text{Yesterday State} \xrightarrow{\text{Today Evidence + Capital Retention}}
 │ 15:00 实际收盘结果   │ 实际收益: [上证 Z_ATR = X.XX] (状态: [涨/震/跌])│
 │                      │ 实际最强主线 Top3: [板块1, 板块2, 板块3]        │
 ├──────────────────────┴─────────────────────────────────────────────────┤
-│ 🎯 量化评估指标追踪 (20日滚动多维评估)                                  │
-│ • 多分类 Brier Score: [计算值] (基准越低越优)                          │
-│ • 概率校准度 (Calibration): [预测概率 vs 真实发生率偏差]               │
-│ • 预测锐度 (Sharpness): [分布区分方差] (评估模型是否敢于明确区分)      │
-│ • 主线 Top1 命中率: [命中 / 未命中] (20日命中率: XX%)                 │
-│ • 空间点位有效率: [S1支撑 / R1压制 / 破位] (点位有效率: XX%)           │
+│ 🎯 量化评估指标追踪 (20日滚动, 由 eval_tracker.py report 输出)          │
+│ • 多分类 Brier Score / 三态方向命中率 / 预测锐度                        │
+│ • 概率校准度 (分档: 预测均值 vs 实际命中频率)                           │
+│ • 主线 Top1 命中率 / 点位有效率 (S1未破且R1未破)                        │
 └────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+### 九、【可选交付】战报长图渲染 (Report Card)
+
+当用户需要图片版战报（或提到“生成卡片 / 长图 / 战报图”）时，将报告关键结论写入 JSON 后调用：
+
+```bash
+python scripts/generate_report_card.py --type prediction --json report.json --output 盘前战报.png
+```
+
+JSON 字段说明（缺省字段自动回退内置示例值，建议至少填齐顶部五项速览；表格行数建议不超过模板行数，防止长图溢出）：
+
+```json
+{
+  "title": "A股盘前全景量化研判战报 (V3.0)",
+  "date": "YYYY-MM-DD",
+  "regime": "S3 趋势启动",
+  "sentiment_score": 78,
+  "position": "6 ～ 8 成",
+  "opportunity_score": 85,
+  "top_sector": "半导体/算力 [强化期]",
+  "evidence": [["[1] 全球科技偏好簇", "纳指 +1.4%, SOX +2.1%", "【实时数据】", "偏多", "提振半导体高开情绪"]],
+  "indices_full": [["上证指数", "S3 启动", "64%", "26%", "10%", "3880", "3850", "3825", "3800", "3770", "+1.4%", "-0.6%", "空间充沛"]],
+  "sectors_full": [["半导体/算力硬件", "[强化期]", "92/100", "88%", "45 (健康)", "88 分 [极高]", "寒武纪", "中际旭创", "优先核心中军，等分歧放量承接"]],
+  "chain_lines": ["• 上游 (...): ... -> ...", "• 中游 (...): ... -> ...", "• 下游 (...): ... -> ..."],
+  "seat_lines": ["机构加仓: ...", "游资连板: ...", "风险预警: ..."],
+  "trade_lines": ["优先标的: ...", "等待条件: ...", "止损纪律: ..."],
+  "watchlist_full": [["高低切潜力主线", "板块", "标的 (代码)", "竞价量能/价格特征", "[强确认做多]", "开盘分歧放量承接时逢低介入"]],
+  "eval_summary": [["模型置信度", "88 / 100", "完整度极高"]],
+  "risk_warning": "[失效风险预警] ..."
+}
+```
+其中 `evidence` / `indices_full` / `sectors_full` / `watchlist_full` 为多行数组，每行字段数与上例一致（分别为 5 / 13 / 9 / 6 个）。
 
 ---
 *(免责声明：本报告基于公开市场数据及AI推演模型生成，仅供个人学习与学术研究参考，不构成任何投资建议或买卖依据。股市有风险，入市需谨慎。)*

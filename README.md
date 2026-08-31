@@ -15,7 +15,7 @@ stock-prompt/
 │   ├── daily-review/                  # 🌇 技能 2 (盘后)：每日强势板块产业链共振深度复盘
 │   └── sector-rotation/               # 🔄 技能 3 (中期)：近5日板块轮动与节奏深度推演
 │
-├── prompts/                           # 📄 通用 Markdown 提示词库（与 skills 完全对齐）
+├── prompts/                           # 📄 面向其他平台的精简 Markdown 提示词库
 │   ├── market-prediction/             # 🌅 盘前全景研判
 │   │   └── A股盘前全景策略研判.md
 │   ├── daily-review/                  # 🌇 盘后共振复盘
@@ -40,16 +40,16 @@ stock-prompt/
 
 ```bash
 # 1. 每日收盘强势板块与产业链复盘长图 (15:00 收盘后使用)
-python scripts/generate_report_card.py --type daily
+python3 scripts/generate_report_card.py --demo --type daily
 
 # 2. 5 日板块轮动与主线节奏复盘长图 (周五/周末/月末使用)
-python scripts/generate_report_card.py --type rotation
+python3 scripts/generate_report_card.py --demo --type rotation
 
 # 3. 盘前全景量化推演战报长图 (08:30-09:15 使用)
-python scripts/generate_report_card.py --type prediction
+python3 scripts/generate_report_card.py --demo --type prediction
 
 # 4. 深色科技风卡片 (末尾加上 --theme dark)
-python scripts/generate_report_card.py --type daily --theme dark
+python3 scripts/generate_report_card.py --demo --type daily --theme dark
 ```
 
 ---
@@ -110,7 +110,7 @@ python scripts/generate_report_card.py --type daily --theme dark
 **首次安装**（将三大 Skill 与战报脚本同步到本机全局环境）：
 
 ```bash
-python scripts/install_skills.py
+python3 scripts/install_skills.py
 ```
 
 **日常更新**（上游发布新版本后，一条命令完成 拉取代码 ➡️ 同步全局副本 ➡️ 防漂移校验）：

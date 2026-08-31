@@ -64,7 +64,11 @@ def parse_probs(args):
     probs = {"up": args.p_up, "side": args.p_side, "down": args.p_down}
     if None in probs.values():
         sys.exit("[ERR] --p-up / --p-side / --p-down 三项必填")
+    if any(p < 0 or p > 100 for p in probs.values()):
+        sys.exit("[ERR] 三态概率必须分别位于 0-100")
     total = sum(probs.values())
+    if total <= 0:
+        sys.exit("[ERR] 三态概率合计必须大于 0")
     if abs(total - 100) > 1.5:
         print(f"[WARN] 三态概率合计 {total}% != 100%，已自动归一化")
         probs = {k: v * 100.0 / total for k, v in probs.items()}
@@ -74,6 +78,8 @@ def parse_probs(args):
 
 
 def cmd_record(args):
+    if args.opportunity is not None and not 0 <= args.opportunity <= 100:
+        sys.exit("[ERR] --opportunity 必须位于 0-100")
     rec = {
         "type": "prediction",
         "date": args.date,
@@ -190,7 +196,10 @@ def main():
 
     p_res = sub.add_parser("result", help="收盘后记录当日实际")
     p_res.add_argument("--date", required=True, help="交易日 YYYY-MM-DD")
-    p_res.add_argument("--z-atr", type=float, required=True, help="上证当日收益 / ATR14")
+    p_res.add_argument(
+        "--z-atr", type=float, required=True,
+        help="(当日收盘点位-昨日收盘点位)/ATR14；或等价的收益率/ATR百分比",
+    )
     p_res.add_argument("--top-sectors", default="", help="实际最强主线 Top3，逗号分隔")
     p_res.add_argument("--close", type=float, default=None, help="上证收盘点位")
     p_res.add_argument("--high", type=float, default=None, help="上证最高点位（缺省用 close）")

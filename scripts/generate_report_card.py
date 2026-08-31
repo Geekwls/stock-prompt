@@ -16,6 +16,43 @@ from PIL import Image, ImageDraw, ImageFont
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
+REQUIRED_FIELDS = {
+    "prediction": {
+        "title", "date", "regime", "sentiment_score", "position",
+        "opportunity_score", "top_sector", "evidence", "indices_full",
+        "sectors_full", "chain_lines", "seat_lines", "trade_lines",
+        "watchlist_full", "eval_summary", "risk_warning",
+    },
+    "daily": {
+        "title", "date", "regime", "sentiment_score", "top_sector",
+        "retention", "opportunity_score", "sentiment_breakdown",
+        "regime_notes", "sectors_daily", "resonance_cards", "chain_lines",
+        "stocks_pool", "opportunity_line", "strategy_line", "scenarios",
+        "risk_line",
+    },
+    "rotation": {
+        "title", "date_range", "summary", "volume_5d", "fund_flow",
+        "institution_lines", "hotmoney_lines", "sei_breakdown",
+        "chain_lines", "sentiment_5d", "zhongjun_anchor",
+        "longtou_anchor", "watchlist",
+    },
+}
+
+
+def validate_report_data(report_type, data):
+    """正式报告必须提供完整数据；演示默认值仅允许由 --demo 使用。"""
+    if not isinstance(data, dict):
+        raise ValueError("JSON 顶层必须是对象")
+    missing = sorted(
+        key for key in REQUIRED_FIELDS[report_type]
+        if key not in data or data[key] is None or data[key] == "" or data[key] == []
+    )
+    if missing:
+        raise ValueError(
+            "正式报告缺少必要字段: " + ", ".join(missing)
+            + "。请补齐真实数据；如需示例图请显式使用 --demo。"
+        )
+
 def get_font(size=24, bold=False):
     """跨平台中文字体加载"""
     font_candidates = [
@@ -195,7 +232,7 @@ def render_report_card(data=None, output_path="report_card.png", theme="light"):
     curr_y += 15
 
     # 5. 模块 03：核心主线状态机与产业链穿透
-    curr_y = draw_section_header("03  核心主线状态机、资金留存率与机会函数 (Layer 2 机会探测)", curr_y)
+    curr_y = draw_section_header("03  核心主线状态机、资金延续评分与机会函数 (Layer 2 机会探测)", curr_y)
     sec_col_x = [60, 200, 310, 400, 500, 585, 685, 825, 975]
     sec_headers = ["主线板块", "状态机", "静态质量", "资金留存", "拥挤度", "Opportunity", "领航龙头", "容量中军", "交易结构建议"]
     for h, x in zip(sec_headers, sec_col_x):
@@ -388,7 +425,7 @@ def render_daily_review_card(data=None, output_path="daily_review_card.png", the
         ("Market Regime", data.get("regime", "S3 趋势启动 (过渡)"), PRIMARY),
         ("市场情绪总分", f"{data.get('sentiment_score', 78)}/100", COLOR_UP),
         ("第一核心主线", data.get("top_sector", "半导体/算力 [强化期]"), PRIMARY),
-        ("资金留存率", f"{data.get('retention', '88%')} [高锁仓]", COLOR_WARN),
+        ("资金延续评分", f"{data.get('retention', 88)}/100", COLOR_WARN),
         ("综合机会评分", f"{data.get('opportunity_score', 86)}/100 [优良]", COLOR_UP),
     ]
 
@@ -442,9 +479,9 @@ def render_daily_review_card(data=None, output_path="daily_review_card.png", the
     curr_y += 140
 
     # 4. 模块 02：强势板块定位与留存率
-    curr_y = draw_section_header("02  强势板块定位、资金留存率 (Capital Retention) 与梯队质量", curr_y)
+    curr_y = draw_section_header("02  强势板块定位、资金延续评分 (Capital Continuity) 与梯队质量", curr_y)
     sec_col_x = [60, 110, 270, 365, 465, 580, 750, 840, 970]
-    sec_headers = ["排名", "板块名称", "涨幅", "涨停家数", "成交占比", "资金留存率", "驱动等级", "板块定位", "吸血与跷跷板判定"]
+    sec_headers = ["排名", "板块名称", "涨幅", "涨停家数", "成交占比", "资金延续评分", "驱动等级", "板块定位", "吸血与跷跷板判定"]
     for h, x in zip(sec_headers, sec_col_x):
         draw.text((x, curr_y), h, fill=TEXT_MUTED, font=font_micro)
     curr_y += 24
@@ -493,7 +530,7 @@ def render_daily_review_card(data=None, output_path="daily_review_card.png", the
     curr_y += 80
     chain_lines = data.get("chain_lines", [
         "• 上游 (材料/EDA/设备): 北方华创、中微公司、雅克科技 -> 资金温和放量布局，机构席位逆势净加仓",
-        "• 中游 (芯片/PCB/光模块): 中际旭创 (成交280亿)、胜宏科技、新易盛 -> 产业链爆发核心，资金留存率 88%，机构锁仓",
+        "• 中游 (芯片/PCB/光模块): 中际旭创 (成交280亿)、胜宏科技、新易盛 -> 产业链爆发核心，资金延续评分 88，机构锁仓",
         "• 下游 (算力/AI应用): 工业富联、浪潮信息、金山办公 -> 细分扩散良好，跟随中军放量共振，无单点一日游衰竭迹象"
     ])
     for line in chain_lines:
@@ -534,7 +571,7 @@ def render_daily_review_card(data=None, output_path="daily_review_card.png", the
     curr_y = draw_section_header("05  综合机会评分仪表盘 (Opportunity) 与次日推演三大情景", curr_y)
     draw.text((60, curr_y), data.get("opportunity_line", "[机会定调] Opportunity Score: 86 / 100 分  |  生命周期: [强化期]  |  建议仓位: 6 ～ 8 成"), fill=TEXT_MAIN, font=font_h3)
     curr_y += 28
-    draw.text((60, curr_y), data.get("strategy_line", "[核心策略] 主线资金留存率极高，明日以【核心中军分歧放量承接时低吸】为主，禁止追高开。"), fill=TEXT_SUB, font=font_small)
+    draw.text((60, curr_y), data.get("strategy_line", "[核心策略] 主线资金延续评分较高，次日只观察核心中军的分歧承接，避免追高。"), fill=TEXT_SUB, font=font_small)
     curr_y += 32
 
     scenarios = data.get("scenarios", [
@@ -841,6 +878,12 @@ if __name__ == "__main__":
     if args.json and not args.demo:
         with open(args.json, "r", encoding="utf-8") as f:
             data = json.load(f)
+        try:
+            validate_report_data(args.type, data)
+        except ValueError as exc:
+            parser.error(str(exc))
+    elif not args.demo:
+        parser.error("正式报告必须传入 --json；如需内置示例数据，请显式使用 --demo")
 
     if args.type == "rotation":
         render_sector_rotation_card(data=data, output_path=out_file, theme=args.theme)

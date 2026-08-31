@@ -4,8 +4,8 @@
 一键安装/同步 stock-prompt 核心技能到 Antigravity 全局与工作区环境
 
 用法:
-  python scripts/install_skills.py           安装/同步所有技能
-  python scripts/install_skills.py --check   仅校验各副本与母本是否一致（防漂移），不写入
+  python3 scripts/install_skills.py           安装/同步所有技能
+  python3 scripts/install_skills.py --check   仅校验各副本与母本是否一致（防漂移），不写入
 """
 
 import hashlib
@@ -88,7 +88,7 @@ def check_consistency(generator_script, src_workspace_skills, destinations, skil
             print(f"[OK] {label}: 一致")
 
     if drifted:
-        print(f"\n[FAIL] {drifted} 处副本漂移或缺失。请修改后重新运行: python scripts/install_skills.py")
+        print(f"\n[FAIL] {drifted} 处副本漂移或缺失。请修改后重新运行: python3 scripts/install_skills.py")
         return 1
     print("\n[SUCCESS] 所有副本与母本一致。")
     return 0

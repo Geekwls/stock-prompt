@@ -1,7 +1,7 @@
 ---
 name: market-prediction
 description: >-
-  A股盘前全景研判与概率推演引擎 (V3.0贝叶斯机会推演版)。基于Market Regime条件先验、4大独立证据簇似然更新、ATR空间盈亏比、机会函数(Opportunity Score)、主线时间序列状态机与资金留存率、09:25竞价贝叶斯更新及多维Brier/Calibration/Sharpness评估闭环，解耦市场预测与机会探测。仅适用于交易日盘前 8:30-9:15 及 9:25 竞价窗口的预测任务；收盘后的当日复盘请用 daily-review，近5日板块轮动复盘请用 sector-rotation。
+  A股盘前全景研判与概率推演引擎。基于Market Regime条件先验、4大证据簇启发式贝叶斯更新、ATR空间、机会函数、主线状态机、资金延续评分、09:25竞价更新及滚动评估闭环。仅适用于交易日盘前8:30-9:15及9:25竞价窗口；收盘单日复盘使用daily-review，近5日轮动使用sector-rotation。
 ---
 
 # A股盘前全景研判与概率推演引擎 (V3.0 贝叶斯机会推演版)
@@ -46,7 +46,7 @@ description: >-
                             ↓
                 ┌────────────────────────┐
                 │ ⑥ Mainline State Engine│
-                │ 状态机 + 资金留存率    │
+                │ 状态机 + 资金延续评分  │
                 └───────────┬────────────┘
                             ↓
                 ┌────────────────────────┐
@@ -71,6 +71,8 @@ description: >-
 ## 二、第一阶段：证据采集与 4 大独立证据簇
 
 联网获取截至 8:30 的客观数据，归入 **4 大独立证据簇**（同簇内相关指标合并为单一似然评估，严禁重复计权）：
+
+所有核心数字必须附时间戳、统计口径与来源链接。输出 `Data Coverage`（已取得关键字段数 ÷ 计划字段数）；低于 70% 时只输出条件情景，不输出精确概率、机会评分或仓位区间。
 
 ### 1. 证据簇 1：全球与亚太科技偏好簇 ($E_1$)
 - 纳指、费城半导体 (SOX)、中概金龙指数、美债 10Y 收益率、日经225、韩国综合 (KOSPI) 8:00 开盘实况、亚太半导体链（三星/海力士/东京电子）。
@@ -103,7 +105,11 @@ description: >-
 
 ### 2. 贝叶斯似然更新与 ATR 三态标准定义
 
-#### A. ATR 三态连续标准化定义 ($Z_{\text{ATR}} = \text{今日收益率} / \text{ATR}_{14}$)
+#### A. ATR 三态连续标准化定义
+
+$$Z_{\text{ATR}} = \frac{\text{今日收盘价}-\text{昨日收盘价}}{\text{ATR}_{14}}$$
+
+等价写法为“今日收益率 ÷ ATR百分比”，其中 $\text{ATR百分比}=\text{ATR}_{14}/\text{昨日收盘价}$；禁止用百分比收益率直接除以价格点数 ATR。
 - **强多态 (Strong Up)**：$Z_{\text{ATR}} > +0.8$
 - **偏多态 (Up)**：$+0.3 \le Z_{\text{ATR}} \le +0.8$
 - **震荡态 (Side)**：$-0.3 < Z_{\text{ATR}} < +0.3$
@@ -133,6 +139,8 @@ description: >-
 $$P(\text{State} | E_1, E_2, E_3, E_4) \propto P(\text{Regime Prior}) \times \prod_{i=1}^4 L(E_i | \text{State})$$
 - 归一化后输出：$P(\text{Up}) + P(\text{Side}) + P(\text{Down}) = 100\%$。
 - **极端概率约束**：单项后验概率默认上限 **80%**；仅当满足 **$\ge 3$ 个独立证据簇同向强似然支持** 时，允许突破至 85%～90%。
+- 本表属于待历史样本校准的“启发式贝叶斯”倍率，不得宣称为统计估计值。同一指标若已用于 Regime 先验，在 $E_4$ 中将该部分置为中性，避免重复计权。
+- 若 $E_1$ 与 $E_2$ 因同一全球风险事件高度同向，只保留一个风险偏好似然，另一个设为中性；禁止把相关证据当作两个独立似然连续放大。
 
 ---
 
@@ -154,30 +162,36 @@ $$P(\text{State} | E_1, E_2, E_3, E_4) \propto P(\text{Regime Prior}) \times \pr
 
 解耦“方向判断”与“交易价值”，量化当日真实期望值（**本技能为乘法模型，与 daily-review 收盘复盘的加权平均口径不同，属有意设计：盘前重空间与风险的相乘约束，任一因子坍塌则机会坍塌**）：
 
-$$\text{Opportunity Score} = \frac{\text{Directional Space Score} \times \text{Mainline Quality Score} \times \text{Capital Retention Score}}{\text{Risk Factor}} \times 100$$
+所有输入先归一化到 $[0,1]$：
+
+$$D=\operatorname{Clamp}\left(\frac{P(\text{Up})+0.5P(\text{Side})}{100},0,1\right)$$
+$$S=\operatorname{Clamp}\left(\frac{\text{Space}_{Up}}{\text{Space}_{Up}+\text{Space}_{Down}},0,1\right),\quad Q=\frac{\text{Mainline Quality}}{100},\quad R=\frac{\text{Capital Continuity}}{100},\quad C=\frac{\text{Crowding}}{100}$$
+$$\text{Opportunity Score}=100\times D^{0.30}S^{0.20}Q^{0.25}R^{0.25}(1-0.5C)$$
+
+`SpaceUp` 与 `SpaceDown` 均取非负距离；两者同时为 0 时 `S` 缺失。任一输入缺失时不准主观补值：按剩余已知因子的指数权重重新归一化，并同步降低 Data Coverage；覆盖率低于 70% 不输出分数。
 
 - **核心评估逻辑**：
   * **情况 A（方向偏多但机会低）**：$P(\text{Up}) = 70\%$，但价格距 $R_1$ 仅 $0.2\%$，主线拥挤度 $85$ ➡️ **Opportunity Score 极低，判定为“方向偏多 $\neq$ 适合追高，空间受限”**。
-  * **情况 B（方向震荡但机会高）**：$P(\text{Side}) = 55\%$，但主线刚启动（拥挤度 20）、下方距 $S_1$ 安全垫深厚、资金留存率高 ➡️ **Opportunity Score 高，判定为“结构性精品机会”**。
+  * **情况 B（方向震荡但机会高）**：$P(\text{Side}) = 55\%$，但主线刚启动（拥挤度 20）、下方距 $S_1$ 安全垫深厚、资金延续评分高 ➡️ **Opportunity Score 高，判定为“结构性机会”**。
 
 ---
 
-### 5. 主线时间序列状态机与资金留存率 (Capital Retention)
+### 5. 主线时间序列状态机与资金延续评分 (Capital Continuity)
 
-#### A. 资金留存率模型 (Capital Retention, 盘前口径)
+#### A. 资金延续评分 (Capital Continuity, 盘前口径)
 
-盘前 8:30 **无法得知 T 日实际成交额**，因此留存率以 **T-1 收盘留存为基准、9:25 竞价承接为修正**：
+盘前 8:30 **无法得知 T 日实际成交额**，因此以 **T-1 收盘延续评分为基准、9:25 竞价承接为修正**：
 
-$$\text{Retention}_{\text{基准}} = \frac{(T-1)\text{日板块成交额}}{(T-2)\text{日板块成交额}} \times (1 - \text{T-1日炸板率}) \times 100$$
+成交连续度 `V=Clamp((T-1成交额)/(T-2成交额),0,1)×100`，板块封板质量 `Q=(1-板块炸板率)×100`，基准分 `0.6V+0.4Q`。炸板率必须按板块内部计算，不得使用全市场炸板率替代。
 
 - **9:25 竞价修正规则**（对第一主线板块）：
-  * 竞价成交额 ≥ 昨日同期 ×1.5 且高开 → 留存基准 **上调 10 个百分点**（封顶 95%）；
+  * 同一主线代表标的篮子的竞价成交额 ÷ 昨日同一篮子竞价成交额 ≥1.5 且多数核心高开 → 基准 **上调 10 分**（封顶 95）；
   * 竞价平量或缩量且平开 → 维持基准；
   * 竞价缩量低开 >2% → **下调 15 个百分点**。
-- **阈值判定**（与 daily-review 收盘口径一致）：≥80% 强留存；50%~79% 良性换手；<50% 资金出逃、一日游风险极高。
+- **阈值判定**（与 daily-review 收盘口径一致）：≥80 强延续；50–79 良性换手；<50 弱延续。低分不能单独证明资金净流出。
 
 #### B. 主线生命周期状态机转移
-$$\text{Yesterday State} \xrightarrow{\text{Today Evidence + Capital Retention}} \text{Today State}$$
+$$\text{Yesterday State} \xrightarrow{\text{Today Evidence + Capital Continuity}} \text{Today State}$$
 - **🟢 启动期** ➡️ **🟢 强化期** ➡️ **🟡 加速期** ➡️ **🟡 高位分歧** ➡️ **🔴 弱化期** ➡️ **🔴 退潮期**
 - *允许逆向回升*：高位分歧 $\xrightarrow{\text{放量承接}}$ 再次强化；弱化期 $\xrightarrow{\text{新催化注入}}$ 二次启动。
 
@@ -189,9 +203,9 @@ $$\text{Yesterday State} \xrightarrow{\text{Today Evidence + Capital Retention}}
 
 | 竞价量能比 | 竞价价格方向 | 核心一致性 | 竞价证据属性 | 贝叶斯更新结果 |
 |:---:|:---:|:---:|:---:|:---|
-| **放量 ($\ge 5\%$)** | 高开 | 核心强一致 | 🟢 **强确认** | 后验 $P(\text{Up})$ 显著上调，Opportunity Score 确认 |
-| **放量 ($\ge 5\%$)** | 高开 | 龙头松动分化 | 🟡 **高位分歧** | 调增震荡概率 $P(\text{Side})$，策略转为观察承接 |
-| **放量 ($\ge 5\%$)** | 低开 | 核心均走弱 | 🔴 **资金撤退** | **逻辑证伪**，后验 $P(\text{Down})$ 大幅上调，取消买入 |
+| **竞价量比 $\ge 1.5$** | 高开 | 核心强一致 | 🟢 **强确认** | 按预先设定的竞价似然重新计算后验 |
+| **竞价量比 $\ge 1.5$** | 高开 | 龙头松动分化 | 🟡 **高位分歧** | 调增震荡概率 $P(\text{Side})$，策略转为观察承接 |
+| **竞价量比 $\ge 1.5$** | 低开 | 核心均走弱 | 🔴 **资金撤退** | **逻辑证伪**，重新计算后验并取消原计划 |
 | **平量/缩量** | 高开 | 核心偏强 | 🟢 **偏强锁仓** | 维持原推演 |
 | **平量/缩量** | 低开 | 核心走弱 | 🔴 **预期落空** | 下调主线权重，转为防守观望 |
 
@@ -199,7 +213,7 @@ $$\text{Yesterday State} \xrightarrow{\text{Today Evidence + Capital Retention}}
 
 ## 四、输出报告结构 (Output Format)
 
-*严格按以下 8 步递进决策流输出报告：*
+按以下决策流输出；无法验证的数据标记 `N/A` 并降低覆盖率，不得用占位符或示例数字补齐。
 
 ---
 
@@ -251,11 +265,11 @@ $$\text{Yesterday State} \xrightarrow{\text{Today Evidence + Capital Retention}}
 
 ### 四、【Layer 2 机会探测】主线状态机与资金留存评估
 
-| 排名 | 板块名称 | 静态质量 (0-100) | 资金留存率 (0-100) | 拥挤度 (0-100) | 机会评分 (Opportunity) | 状态机定位 | 交易结构导向 |
+| 排名 | 板块名称 | 静态质量 (0-100) | 资金延续评分 (0-100) | 拥挤度 (0-100) | 机会评分 (Opportunity) | 状态机定位 | 交易结构导向 |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---|
-| 1 | [板块A] | [XX] | [XX]% | [XX] (低/中/高) | **[XX]/100** | 🟢 强化期 | 优先核心中军，等分歧放量承接 |
-| 2 | [板块B] | [XX] | [XX]% | [XX] (低/中/高) | **[XX]/100** | 🟡 加速期 | 观望龙头封单，避免无脑追高开 |
-| 3 | [板块C] | [XX] | [XX]% | [XX] (低/中/高) | **[XX]/100** | 🔴 弱化期 | 降低优先级，回避后排补跌 |
+| 1 | [板块A] | [XX] | [XX] | [XX] (低/中/高) | **[XX]/100** | 🟢 强化期 | 优先核心中军，等分歧放量承接 |
+| 2 | [板块B] | [XX] | [XX] | [XX] (低/中/高) | **[XX]/100** | 🟡 加速期 | 观望龙头封单，避免无脑追高开 |
+| 3 | [板块C] | [XX] | [XX] | [XX] (低/中/高) | **[XX]/100** | 🔴 弱化期 | 降低优先级，回避后排补跌 |
 
 #### 核心主线交易结构设计
 - **第一核心主线**：[板块名]（Opportunity 评分 [XX] 分，处于【___期】）
@@ -273,8 +287,8 @@ $$\text{Yesterday State} \xrightarrow{\text{Today Evidence + Capital Retention}}
 #### 1. 09:25 竞价增量证据更新
 | 核心标的/主线 | 竞价量能比 | 价格方向 | 核心一致性 | 竞价证据判定 | 贝叶斯后验修正 |
 |:---|:---:|:---:|:---:|:---:|:---|
-| **第一主线板块** | $\ge 5\%$ / $<1\%$ | 高开/低开 | 强/弱 | 🟢强确认 / 🟡高位分歧 / 🔴资金撤退 | 确认做多 / 转为观察 / 否决买入 |
-| **领航龙头个股** | $\ge 5\%$ / $<1\%$ | 高开/低开 | 强/弱 | 🟢强确认 / 🟡高位分歧 / 🔴资金撤退 | 确认做多 / 等待承接 / 放弃计划 |
+| **第一主线板块** | 相对昨日同篮子竞价 $\ge1.5$ / $<1.0$ | 高开/低开 | 强/弱 | 🟢强确认 / 🟡高位分歧 / 🔴资金撤退 | 提高优先级 / 转为观察 / 否决计划 |
+| **领航龙头个股** | 相对该股昨日竞价 $\ge1.5$ / $<1.0$ | 高开/低开 | 强/弱 | 🟢强确认 / 🟡高位分歧 / 🔴资金撤退 | 提高优先级 / 等待承接 / 放弃计划 |
 
 #### 2. 条件化仓位区间导向
 - **高机会评分 (Opportunity $\ge 75$) + S3/S4 趋势态**：建议仓位区间 **6 ～ 8 成**
@@ -293,7 +307,7 @@ $$\text{Yesterday State} \xrightarrow{\text{Today Evidence + Capital Retention}}
 
 ### 七、【模型元状态】置信度与失效预警 (Meta-State)
 - **模型当前置信度**：【[XX]/100 分】
-- **证据完整度**：【[XX]/100 分】（标注具体缺失项，如：期权数据缺失采用 ATR 降级计算）
+- **Data Coverage**：【[XX]%】（按计划字段计算并标注具体缺失项；低于70%不输出精确概率、机会分或仓位区间）
 - **当前推演稳定性**：【高 / 中 / 低】
 - **最可能导致推演失效的单点变量**：【如：早盘外汇急跌 / 龙头特停监管 / 竞价超预期核按钮】
 
@@ -304,16 +318,16 @@ $$\text{Yesterday State} \xrightarrow{\text{Today Evidence + Capital Retention}}
 
 ```bash
 # 盘前 8:30-9:15：记录当日预测（写入 ./eval/predictions.jsonl）
-python scripts/eval_tracker.py record --date YYYY-MM-DD --regime S3 \
+python3 .agents/skills/market-prediction/scripts/eval_tracker.py record --date YYYY-MM-DD --regime S3 \
     --p-up 55 --p-side 30 --p-down 15 --opportunity 78 \
     --top-sector 半导体 --r1 3850 --s1 3800
 
 # 15:00 收盘后：记录实际结果（Z_ATR 五档自动归并三态）
-python scripts/eval_tracker.py result --date YYYY-MM-DD --z-atr 0.62 \
+python3 .agents/skills/market-prediction/scripts/eval_tracker.py result --date YYYY-MM-DD --z-atr 0.62 \
     --top-sectors 半导体,农业,化工 --close 3842 --high 3855 --low 3805
 
 # 任意时点：输出 20 日滚动评估
-python scripts/eval_tracker.py report
+python3 .agents/skills/market-prediction/scripts/eval_tracker.py report
 ```
 
 ```text
@@ -342,10 +356,10 @@ python scripts/eval_tracker.py report
 当用户需要图片版战报（或提到“生成卡片 / 长图 / 战报图”）时，将报告关键结论写入 JSON 后调用：
 
 ```bash
-python scripts/generate_report_card.py --type prediction --json report.json --output 盘前战报.png
+python3 scripts/generate_report_card.py --type prediction --json report.json --output 盘前战报.png
 ```
 
-JSON 字段说明（缺省字段自动回退内置示例值，建议至少填齐顶部五项速览；表格行数建议不超过模板行数，防止长图溢出）：
+JSON 字段说明（正式报告必须填齐所列字段并通过脚本校验；只有显式 `--demo` 才可使用内置示例值）：
 
 ```json
 {

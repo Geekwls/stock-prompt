@@ -25,7 +25,7 @@ def install_skills(check_only=False):
         os.path.join(os.path.expanduser("~"), ".gemini", "antigravity", "skills"),
     ]
 
-    skill_names = ["daily-review", "market-prediction", "sector-rotation"]
+    skill_names = ["daily-review", "market-prediction", "sector-rotation", "stock-analysis"]
 
     if check_only:
         return check_consistency(generator_script, src_workspace_skills, destinations, skill_names)

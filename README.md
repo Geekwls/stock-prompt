@@ -6,26 +6,30 @@
 
 ---
 
-## 📂 项目结构（三大核心交易场景）
+## 📂 项目结构（四大核心交易与研究场景）
 
 ```text
 stock-prompt/
 ├── .agents/skills/                    # 🤖 Antigravity / Agent 专用 Skill 目录
 │   ├── market-prediction/             # 🌅 技能 1 (盘前)：大盘点位 + 行业主线 + 竞价全景研判 (V5.0)
 │   ├── daily-review/                  # 🌇 技能 2 (盘后)：每日强势板块产业链共振深度复盘
-│   └── sector-rotation/               # 🔄 技能 3 (中期)：近5日板块轮动与节奏深度推演
+│   ├── sector-rotation/               # 🔄 技能 3 (中期)：近5日板块轮动与节奏深度推演
+│   └── stock-analysis/                # 🔍 技能 4 (个股)：个股深度分析与威科夫量价结构研判
 │
 ├── prompts/                           # 📄 从 Skill 母本同步生成的跨平台 Markdown 提示词库
 │   ├── market-prediction/             # 🌅 盘前全景研判
 │   │   └── A股盘前全景策略研判.md
 │   ├── daily-review/                  # 🌇 盘后共振复盘
 │   │   └── 每天强势板块产业链共振分析.md
-│   └── sector-rotation/               # 🔄 近5日轮动节奏
-│       └── 5日内板块轮动节奏分析.md
+│   ├── sector-rotation/               # 🔄 近5日轮动节奏
+│   │   └── 5日内板块轮动节奏分析.md
+│   └── stock-analysis/                # 🔍 个股威科夫研判
+│       └── A股个股深度分析与威科夫结构研判.md
 │
 ├── scripts/                           # 🛠 自动化工具库
-│   ├── generate_report_card.py        # 🎨 高清深色科技风战报长图自动生成脚本
-│   ├── sync_prompts.py                 # 🔁 Skill → Prompt 同步及漂移检查
+│   ├── generate_report_card.py        # 🎨 高清极简金融研报长图自动生成脚本 (支持 prediction/daily/rotation/stock)
+│   ├── install_skills.py              # 🚀 一键安装/校验所有技能到 Antigravity 全局环境
+│   ├── sync_prompts.py                # 🔁 Skill → Prompt 同步及漂移检查
 │   ├── update.bat                     # 🔄 Windows 自动更新脚本
 │   └── update.sh                      # 🔄 Linux/Mac 自动更新脚本
 ├── CHANGELOG.md                       # 项目主版本日志
@@ -37,20 +41,23 @@ stock-prompt/
 
 ## 🎨 📊 自动生成超高清研报长图 (战报卡片引擎)
 
-项目内置了全自动 Python 研报长图生成器 (`scripts/generate_report_card.py`)，支持将三大核心场景的全量量化数据一键渲染为极简金融研报风长图（支持浅色/深色主题）：
+项目内置了全自动 Python 研报长图生成器 (`scripts/generate_report_card.py`)，支持将四大核心场景的全量量化数据一键渲染为极简金融研报风长图（支持浅色/深色主题）：
 
 ```bash
-# 1. 每日收盘强势板块与产业链复盘长图 (15:00 收盘后使用)
+# 1. 个股深度量化与威科夫结构研报长图 (输入任意个股使用)
+python3 scripts/generate_report_card.py --demo --type stock
+
+# 2. 每日收盘强势板块与产业链复盘长图 (15:00 收盘后使用)
 python3 scripts/generate_report_card.py --demo --type daily
 
-# 2. 5 日板块轮动与主线节奏复盘长图 (周五/周末/月末使用)
+# 3. 5 日板块轮动与主线节奏复盘长图 (周五/周末/月末使用)
 python3 scripts/generate_report_card.py --demo --type rotation
 
-# 3. 盘前全景量化推演战报长图 (08:30-09:15 使用)
+# 4. 盘前全景量化推演战报长图 (08:30-09:15 使用)
 python3 scripts/generate_report_card.py --demo --type prediction
 
-# 4. 深色科技风卡片 (末尾加上 --theme dark)
-python3 scripts/generate_report_card.py --demo --type daily --theme dark
+# 5. 深色科技风卡片 (末尾加上 --theme dark)
+python3 scripts/generate_report_card.py --demo --type stock --theme dark
 ```
 
 ---

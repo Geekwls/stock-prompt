@@ -14,6 +14,8 @@ MAPPINGS = {
         ROOT / "prompts/market-prediction/A股盘前全景策略研判.md",
     ROOT / ".agents/skills/sector-rotation/SKILL.md":
         ROOT / "prompts/sector-rotation/5日内板块轮动节奏分析.md",
+    ROOT / ".agents/skills/stock-analysis/SKILL.md":
+        ROOT / "prompts/stock-analysis/A股个股深度分析与威科夫结构研判.md",
 }
 
 

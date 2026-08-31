@@ -19,11 +19,12 @@ if hasattr(sys.stdout, 'reconfigure'):
 def get_font(size=24, bold=False):
     """跨平台中文字体加载"""
     font_candidates = [
-        "C:\\Windows\\Fonts\\msyh.ttc",       # 微软雅黑
-        "C:\\Windows\\Fonts\\msyhbd.ttc" if bold else "C:\\Windows\\Fonts\\msyh.ttc",
+        "C:\\Windows\\Fonts\\msyhbd.ttc" if bold else "C:\\Windows\\Fonts\\msyh.ttc",  # 微软雅黑
         "C:\\Windows\\Fonts\\simhei.ttf",      # 黑体
         "/System/Library/Fonts/PingFang.ttc",  # macOS 苹方
-        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc" # Linux
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc" if bold else "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # Linux Noto
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",  # Linux 文泉驿
+        "/usr/share/fonts/truetype/arphic/uming.ttc",      # Linux AR PL
     ]
     for p in font_candidates:
         if os.path.exists(p):
@@ -224,13 +225,16 @@ def render_report_card(data=None, output_path="report_card.png", theme="light"):
         curr_y += 8
 
     # 产业链穿透简明条目
+    chain_lines = data.get("chain_lines", [
+        "• 上游 (材料/设备/EDA): 北方华创、中微公司、雅克科技 -> 资金温和放量布局，机构席位逆势加仓",
+        "• 中游 (芯片/PCB/光模块): 中际旭创 (成交280亿)、胜宏科技、新易盛 -> 产业链绝对爆发核心，流动性容量极佳",
+        "• 下游 (算力/AI应用): 工业富联、浪潮信息、金山办公 -> 细分扩散良好，跟随中军稳步放量共振"
+    ])
     curr_y += 6
-    draw.text((60, curr_y), "• 上游 (材料/设备/EDA): 北方华创、中微公司、雅克科技 -> 资金温和放量布局，机构席位逆势加仓", fill=TEXT_SUB, font=font_micro)
-    curr_y += 20
-    draw.text((60, curr_y), "• 中游 (芯片/PCB/光模块): 中际旭创 (成交280亿)、胜宏科技、新易盛 -> 产业链绝对爆发核心，流动性容量极佳", fill=TEXT_SUB, font=font_micro)
-    curr_y += 20
-    draw.text((60, curr_y), "• 下游 (算力/AI应用): 工业富联、浪潮信息、金山办公 -> 细分扩散良好，跟随中军稳步放量共振", fill=TEXT_SUB, font=font_micro)
-    curr_y += 30
+    for line in chain_lines:
+        draw.text((60, curr_y), line, fill=TEXT_SUB, font=font_micro)
+        curr_y += 20
+    curr_y += 10
 
     # 6. 模块 04：筹码体检与交易结构
     curr_y = draw_section_header("04  龙虎榜席位品质、筹码结构体检与实战交易结构设计", curr_y)
@@ -238,16 +242,26 @@ def render_report_card(data=None, output_path="report_card.png", theme="light"):
 
     # 左侧：席位
     draw.text((60, curr_y), "[主力席位动态]", fill=PRIMARY, font=font_h3)
-    draw.text((60, curr_y + 24), "机构加仓: 20只个股上榜，嘉立创(净买2.53亿)、肯特股份(净买6989万)", fill=TEXT_MAIN, font=font_micro)
-    draw.text((60, curr_y + 44), "游资连板: 深中华A(6板获游资接力)、楚天龙(5板)，高标题材情绪穿越", fill=TEXT_MAIN, font=font_micro)
-    draw.text((60, curr_y + 64), "风险预警: 汉森制药炸板后拉萨席位对倒；电子板块高位获利盘部分兑现", fill=COLOR_UP, font=font_micro)
+    seat_lines = data.get("seat_lines", [
+        "机构加仓: 20只个股上榜，嘉立创(净买2.53亿)、肯特股份(净买6989万)",
+        "游资连板: 深中华A(6板获游资接力)、楚天龙(5板)，高标题材情绪穿越",
+        "风险预警: 汉森制药炸板后拉萨席位对倒；电子板块高位获利盘部分兑现"
+    ])
+    for s_i, line in enumerate(seat_lines):
+        seat_color = COLOR_UP if ("风险" in line or "预警" in line or "炸板" in line) else TEXT_MAIN
+        draw.text((60, curr_y + 24 + s_i * 20), line, fill=seat_color, font=font_micro)
 
     # 右侧：交易结构
     rx = 60 + col_w + 40
     draw.text((rx, curr_y), "[实战交易结构]", fill=PRIMARY, font=font_h3)
-    draw.text((rx, curr_y + 24), "优先标的: 第一主线容量中军 (中际旭创) + 政策低位先锋 (万向德农)", fill=TEXT_MAIN, font=font_micro)
-    draw.text((rx, curr_y + 44), "等待条件: 早盘前15分钟分歧释放完毕，分时均线上方放量二次站稳", fill=TEXT_MAIN, font=font_micro)
-    draw.text((rx, curr_y + 64), "止损纪律: 上证跌破 S1 (3800) 且30分钟无法收回，坚决执行止损", fill=COLOR_UP, font=font_micro)
+    trade_lines = data.get("trade_lines", [
+        "优先标的: 第一主线容量中军 (中际旭创) + 政策低位先锋 (万向德农)",
+        "等待条件: 早盘前15分钟分歧释放完毕，分时均线上方放量二次站稳",
+        "止损纪律: 上证跌破 S1 (3800) 且30分钟无法收回，坚决执行止损"
+    ])
+    for t_i, line in enumerate(trade_lines):
+        trade_color = COLOR_UP if ("止损" in line or "严禁" in line) else TEXT_MAIN
+        draw.text((rx, curr_y + 24 + t_i * 20), line, fill=trade_color, font=font_micro)
 
     curr_y += 105
 
@@ -282,12 +296,16 @@ def render_report_card(data=None, output_path="report_card.png", theme="light"):
 
     # 8. 模块 06：模型评估与免责
     curr_y = draw_section_header("06  模型元状态、失效预警与 20 日量化评估闭环", curr_y)
+    eval_items_raw = data.get("eval_summary", [
+        ("模型置信度", "88 / 100", "完整度极高"),
+        ("三态准确率", "76.2%", "基准表现优良"),
+        ("Brier Score", "0.138", "校准度佳(<0.15)"),
+        ("预测锐度", "0.824", "区分度强"),
+        ("主线命中率", "84.0%", "主线捕捉胜率高")
+    ])
     eval_items_full = [
-        ("模型置信度", "88 / 100", "完整度极高", PRIMARY),
-        ("三态准确率", "76.2%", "基准表现优良", COLOR_UP),
-        ("Brier Score", "0.138", "校准度佳(<0.15)", COLOR_WARN),
-        ("预测锐度", "0.824", "区分度强", COLOR_UP),
-        ("主线命中率", "84.0%", "主线捕捉胜率高", COLOR_DOWN)
+        (l, v, sub, COLOR_WARN if "Brier" in l else (COLOR_UP if ("命中" in l or "准确" in l or "锐度" in l) else PRIMARY))
+        for l, v, sub in eval_items_raw
     ]
     eval_w = (W - 120 - 40) // 5
     for i, (l, v, sub, c) in enumerate(eval_items_full):
@@ -298,7 +316,7 @@ def render_report_card(data=None, output_path="report_card.png", theme="light"):
         draw.text((ex + 10, curr_y + 48), sub, fill=TEXT_MUTED, font=get_font(11))
 
     curr_y += 85
-    draw.text((60, curr_y), "[失效风险预警] 若早盘 USDCNH 汇率突发急贬 > 200 点 或 领航龙头开盘遭巨额砸盘，即时触发风控防御。", fill=COLOR_UP, font=font_micro)
+    draw.text((60, curr_y), data.get("risk_warning", "[失效风险预警] 若早盘 USDCNH 汇率突发急贬 > 200 点 或 领航龙头开盘遭巨额砸盘，即时触发风控防御。"), fill=COLOR_UP, font=font_micro)
 
     curr_y += 35
     draw.line([(60, curr_y), (W - 60, curr_y)], fill=BORDER_DIVIDER, width=1)
@@ -360,7 +378,7 @@ def render_daily_review_card(data=None, output_path="daily_review_card.png", the
     date_str = data.get("date", datetime.now().strftime("%Y-%m-%d"))
 
     # 1. 标题
-    draw.text((60, 36), "A股每日强势板块与产业链共振复盘", fill=TEXT_MAIN, font=font_title)
+    draw.text((60, 36), data.get("title", "A股每日强势板块与产业链共振复盘"), fill=TEXT_MAIN, font=font_title)
     draw_pill(draw, f"复盘时点: {date_str} 15:00 收盘", (W - 280, 40), bg_color="#f8fafc" if is_light else "#1e293b", text_color=TEXT_MUTED, font=font_micro)
     draw_pill(draw, "收盘全景复盘", (W - 420, 40), bg_color="#ecfdf5" if is_light else "#064e3b", text_color=PRIMARY, font=font_micro)
     draw.line([(60, 85), (W - 60, 85)], fill=BORDER_DIVIDER, width=1)
@@ -396,13 +414,13 @@ def render_daily_review_card(data=None, output_path="daily_review_card.png", the
 
     # 左侧：打分
     draw.text((60, curr_y), "[情绪指标打分拆解]", fill=PRIMARY, font=font_h3)
-    sent_items = [
+    sent_items = data.get("sentiment_breakdown", [
         ("涨跌家数比 (25分)", "上涨 3320 家 / 下跌 1850 家 (涨跌比 6.4:3.6) -> 得分: 18 / 25"),
         ("昨日涨停溢价 (20分)", "昨日涨停个股今日平均红盘率 74.2% -> 得分: 20 / 20"),
         ("连板晋级率 (20分)", "首板进二板晋级率 61.54% (接力健康) -> 得分: 20 / 20"),
         ("炸板率得分 (20分)", "全市场涨停 77 家，炸板 17 家 (炸板率 18.0%) -> 得分: 12 / 20"),
         ("两市总成交量 (15分)", "全天 2.12 万亿，较 5 日均量放量 +14.8% -> 得分: 8 / 15")
-    ]
+    ])
     for s_i, (t, d) in enumerate(sent_items):
         sy = curr_y + 24 + s_i * 20
         draw.text((60, sy), f"• {t}: {d}", fill=TEXT_SUB, font=font_micro)
@@ -410,13 +428,13 @@ def render_daily_review_card(data=None, output_path="daily_review_card.png", the
     # 右侧：Regime 定调
     rx = 60 + col_w + 40
     draw.text((rx, curr_y), "[总量环境与 Regime 定调]", fill=PRIMARY, font=font_h3)
-    regime_details = [
+    regime_details = data.get("regime_notes", [
         ("Market Regime", "处于 S2 存量震荡 向 S3 趋势启动 过渡态"),
         ("两市量价健康度", "成交额突破 2.1 万亿，属于放量良性攻坚，无缩量诱多背离"),
         ("主线资金集中度", "前 3 大热点行业成交占比达 24.5%，主力做多合力高度聚焦"),
         ("一日游风险体检", "[低风险] 未触发偷尾盘、无连板等 6 大一日游刹车规则"),
         ("建议仓位导向", "维持 6 ～ 8 成 区间，积极参与核心主线低吸")
-    ]
+    ])
     for r_i, (t, d) in enumerate(regime_details):
         ry = curr_y + 24 + r_i * 20
         draw.text((rx, ry), f"• {t}: {d}", fill=TEXT_SUB, font=font_micro)
@@ -433,12 +451,12 @@ def render_daily_review_card(data=None, output_path="daily_review_card.png", the
     draw.line([(60, curr_y), (W - 60, curr_y)], fill=BORDER_LIGHT, width=1)
     curr_y += 10
 
-    sectors_daily = [
+    sectors_daily = data.get("sectors_daily", [
         ("1", "半导体/算力硬件", "+4.22%", "14 家", "11.5%", "88% [强沉淀锁仓]", "S 级 (行业革命)", "[核心主线]", "强吸血医药生物与新能源"),
         ("2", "农林牧渔/粮食安全", "+3.85%", "8 家", "6.2%", "92% [资金高留存]", "A 级 (国家战略)", "[独立防守]", "与大盘形成良性逆势对冲"),
         ("3", "基础化工/化肥农化", "+2.95%", "6 家", "4.8%", "72% [良性换手]", "B 级 (旺季催化)", "[结构补涨]", "承接高位科技分流溢出资金"),
         ("4", "医药生物/创新药", "-1.40%", "1 家", "3.1%", "42% [大幅流出]", "C 级 (常规轮动)", "[边缘退潮]", "受主线吸血严重失血阴跌")
-    ]
+    ])
     for row in sectors_daily:
         draw.text((sec_col_x[0], curr_y), row[0], fill=PRIMARY, font=font_small)
         draw.text((sec_col_x[1], curr_y), row[1], fill=TEXT_MAIN, font=font_small)
@@ -457,27 +475,31 @@ def render_daily_review_card(data=None, output_path="daily_review_card.png", the
 
     # 5. 模块 03：产业链共振质量与穿透
     curr_y = draw_section_header("03  产业链深度共振评分 (0-100) 与上中下游全景穿透", curr_y)
-    res_items = [
-        ("细分上涨占比", "23 / 25 分", "92% 细分板块飘红", COLOR_UP),
-        ("细分涨停广度", "32 / 35 分", "上中下游皆有涨停封板", COLOR_UP),
-        ("放量扩散度", "22 / 25 分", "各环节成交量同步放大", PRIMARY),
-        ("共振质量总分", "92 / 100 分", "【强产业链深度共振】", COLOR_UP)
-    ]
+    res_items = data.get("resonance_cards", [
+        ("细分上涨占比", "23 / 25 分", "92% 细分板块飘红"),
+        ("细分涨停广度", "32 / 35 分", "上中下游皆有涨停封板"),
+        ("放量扩散度", "22 / 25 分", "各环节成交量同步放大"),
+        ("共振质量总分", "92 / 100 分", "【强产业链深度共振】")
+    ])
     res_w = (W - 120 - 30) // 4
-    for r_i, (l, v, sub, c) in enumerate(res_items):
+    for r_i, (l, v, sub) in enumerate(res_items):
+        card_color = COLOR_WARN if ("滞涨" in sub or "缩量" in sub or "单点" in sub) else (PRIMARY if "扩散" in l else COLOR_UP)
         rx_pos = 60 + r_i * (res_w + 10)
         draw.rounded_rectangle([rx_pos, curr_y, rx_pos + res_w, curr_y + 65], radius=4, fill=BG_SECTION, outline=BORDER_LIGHT, width=1)
         draw.text((rx_pos + 10, curr_y + 8), l, fill=TEXT_MUTED, font=font_micro)
-        draw.text((rx_pos + 10, curr_y + 26), v, fill=c, font=get_font(17, bold=True))
+        draw.text((rx_pos + 10, curr_y + 26), v, fill=card_color, font=get_font(17, bold=True))
         draw.text((rx_pos + 10, curr_y + 48), sub, fill=TEXT_MAIN, font=get_font(11))
 
     curr_y += 80
-    draw.text((60, curr_y), "• 上游 (材料/EDA/设备): 北方华创、中微公司、雅克科技 -> 资金温和放量布局，机构席位逆势净加仓", fill=TEXT_SUB, font=font_micro)
-    curr_y += 20
-    draw.text((60, curr_y), "• 中游 (芯片/PCB/光模块): 中际旭创 (成交280亿)、胜宏科技、新易盛 -> 产业链爆发核心，资金留存率 88%，机构锁仓", fill=TEXT_SUB, font=font_micro)
-    curr_y += 20
-    draw.text((60, curr_y), "• 下游 (算力/AI应用): 工业富联、浪潮信息、金山办公 -> 细分扩散良好，跟随中军放量共振，无单点一日游衰竭迹象", fill=TEXT_SUB, font=font_micro)
-    curr_y += 30
+    chain_lines = data.get("chain_lines", [
+        "• 上游 (材料/EDA/设备): 北方华创、中微公司、雅克科技 -> 资金温和放量布局，机构席位逆势净加仓",
+        "• 中游 (芯片/PCB/光模块): 中际旭创 (成交280亿)、胜宏科技、新易盛 -> 产业链爆发核心，资金留存率 88%，机构锁仓",
+        "• 下游 (算力/AI应用): 工业富联、浪潮信息、金山办公 -> 细分扩散良好，跟随中军放量共振，无单点一日游衰竭迹象"
+    ])
+    for line in chain_lines:
+        draw.text((60, curr_y), line, fill=TEXT_SUB, font=font_micro)
+        curr_y += 20
+    curr_y += 10
 
     # 6. 模块 04：股池与席位交易结构
     curr_y = draw_section_header("04  龙虎榜席位品质、筹码结构体检与核心股池交易结构", curr_y)
@@ -489,12 +511,12 @@ def render_daily_review_card(data=None, output_path="daily_review_card.png", the
     draw.line([(60, curr_y), (W - 60, curr_y)], fill=BORDER_LIGHT, width=1)
     curr_y += 10
 
-    stocks_data = [
+    stocks_data = data.get("stocks_pool", [
         ("领航龙头", "寒武纪 (688256)", "+12.45%", "充分换手板，放量突破前期平台", "知名游资席位锁仓加持", "【优先】观察龙头封单，做先锋确认"),
         ("容量中军", "中际旭创 (300308)", "+8.65%", "全天成交280亿，机构锁仓良好", "机构净买入 2.53 亿元", "【等待】早盘分歧均线放量承接时低吸"),
         ("低位弹性", "胜宏科技 (300476)", "+15.20%", "20cm 放量突破，细分扩散弹性", "量化与机构混合合力", "【等待】逢回踩均线分歧低吸弹性先锋"),
         ("防守中军", "万向德农 (600371)", "+10.02%", "8天5板强势涨停，筹码高锁仓", "游资合力坚决封死涨停", "【避免】一致性大幅高开盲目无脑追涨")
-    ]
+    ])
     for row in stocks_data:
         draw.text((stock_col_x[0], curr_y), row[0], fill=PRIMARY, font=font_small)
         draw.text((stock_col_x[1], curr_y), row[1], fill=COLOR_WARN, font=font_small)
@@ -510,23 +532,24 @@ def render_daily_review_card(data=None, output_path="daily_review_card.png", the
 
     # 7. 模块 05：机会评分与三大情景
     curr_y = draw_section_header("05  综合机会评分仪表盘 (Opportunity) 与次日推演三大情景", curr_y)
-    draw.text((60, curr_y), "[机会定调] Opportunity Score: 86 / 100 分  |  生命周期: [强化期]  |  建议仓位: 6 ～ 8 成", fill=TEXT_MAIN, font=font_h3)
+    draw.text((60, curr_y), data.get("opportunity_line", "[机会定调] Opportunity Score: 86 / 100 分  |  生命周期: [强化期]  |  建议仓位: 6 ～ 8 成"), fill=TEXT_MAIN, font=font_h3)
     curr_y += 28
-    draw.text((60, curr_y), "[核心策略] 主线资金留存率极高，明日以【核心中军分歧放量承接时低吸】为主，禁止追高开。", fill=TEXT_SUB, font=font_small)
+    draw.text((60, curr_y), data.get("strategy_line", "[核心策略] 主线资金留存率极高，明日以【核心中军分歧放量承接时低吸】为主，禁止追高开。"), fill=TEXT_SUB, font=font_small)
     curr_y += 32
 
-    scenarios = [
+    scenarios = data.get("scenarios", [
         ("[情景 A] 强势主升延续", "触发条件: 领航龙头竞价高开 > 3% 且 30 分钟内放量封板 -> 积极持股做多核心中军"),
         ("[情景 B] 分歧转一致低吸", "触发条件: 早盘微幅低开回踩 MA5 均线获大单放量承接 -> 于分时均线附近分批逢低介入中军"),
         ("[情景 C] 退潮冲高回落防守", "触发条件: 板块放量但后排大面积炸板，中军遭大额卖单砸盘 -> 坚决逢高减仓，严禁逆势补仓")
-    ]
+    ])
     for sc_title, sc_desc in scenarios:
-        draw.text((60, curr_y), sc_title, fill=COLOR_DOWN if "A" in sc_title else (PRIMARY if "B" in sc_title else COLOR_UP), font=font_small)
+        sc_color = COLOR_UP if "延续" in sc_title else (PRIMARY if ("低吸" in sc_title or "分歧" in sc_title) else COLOR_DOWN)
+        draw.text((60, curr_y), sc_title, fill=sc_color, font=font_small)
         draw.text((260, curr_y), sc_desc, fill=TEXT_MAIN, font=font_micro)
         curr_y += 24
 
     curr_y += 8
-    draw.text((60, curr_y), "[风控底线] 单票止损位严格锚定 MA5 均线或 -5%，严禁在一致性高潮日追涨跟风杂毛。", fill=COLOR_UP, font=font_micro)
+    draw.text((60, curr_y), data.get("risk_line", "[风控底线] 单票止损位严格锚定 MA5 均线或 -5%，严禁在一致性高潮日追涨跟风杂毛。"), fill=COLOR_UP, font=font_micro)
 
     curr_y += 35
     draw.line([(60, curr_y), (W - 60, curr_y)], fill=BORDER_DIVIDER, width=1)
@@ -582,20 +605,36 @@ def render_sector_rotation_card(data=None, output_path="sector_rotation_card.png
     font_small = get_font(14)
     font_micro = get_font(12)
 
+    if data is None:
+        data = {}
+
     # 1. 标题
-    draw.text((60, 36), "A股近 5 日板块轮动与节奏深度复盘", fill=TEXT_MAIN, font=font_title)
-    draw_pill(draw, "分析区间: 8月24日(T-4) ~ 8月28日(T日)", (W - 350, 40), bg_color="#f8fafc" if is_light else "#1e293b", text_color=TEXT_MUTED, font=font_micro)
+    draw.text((60, 36), data.get("title", "A股近 5 日板块轮动与节奏深度复盘"), fill=TEXT_MAIN, font=font_title)
+    draw_pill(draw, f"分析区间: {data.get('date_range', '8月24日(T-4) ~ 8月28日(T日)')}", (W - 350, 40), bg_color="#f8fafc" if is_light else "#1e293b", text_color=TEXT_MUTED, font=font_micro)
     draw_pill(draw, "中期轮动推演", (W - 470, 40), bg_color="#f0f9ff" if is_light else "#082f49", text_color=PRIMARY, font=font_micro)
     draw.line([(60, 85), (W - 60, 85)], fill=BORDER_DIVIDER, width=1)
 
     # 2. 5大核心速览
-    top_metrics = [
-        ("总量环境定性", "【存量轮动】", COLOR_WARN),
-        ("当前轮动状态", "State 2 畏高切低", PRIMARY),
-        ("主线衰竭 SEI", "64 / 100 [严重衰竭]", COLOR_UP),
-        ("收盘情绪温度", "30 / 100 [偏低分化]", COLOR_WARN),
-        ("高低切流向", "农业种植 / 基础化工", COLOR_DOWN),
-    ]
+    summary_raw = data.get("summary", [
+        ("总量环境定性", "【存量轮动】"),
+        ("当前轮动状态", "State 2 畏高切低"),
+        ("主线衰竭 SEI", "64 / 100 [严重衰竭]"),
+        ("收盘情绪温度", "30 / 100 [偏低分化]"),
+        ("高低切流向", "农业种植 / 基础化工")
+    ])
+
+    def _summary_color(label, val):
+        if "SEI" in label:
+            return COLOR_UP
+        if "总量" in label:
+            return COLOR_UP if "增量" in str(val) else COLOR_WARN
+        if "轮动状态" in label:
+            return PRIMARY if "主升" in str(val) else COLOR_WARN
+        if "情绪" in label:
+            return COLOR_WARN
+        return COLOR_DOWN
+
+    top_metrics = [(l, v, _summary_color(l, v)) for l, v in summary_raw]
 
     card_w = (W - 120 - 40) // 5
     card_y = 105
@@ -619,13 +658,13 @@ def render_sector_rotation_card(data=None, output_path="sector_rotation_card.png
 
     # 左侧：5日量能
     draw.text((60, curr_y), "[5日量能走向] 两市成交额及环比", fill=PRIMARY, font=font_h3)
-    vol_data = [
+    vol_data = data.get("volume_5d", [
         ("T-4", "8月24日 (周一)", "约 2.01 万亿", "放量 +1282亿", "放量杀跌"),
         ("T-3", "8月25日 (周二)", "约 1.84 万亿", "缩量 -1769亿", "缩量普涨"),
         ("T-2", "8月26日 (周三)", "约 1.82 万亿", "缩量 -231亿", "阶段地量"),
         ("T-1", "8月27日 (周四)", "约 2.13 万亿", "放量 +3172亿", "放量上攻"),
         ("T日", "8月28日 (周五)", "约 2.12 万亿", "缩量 -232亿", "缩量分化")
-    ]
+    ])
     for v_i, r in enumerate(vol_data):
         vy = curr_y + 24 + v_i * 20
         draw.text((60, vy), f"{r[0]} ({r[1]}): {r[2]} | {r[3]} -> {r[4]}", fill=TEXT_SUB, font=font_micro)
@@ -633,13 +672,13 @@ def render_sector_rotation_card(data=None, output_path="sector_rotation_card.png
     # 右侧：主力流入/流出
     rx = 60 + col_w + 40
     draw.text((rx, curr_y), "[主力资金流向] 净流入/流出 Top3", fill=PRIMARY, font=font_h3)
-    in_out_details = [
+    in_out_details = data.get("fund_flow", [
         ("[流入 Top1]", "基础化工: T日主力资金净流入居首，化肥农化走强"),
         ("[流入 Top2]", "专用设备: T-3日净流入41.54亿，智能制造底仓"),
         ("[流入 Top3]", "有色金属: T-2日净流入超百亿，大宗商品涨价驱动"),
         ("[流出 Top1]", "电子/半导体: T日净流出居首，科技高潮次日大出逃"),
         ("[流出 Top2]", "电池/新能源: T-3日净流出26.16亿，反弹持续性不足")
-    ]
+    ])
     for io_i, (t, d) in enumerate(in_out_details):
         iy = curr_y + 24 + io_i * 20
         draw.text((rx, iy), f"• {t}: {d}", fill=TEXT_SUB, font=font_micro)
@@ -649,40 +688,54 @@ def render_sector_rotation_card(data=None, output_path="sector_rotation_card.png
     # 4. 模块 02：主线角逐与跷跷板
     curr_y = draw_section_header("02  主线角逐与资金博弈 (机构趋势 vs 游资连板 & 跷跷板吸血)", curr_y)
     draw.text((60, curr_y), "[机构趋势方向]", fill=PRIMARY, font=font_h3)
-    draw.text((60, curr_y + 24), "农林牧渔(+6.5%)、煤炭(+5.1%)、基础化工(+3.9%) 获主力持续流入", fill=TEXT_MAIN, font=font_micro)
-    draw.text((60, curr_y + 44), "机构席位加仓: 嘉立创(净买2.53亿)、肯特股份(净买6989万)", fill=TEXT_MAIN, font=font_micro)
-    draw.text((60, curr_y + 64), "机构风险预警: 散户接盘：电子板块T-1大幅流入后T日即反手出货", fill=COLOR_UP, font=font_micro)
+    institution_lines = data.get("institution_lines", [
+        "农林牧渔(+6.5%)、煤炭(+5.1%)、基础化工(+3.9%) 获主力持续流入",
+        "机构席位加仓: 嘉立创(净买2.53亿)、肯特股份(净买6989万)",
+        "机构风险预警: 散户接盘：电子板块T-1大幅流入后T日即反手出货"
+    ])
+    for i_i, line in enumerate(institution_lines):
+        inst_color = COLOR_UP if ("风险" in line or "预警" in line or "出货" in line) else TEXT_MAIN
+        draw.text((60, curr_y + 24 + i_i * 20), line, fill=inst_color, font=font_micro)
 
     draw.text((rx, curr_y), "[游资连板穿越与跷跷板]", fill=PRIMARY, font=font_h3)
-    draw.text((rx, curr_y + 24), "连板标杆: 深中华A(6连板)、万向德农(8天5板涨停穿越)", fill=TEXT_MAIN, font=font_micro)
-    draw.text((rx, curr_y + 44), "风险大面: 汉森制药(6连板炸板跳水，T日再跌 -6.35%)", fill=COLOR_UP, font=font_micro)
-    draw.text((rx, curr_y + 64), "跷跷板拉锯: 高位科技成长派发流出，资金直接切换至低位农业/化工", fill=COLOR_WARN, font=font_micro)
+    hotmoney_lines = data.get("hotmoney_lines", [
+        "连板标杆: 深中华A(6连板)、万向德农(8天5板涨停穿越)",
+        "风险大面: 汉森制药(6连板炸板跳水，T日再跌 -6.35%)",
+        "跷跷板拉锯: 高位科技成长派发流出，资金直接切换至低位农业/化工"
+    ])
+    for h_i, line in enumerate(hotmoney_lines):
+        hot_color = COLOR_UP if ("风险" in line or "大面" in line or "炸板" in line) else (COLOR_WARN if "跷跷板" in line or "切换" in line else TEXT_MAIN)
+        draw.text((rx, curr_y + 24 + h_i * 20), line, fill=hot_color, font=font_micro)
 
     curr_y += 105
 
     # 5. 模块 03：SEI 衰竭指数与产业链传导
     curr_y = draw_section_header("03  产业链传导与核心主线衰竭指数 (SEI) 深度量化", curr_y)
-    sei_items = [
-        ("量价背离度得分", "28 / 40 分", "严重放量滞涨 / 阴跌", COLOR_UP),
-        ("接力与炸板风险", "12 / 30 分", "高位松动 / 龙头断板", COLOR_WARN),
-        ("资金溢出高低切", "24 / 30 分", "主力大幅撤离涌向低位", COLOR_UP),
-        ("SEI 综合衰竭得分", "64 / 100 分", "【动能严重衰竭 / 高低切】", COLOR_UP)
-    ]
+    sei_items = data.get("sei_breakdown", [
+        ("量价背离度得分", "28 / 40 分", "严重放量滞涨 / 阴跌"),
+        ("接力与炸板风险", "12 / 30 分", "高位松动 / 龙头断板"),
+        ("资金溢出高低切", "24 / 30 分", "主力大幅撤离涌向低位"),
+        ("SEI 综合衰竭得分", "64 / 100 分", "【动能严重衰竭 / 高低切】")
+    ])
     sei_w = (W - 120 - 30) // 4
-    for s_i, (l, v, sub, c) in enumerate(sei_items):
+    for s_i, (l, v, sub) in enumerate(sei_items):
+        sei_color = COLOR_UP if ("衰竭" in sub or "滞涨" in sub or "撤离" in sub or "阴跌" in sub) else COLOR_WARN
         sx = 60 + s_i * (sei_w + 10)
         draw.rounded_rectangle([sx, curr_y, sx + sei_w, curr_y + 65], radius=4, fill=BG_SECTION, outline=BORDER_LIGHT, width=1)
         draw.text((sx + 10, curr_y + 8), l, fill=TEXT_MUTED, font=font_micro)
-        draw.text((sx + 10, curr_y + 26), v, fill=c, font=get_font(17, bold=True))
+        draw.text((sx + 10, curr_y + 26), v, fill=sei_color, font=get_font(17, bold=True))
         draw.text((sx + 10, curr_y + 48), sub, fill=TEXT_MAIN, font=get_font(11))
 
     curr_y += 80
-    draw.text((60, curr_y), "• 农业产业链 (强化主线): 化肥/农药 -> 种植业/种业 -> 农产品加工 (高层调研+APEC催化，万向德农涨停)", fill=TEXT_SUB, font=font_micro)
-    curr_y += 20
-    draw.text((60, curr_y), "• 科技硬件链 (脉冲退潮): 材料设备 -> 芯片/PCB/光模块 -> AI算力 (英伟达催化后放量见顶，半导体-2.12% 坚决派发)", fill=TEXT_SUB, font=font_micro)
-    curr_y += 20
-    draw.text((60, curr_y), "• 基础化工链 (低位补涨): 化学原料 -> 精细化学制品 -> 农化制品 (主力T日净流入居首，承接科技流出资金)", fill=TEXT_SUB, font=font_micro)
-    curr_y += 30
+    chain_lines = data.get("chain_lines", [
+        "• 农业产业链 (强化主线): 化肥/农药 -> 种植业/种业 -> 农产品加工 (高层调研+APEC催化，万向德农涨停)",
+        "• 科技硬件链 (脉冲退潮): 材料设备 -> 芯片/PCB/光模块 -> AI算力 (英伟达催化后放量见顶，半导体-2.12% 坚决派发)",
+        "• 基础化工链 (低位补涨): 化学原料 -> 精细化学制品 -> 农化制品 (主力T日净流入居首，承接科技流出资金)"
+    ])
+    for line in chain_lines:
+        draw.text((60, curr_y), line, fill=TEXT_SUB, font=font_micro)
+        curr_y += 20
+    curr_y += 10
 
     # 6. 模块 04：5日情绪走向与锚点
     curr_y = draw_section_header("04  5 日情绪指标走向与中军/龙头盘前观察锚点", curr_y)
@@ -694,29 +747,41 @@ def render_sector_rotation_card(data=None, output_path="sector_rotation_card.png
     draw.line([(60, curr_y), (W - 60, curr_y)], fill=BORDER_LIGHT, width=1)
     curr_y += 10
 
-    sent_data = [
+    sent_data = data.get("sentiment_5d", [
         ("T-4", "8月24日 (周一)", "~27% (1460家红)", "36.36%", "26.0%", "冰点杀跌", "24 / 100"),
         ("T-3", "8月25日 (周二)", "~78% (4200家红)", "估算 ~35%", "估算 ~25%", "超跌修复", "68 / 100"),
         ("T-2", "8月26日 (周三)", "~55% (2946家红)", "估算 ~30%", "33.33%", "温和整理", "52 / 100"),
         ("T-1", "8月27日 (周四)", "~63% (3300家红)", "61.54%", "18.0%", "高潮加速", "82 / 100"),
         ("T日", "8月28日 (周五)", "~56% (3000家红)", "估算 ~30%", "估算 ~22%", "分化降温", "30 / 100")
-    ]
+    ])
+
+    def _pct(text):
+        num = ""
+        for ch in str(text):
+            if ch.isdigit() or ch == ".":
+                num += ch
+            elif num:
+                break
+        return float(num) if num else None
+
     for r in sent_data:
+        hong, promote, zhaban = _pct(r[2]), _pct(r[3]), _pct(r[4])
         draw.text((sent_col_x[0], curr_y), r[0], fill=PRIMARY, font=font_micro)
         draw.text((sent_col_x[1], curr_y), r[1], fill=TEXT_MAIN, font=font_micro)
-        draw.text((sent_col_x[2], curr_y), r[2], fill=COLOR_UP if "78%" in r[2] or "63%" in r[2] else COLOR_DOWN, font=font_micro)
-        draw.text((sent_col_x[3], curr_y), r[3], fill=COLOR_UP if "61%" in r[3] else TEXT_MAIN, font=font_micro)
-        draw.text((sent_col_x[4], curr_y), r[4], fill=COLOR_DOWN if "18%" in r[4] else COLOR_UP, font=font_micro)
-        draw.text((sent_col_x[5], curr_y), r[5], fill=COLOR_WARN if "分化" in r[5] else (COLOR_UP if "高潮" in r[5] else TEXT_MAIN), font=font_micro)
+        draw.text((sent_col_x[2], curr_y), r[2], fill=COLOR_UP if (hong is not None and hong >= 50) else COLOR_DOWN, font=font_micro)
+        draw.text((sent_col_x[3], curr_y), r[3], fill=COLOR_UP if (promote is not None and promote >= 40) else TEXT_MAIN, font=font_micro)
+        draw.text((sent_col_x[4], curr_y), r[4], fill=COLOR_UP if (zhaban is not None and zhaban < 25) else COLOR_DOWN, font=font_micro)
+        sent_color = COLOR_UP if ("高潮" in r[5] or "修复" in r[5]) else (COLOR_WARN if ("分化" in r[5] or "整理" in r[5] or "降温" in r[5]) else TEXT_MAIN)
+        draw.text((sent_col_x[5], curr_y), r[5], fill=sent_color, font=font_micro)
         draw.text((sent_col_x[6], curr_y), r[6], fill=PRIMARY, font=font_micro)
         curr_y += 24
         draw.line([(60, curr_y), (W - 60, curr_y)], fill=BORDER_LIGHT, width=1)
         curr_y += 6
 
     curr_y += 10
-    draw.text((60, curr_y), "[中军锚点] 中际旭创(成交280亿) 若竞价低开 > -2%，确认机构继续派发；科技板块短期需坚决回避。", fill=COLOR_UP, font=font_micro)
+    draw.text((60, curr_y), data.get("zhongjun_anchor", "[中军锚点] 中际旭创(成交280亿) 若竞价低开 > -2%，确认机构继续派发；科技板块短期需坚决回避。"), fill=COLOR_UP, font=font_micro)
     curr_y += 20
-    draw.text((60, curr_y), "[龙头锚点] 万向德农(8天5板) 若竞价高开 > 7% 并快速封板，确认农业情绪延续；若高开低走需防补涨熄火。", fill=PRIMARY, font=font_micro)
+    draw.text((60, curr_y), data.get("longtou_anchor", "[龙头锚点] 万向德农(8天5板) 若竞价高开 > 7% 并快速封板，确认农业情绪延续；若高开低走需防补涨熄火。"), fill=PRIMARY, font=font_micro)
     curr_y += 30
 
     # 7. 模块 05：次日盘前重点跟踪矩阵
@@ -729,12 +794,12 @@ def render_sector_rotation_card(data=None, output_path="sector_rotation_card.png
     draw.line([(60, curr_y), (W - 60, curr_y)], fill=BORDER_LIGHT, width=1)
     curr_y += 10
 
-    watchlist_rotation = [
+    watchlist_rotation = data.get("watchlist", [
         ("高低切潜力主线", "农业种植 / 种业", "万向德农 (600371)", "竞价爆量比 >= 5% 且高开 > 3%，关注首板与20cm弹性", "确认强承接后分歧低吸"),
         ("低位补涨方向", "基础化工 / 化肥", "新赛股份 (600540)", "观察主力资金是否持续净流入，前排封单是否坚决", "寻找 1 进 2 晋级机会"),
         ("老主线止跌观察", "半导体 / 算力硬件", "中际旭创 (300308)", "观察 MA20 均线支撑能否守住，早盘是否缩量企稳", "观望为主，暂不盲目抄底"),
         ("高危回避方向", "高位连续加速题材", "汉森制药 (002412)", "警惕获利盘竞价核按钮抛压，断板后负反馈扩散", "坚决回避，逢反抽离场")
-    ]
+    ])
     for row in watchlist_rotation:
         draw.text((wl_col_x[0], curr_y), row[0], fill=TEXT_MAIN, font=font_small)
         draw.text((wl_col_x[1], curr_y), row[1], fill=PRIMARY, font=font_small)
@@ -772,14 +837,14 @@ if __name__ == "__main__":
         else:
             out_file = "demo_report_card.png"
 
+    data = None
+    if args.json and not args.demo:
+        with open(args.json, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
     if args.type == "rotation":
-        render_sector_rotation_card(output_path=out_file, theme=args.theme)
+        render_sector_rotation_card(data=data, output_path=out_file, theme=args.theme)
     elif args.type == "daily":
-        render_daily_review_card(output_path=out_file, theme=args.theme)
+        render_daily_review_card(data=data, output_path=out_file, theme=args.theme)
     else:
-        if args.demo or not args.json:
-            render_report_card(output_path=out_file, theme=args.theme)
-        else:
-            with open(args.json, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            render_report_card(data, output_path=out_file, theme=args.theme)
+        render_report_card(data=data, output_path=out_file, theme=args.theme)

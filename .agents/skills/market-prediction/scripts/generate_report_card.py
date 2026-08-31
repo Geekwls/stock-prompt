@@ -10,6 +10,7 @@ import os
 import sys
 import json
 import argparse
+import re
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 
@@ -83,6 +84,50 @@ def draw_pill(draw, text, xy, bg_color="#f1f5f9", text_color="#334155", font=Non
     draw.text((x + 8, y + 2), text, fill=text_color, font=font)
     return w, h
 
+
+def _score_ratio(value):
+    """从 `86/100` 等展示值提取 0-1 比例；非评分文本返回 None。"""
+    match = re.search(r"(-?\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)", str(value))
+    if not match:
+        return None
+    numerator, denominator = map(float, match.groups())
+    if denominator <= 0:
+        return None
+    return max(0.0, min(1.0, numerator / denominator))
+
+
+def draw_score_bar(draw, x, y, width, value, color, track_color):
+    """为评分卡增加克制的进度条，强化数字层级。"""
+    ratio = _score_ratio(value)
+    if ratio is None:
+        return
+    draw.rounded_rectangle([x, y, x + width, y + 5], radius=2, fill=track_color)
+    if ratio > 0:
+        draw.rounded_rectangle([x, y, x + max(5, int(width * ratio)), y + 5], radius=2, fill=color)
+
+
+def draw_metric_cards(draw, metrics, width, y, bg_color, border_color, muted_color, font_label):
+    """绘制统一的顶部指标卡，并对 `x/100` 指标自动增加进度条。"""
+    gap = 10
+    left = 60
+    card_width = (width - 120 - gap * (len(metrics) - 1)) // len(metrics)
+    for index, (label, value, color) in enumerate(metrics):
+        x = left + index * (card_width + gap)
+        draw.rounded_rectangle(
+            [x, y, x + card_width, y + 90], radius=8,
+            fill=bg_color, outline=border_color, width=1,
+        )
+        draw.text((x + 14, y + 12), label, fill=muted_color, font=font_label)
+        draw.text((x + 14, y + 38), str(value), fill=color, font=get_font(19, bold=True))
+        draw_score_bar(draw, x + 14, y + 77, card_width - 28, value, color, border_color)
+
+
+def save_cropped_card(img, output_path, content_bottom, min_height=900):
+    """根据实际内容裁切画布，移除固定高度造成的大面积底部空白。"""
+    final_height = max(min_height, min(img.height, int(content_bottom)))
+    img.crop((0, 0, img.width, final_height)).save(output_path, "PNG")
+    return final_height
+
 def render_report_card(data=None, output_path="report_card.png", theme="light"):
     """
     极简高定风【盘前全景推演】长图渲染
@@ -115,24 +160,24 @@ def render_report_card(data=None, output_path="report_card.png", theme="light"):
         COLOR_WARN = "#fbbf24"
 
     W = 1200
-    H = 2480
+    H = 4000
     img = Image.new("RGBA", (W, H), BG_PAGE)
     draw = ImageDraw.Draw(img)
 
     # 顶部极细装饰线
     draw.rectangle([0, 0, W, 4], fill=PRIMARY)
 
-    font_title = get_font(30, bold=True)
-    font_h2 = get_font(19, bold=True)
-    font_h3 = get_font(16, bold=True)
-    font_body = get_font(15)
-    font_small = get_font(14)
-    font_micro = get_font(12)
+    font_title = get_font(32, bold=True)
+    font_h2 = get_font(20, bold=True)
+    font_h3 = get_font(17, bold=True)
+    font_body = get_font(16)
+    font_small = get_font(15)
+    font_micro = get_font(13)
 
     if data is None:
         data = {}
 
-    title_text = data.get("title", "A股盘前全景量化研判战报 (V3.0)")
+    title_text = data.get("title", "A股盘前全景量化研判战报 (V5.0)")
     date_str = data.get("date", datetime.now().strftime("%Y-%m-%d"))
 
     # 1. 标题与状态栏
@@ -150,22 +195,17 @@ def render_report_card(data=None, output_path="report_card.png", theme="light"):
         ("第一核心主线", data.get("top_sector", "半导体/算力 [强化期]"), PRIMARY),
     ]
 
-    card_w = (W - 120 - 40) // 5
-    card_y = 105
-    for i, (label, val, col) in enumerate(top_metrics):
-        cx = 60 + i * (card_w + 10)
-        draw.rounded_rectangle([cx, card_y, cx + card_w, card_y + 80], radius=6, fill=BG_SECTION, outline=BORDER_LIGHT, width=1)
-        draw.text((cx + 14, card_y + 12), label, fill=TEXT_MUTED, font=font_micro)
-        draw.text((cx + 14, card_y + 36), str(val), fill=col, font=get_font(18, bold=True))
+    draw_metric_cards(draw, top_metrics, W, 105, BG_SECTION, BORDER_LIGHT, TEXT_MUTED, font_micro)
 
-    curr_y = 210
+    curr_y = 220
 
     # 模块辅助函数：极简章节标题
     def draw_section_header(title_text, y):
-        draw.rectangle([60, y + 2, 64, y + 20], fill=PRIMARY)
-        draw.text((74, y), title_text, fill=TEXT_MAIN, font=font_h2)
-        draw.line([(60, y + 32), (W - 60, y + 32)], fill=BORDER_DIVIDER, width=1)
-        return y + 45
+        draw.rounded_rectangle([60, y - 5, W - 60, y + 31], radius=6, fill=BG_SECTION)
+        draw.rectangle([60, y - 5, 65, y + 31], fill=PRIMARY)
+        draw.text((78, y), title_text, fill=TEXT_MAIN, font=font_h2)
+        draw.line([(60, y + 36), (W - 60, y + 36)], fill=BORDER_DIVIDER, width=1)
+        return y + 50
 
     # 3. 模块 01：4大独立证据簇
     curr_y = draw_section_header("01  4 大独立证据簇与亚太早盘似然反馈 (8:30 黄金窗口)", curr_y)
@@ -347,12 +387,13 @@ def render_report_card(data=None, output_path="report_card.png", theme="light"):
     eval_w = (W - 120 - 40) // 5
     for i, (l, v, sub, c) in enumerate(eval_items_full):
         ex = 60 + i * (eval_w + 10)
-        draw.rounded_rectangle([ex, curr_y, ex + eval_w, curr_y + 65], radius=4, fill=BG_SECTION, outline=BORDER_LIGHT, width=1)
+        draw.rounded_rectangle([ex, curr_y, ex + eval_w, curr_y + 75], radius=6, fill=BG_SECTION, outline=BORDER_LIGHT, width=1)
         draw.text((ex + 10, curr_y + 8), l, fill=TEXT_MUTED, font=font_micro)
         draw.text((ex + 10, curr_y + 26), v, fill=c, font=get_font(17, bold=True))
         draw.text((ex + 10, curr_y + 48), sub, fill=TEXT_MUTED, font=get_font(11))
+        draw_score_bar(draw, ex + 10, curr_y + 66, eval_w - 20, v, c, BORDER_LIGHT)
 
-    curr_y += 85
+    curr_y += 95
     draw.text((60, curr_y), data.get("risk_warning", "[失效风险预警] 若早盘 USDCNH 汇率突发急贬 > 200 点 或 领航龙头开盘遭巨额砸盘，即时触发风控防御。"), fill=COLOR_UP, font=font_micro)
 
     curr_y += 35
@@ -360,8 +401,8 @@ def render_report_card(data=None, output_path="report_card.png", theme="light"):
     draw.text((60, curr_y + 12), "stock-prompt 量化研判引擎 | GitHub: Geekwls/stock-prompt", fill=TEXT_MUTED, font=font_micro)
     draw.text((W - 360, curr_y + 12), "免责声明：仅供量化研究参考，不构成任何投资建议", fill=COLOR_UP, font=font_micro)
 
-    img.save(output_path, "PNG")
-    print(f"Clean report card generated: {os.path.abspath(output_path)}")
+    final_height = save_cropped_card(img, output_path, curr_y + 58)
+    print(f"Clean report card generated: {os.path.abspath(output_path)} ({W}x{final_height})")
     return output_path
 
 def render_daily_review_card(data=None, output_path="daily_review_card.png", theme="light"):
@@ -396,18 +437,18 @@ def render_daily_review_card(data=None, output_path="daily_review_card.png", the
         COLOR_WARN = "#fbbf24"
 
     W = 1200
-    H = 2360
+    H = 4000
     img = Image.new("RGBA", (W, H), BG_PAGE)
     draw = ImageDraw.Draw(img)
 
     draw.rectangle([0, 0, W, 4], fill=PRIMARY)
 
-    font_title = get_font(30, bold=True)
-    font_h2 = get_font(19, bold=True)
-    font_h3 = get_font(16, bold=True)
-    font_body = get_font(15)
-    font_small = get_font(14)
-    font_micro = get_font(12)
+    font_title = get_font(32, bold=True)
+    font_h2 = get_font(20, bold=True)
+    font_h3 = get_font(17, bold=True)
+    font_body = get_font(16)
+    font_small = get_font(15)
+    font_micro = get_font(13)
 
     if data is None:
         data = {}
@@ -429,21 +470,16 @@ def render_daily_review_card(data=None, output_path="daily_review_card.png", the
         ("综合机会评分", f"{data.get('opportunity_score', 86)}/100 [优良]", COLOR_UP),
     ]
 
-    card_w = (W - 120 - 40) // 5
-    card_y = 105
-    for i, (label, val, col) in enumerate(top_metrics):
-        cx = 60 + i * (card_w + 10)
-        draw.rounded_rectangle([cx, card_y, cx + card_w, card_y + 80], radius=6, fill=BG_SECTION, outline=BORDER_LIGHT, width=1)
-        draw.text((cx + 14, card_y + 12), label, fill=TEXT_MUTED, font=font_micro)
-        draw.text((cx + 14, card_y + 36), str(val), fill=col, font=get_font(18, bold=True))
+    draw_metric_cards(draw, top_metrics, W, 105, BG_SECTION, BORDER_LIGHT, TEXT_MUTED, font_micro)
 
-    curr_y = 210
+    curr_y = 220
 
     def draw_section_header(title_text, y):
-        draw.rectangle([60, y + 2, 64, y + 20], fill=PRIMARY)
-        draw.text((74, y), title_text, fill=TEXT_MAIN, font=font_h2)
-        draw.line([(60, y + 32), (W - 60, y + 32)], fill=BORDER_DIVIDER, width=1)
-        return y + 45
+        draw.rounded_rectangle([60, y - 5, W - 60, y + 31], radius=6, fill=BG_SECTION)
+        draw.rectangle([60, y - 5, 65, y + 31], fill=PRIMARY)
+        draw.text((78, y), title_text, fill=TEXT_MAIN, font=font_h2)
+        draw.line([(60, y + 36), (W - 60, y + 36)], fill=BORDER_DIVIDER, width=1)
+        return y + 50
 
     # 3. 模块 01：情绪打分与总量环境
     curr_y = draw_section_header("01  市场情绪打分、量能环境与 Market Regime 状态定调", curr_y)
@@ -522,12 +558,13 @@ def render_daily_review_card(data=None, output_path="daily_review_card.png", the
     for r_i, (l, v, sub) in enumerate(res_items):
         card_color = COLOR_WARN if ("滞涨" in sub or "缩量" in sub or "单点" in sub) else (PRIMARY if "扩散" in l else COLOR_UP)
         rx_pos = 60 + r_i * (res_w + 10)
-        draw.rounded_rectangle([rx_pos, curr_y, rx_pos + res_w, curr_y + 65], radius=4, fill=BG_SECTION, outline=BORDER_LIGHT, width=1)
+        draw.rounded_rectangle([rx_pos, curr_y, rx_pos + res_w, curr_y + 75], radius=6, fill=BG_SECTION, outline=BORDER_LIGHT, width=1)
         draw.text((rx_pos + 10, curr_y + 8), l, fill=TEXT_MUTED, font=font_micro)
         draw.text((rx_pos + 10, curr_y + 26), v, fill=card_color, font=get_font(17, bold=True))
         draw.text((rx_pos + 10, curr_y + 48), sub, fill=TEXT_MAIN, font=get_font(11))
+        draw_score_bar(draw, rx_pos + 10, curr_y + 66, res_w - 20, v, card_color, BORDER_LIGHT)
 
-    curr_y += 80
+    curr_y += 90
     chain_lines = data.get("chain_lines", [
         "• 上游 (材料/EDA/设备): 北方华创、中微公司、雅克科技 -> 资金温和放量布局，机构席位逆势净加仓",
         "• 中游 (芯片/PCB/光模块): 中际旭创 (成交280亿)、胜宏科技、新易盛 -> 产业链爆发核心，资金延续评分 88，机构锁仓",
@@ -593,8 +630,8 @@ def render_daily_review_card(data=None, output_path="daily_review_card.png", the
     draw.text((60, curr_y + 12), "stock-prompt 每日产业链复盘引擎 | GitHub: Geekwls/stock-prompt", fill=TEXT_MUTED, font=font_micro)
     draw.text((W - 360, curr_y + 12), "免责声明：仅供量化研究参考，不构成任何投资建议", fill=COLOR_UP, font=font_micro)
 
-    img.save(output_path, "PNG")
-    print(f"Clean daily review report card generated: {os.path.abspath(output_path)}")
+    final_height = save_cropped_card(img, output_path, curr_y + 58)
+    print(f"Clean daily review report card generated: {os.path.abspath(output_path)} ({W}x{final_height})")
     return output_path
 
 def render_sector_rotation_card(data=None, output_path="sector_rotation_card.png", theme="light"):
@@ -629,18 +666,18 @@ def render_sector_rotation_card(data=None, output_path="sector_rotation_card.png
         COLOR_WARN = "#fbbf24"
 
     W = 1200
-    H = 2360
+    H = 4000
     img = Image.new("RGBA", (W, H), BG_PAGE)
     draw = ImageDraw.Draw(img)
 
     draw.rectangle([0, 0, W, 4], fill=PRIMARY)
 
-    font_title = get_font(30, bold=True)
-    font_h2 = get_font(19, bold=True)
-    font_h3 = get_font(16, bold=True)
-    font_body = get_font(15)
-    font_small = get_font(14)
-    font_micro = get_font(12)
+    font_title = get_font(32, bold=True)
+    font_h2 = get_font(20, bold=True)
+    font_h3 = get_font(17, bold=True)
+    font_body = get_font(16)
+    font_small = get_font(15)
+    font_micro = get_font(13)
 
     if data is None:
         data = {}
@@ -673,21 +710,16 @@ def render_sector_rotation_card(data=None, output_path="sector_rotation_card.png
 
     top_metrics = [(l, v, _summary_color(l, v)) for l, v in summary_raw]
 
-    card_w = (W - 120 - 40) // 5
-    card_y = 105
-    for i, (label, val, col) in enumerate(top_metrics):
-        cx = 60 + i * (card_w + 10)
-        draw.rounded_rectangle([cx, card_y, cx + card_w, card_y + 80], radius=6, fill=BG_SECTION, outline=BORDER_LIGHT, width=1)
-        draw.text((cx + 14, card_y + 12), label, fill=TEXT_MUTED, font=font_micro)
-        draw.text((cx + 14, card_y + 36), str(val), fill=col, font=get_font(18, bold=True))
+    draw_metric_cards(draw, top_metrics, W, 105, BG_SECTION, BORDER_LIGHT, TEXT_MUTED, font_micro)
 
-    curr_y = 210
+    curr_y = 220
 
     def draw_section_header(title_text, y):
-        draw.rectangle([60, y + 2, 64, y + 20], fill=PRIMARY)
-        draw.text((74, y), title_text, fill=TEXT_MAIN, font=font_h2)
-        draw.line([(60, y + 32), (W - 60, y + 32)], fill=BORDER_DIVIDER, width=1)
-        return y + 45
+        draw.rounded_rectangle([60, y - 5, W - 60, y + 31], radius=6, fill=BG_SECTION)
+        draw.rectangle([60, y - 5, 65, y + 31], fill=PRIMARY)
+        draw.text((78, y), title_text, fill=TEXT_MAIN, font=font_h2)
+        draw.line([(60, y + 36), (W - 60, y + 36)], fill=BORDER_DIVIDER, width=1)
+        return y + 50
 
     # 3. 模块 01：5日量能与资金流向
     curr_y = draw_section_header("01  5 日成交额走势与主力资金行业流向定调", curr_y)
@@ -758,12 +790,13 @@ def render_sector_rotation_card(data=None, output_path="sector_rotation_card.png
     for s_i, (l, v, sub) in enumerate(sei_items):
         sei_color = COLOR_UP if ("衰竭" in sub or "滞涨" in sub or "撤离" in sub or "阴跌" in sub) else COLOR_WARN
         sx = 60 + s_i * (sei_w + 10)
-        draw.rounded_rectangle([sx, curr_y, sx + sei_w, curr_y + 65], radius=4, fill=BG_SECTION, outline=BORDER_LIGHT, width=1)
+        draw.rounded_rectangle([sx, curr_y, sx + sei_w, curr_y + 75], radius=6, fill=BG_SECTION, outline=BORDER_LIGHT, width=1)
         draw.text((sx + 10, curr_y + 8), l, fill=TEXT_MUTED, font=font_micro)
         draw.text((sx + 10, curr_y + 26), v, fill=sei_color, font=get_font(17, bold=True))
         draw.text((sx + 10, curr_y + 48), sub, fill=TEXT_MAIN, font=get_font(11))
+        draw_score_bar(draw, sx + 10, curr_y + 66, sei_w - 20, v, sei_color, BORDER_LIGHT)
 
-    curr_y += 80
+    curr_y += 90
     chain_lines = data.get("chain_lines", [
         "• 农业产业链 (强化主线): 化肥/农药 -> 种植业/种业 -> 农产品加工 (高层调研+APEC催化，万向德农涨停)",
         "• 科技硬件链 (脉冲退潮): 材料设备 -> 芯片/PCB/光模块 -> AI算力 (英伟达催化后放量见顶，半导体-2.12% 坚决派发)",
@@ -852,8 +885,8 @@ def render_sector_rotation_card(data=None, output_path="sector_rotation_card.png
     draw.text((60, curr_y + 12), "stock-prompt 量化研判引擎 | GitHub: Geekwls/stock-prompt", fill=TEXT_MUTED, font=font_micro)
     draw.text((W - 360, curr_y + 12), "免责声明：仅供量化研究参考，不构成任何投资建议", fill=COLOR_UP, font=font_micro)
 
-    img.save(output_path, "PNG")
-    print(f"Clean sector rotation report card generated: {os.path.abspath(output_path)}")
+    final_height = save_cropped_card(img, output_path, curr_y + 58)
+    print(f"Clean sector rotation report card generated: {os.path.abspath(output_path)} ({W}x{final_height})")
     return output_path
 
 if __name__ == "__main__":

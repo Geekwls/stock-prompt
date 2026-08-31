@@ -11,11 +11,11 @@
 ```text
 stock-prompt/
 ├── .agents/skills/                    # 🤖 Antigravity / Agent 专用 Skill 目录
-│   ├── market-prediction/             # 🌅 技能 1 (盘前)：大盘点位 + 行业主线 + 竞价全景研判 (V3.0)
+│   ├── market-prediction/             # 🌅 技能 1 (盘前)：大盘点位 + 行业主线 + 竞价全景研判 (V5.0)
 │   ├── daily-review/                  # 🌇 技能 2 (盘后)：每日强势板块产业链共振深度复盘
 │   └── sector-rotation/               # 🔄 技能 3 (中期)：近5日板块轮动与节奏深度推演
 │
-├── prompts/                           # 📄 面向其他平台的精简 Markdown 提示词库
+├── prompts/                           # 📄 从 Skill 母本同步生成的跨平台 Markdown 提示词库
 │   ├── market-prediction/             # 🌅 盘前全景研判
 │   │   └── A股盘前全景策略研判.md
 │   ├── daily-review/                  # 🌇 盘后共振复盘
@@ -25,6 +25,7 @@ stock-prompt/
 │
 ├── scripts/                           # 🛠 自动化工具库
 │   ├── generate_report_card.py        # 🎨 高清深色科技风战报长图自动生成脚本
+│   ├── sync_prompts.py                 # 🔁 Skill → Prompt 同步及漂移检查
 │   ├── update.bat                     # 🔄 Windows 自动更新脚本
 │   └── update.sh                      # 🔄 Linux/Mac 自动更新脚本
 ├── CHANGELOG.md                       # 项目主版本日志
@@ -69,7 +70,7 @@ python3 scripts/generate_report_card.py --demo --type daily --theme dark
 ### 方式二：在 Workbuddy / Cursor / Windsurf 等 AI 开发工具中使用
 如果你或你的朋友使用 **Workbuddy**、**Cursor** 或 **Windsurf**：
 - **项目级集成**：直接 Clone 本项目作为 Workspace，Workbuddy / Cursor 会自动识别并索引 `.agents/` 目录中的技能与规则。
-- **自定义提示词库**：在 Workbuddy 的 Prompt/Rule 管理面板中，新增自定义提示词，将 `prompts/` 对应目录下的 `.md` 主文件全文粘贴保存，即可随用随点。
+- **自定义提示词库**：在 Workbuddy 的 Prompt/Rule 管理面板中，新增自定义提示词，将 `prompts/` 对应目录下的 `.md` 主文件全文粘贴保存，即可随用随点。Prompt 由对应 `SKILL.md` 自动生成，请勿单独维护两份规则。
 
 ---
 
@@ -97,13 +98,20 @@ python3 scripts/generate_report_card.py --demo --type daily --theme dark
 
 ## 🧠 核心分析逻辑与防幻觉机制
 
-1. **严谨的数据降级与防幻觉**：所有提示词均设有严格的**数据缺失处理规则**，当关键数据获取受限时强制按照中性或定性规则推演，防止 AI 编造假数据。
+1. **严谨的数据覆盖率与防幻觉**：所有提示词均设有 `Data Coverage` 和缺失值规则；关键覆盖率不足时只输出条件情景，不用中性值、0分或示例行情伪造精确结论。
 2. **贝叶斯先验与机会函数双解耦**：大盘四维立体空间点位（ATR波动率 + 筹码POC + 期权对冲墙）界定安全边际，机会评分 (Opportunity Score) 解耦方向与盈亏比。
 3. **多维闭环自检**：引入 Brier Score、校准度 (Calibration) 与锐度 (Sharpness) 持续追踪模型效能。
 
 ---
 
 ## 🚀 首次安装与一键更新
+
+三份跨平台 Prompt 以 `.agents/skills/*/SKILL.md` 为唯一母本。修改 Skill 后运行：
+
+```bash
+python3 scripts/sync_prompts.py
+python3 scripts/sync_prompts.py --check
+```
 
 本仓库内置完整的**独立分发与更新机制**，使用者无需手动拷贝技能文件。
 

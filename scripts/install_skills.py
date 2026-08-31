@@ -16,8 +16,8 @@ def install_skills():
     generator_script = os.path.abspath(os.path.join(os.path.dirname(__file__), "generate_report_card.py"))
 
     destinations = [
-        os.path.expanduser(r"~\.gemini\skills"),
-        os.path.expanduser(r"~\.gemini\antigravity\skills"),
+        os.path.join(os.path.expanduser("~"), ".gemini", "skills"),
+        os.path.join(os.path.expanduser("~"), ".gemini", "antigravity", "skills"),
     ]
 
     skill_names = ["daily-review", "market-prediction", "sector-rotation"]

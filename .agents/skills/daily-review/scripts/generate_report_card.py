@@ -1015,7 +1015,7 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
     col_w = (W - 120 - 40) // 2
 
     # 左侧：市场环境
-    draw.text((60, curr_y), "[市场大盘环境] 顺风驱动 [顺]", fill=PRIMARY, font=font_h3)
+    draw.text((60, curr_y), f"[市场大盘环境] {data.get('market_wind', 'N/A')}", fill=PRIMARY, font=font_h3)
     market_details = data.get("market_details", [
         ("指数趋势", "上证处于 MA20/MA60 多头排列上方，良性主升"),
         ("量能环境", "两市全天成交 2.12 万亿，增量攻坚资金充沛"),
@@ -1029,7 +1029,7 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
 
     # 右侧：板块共振
     rx = 60 + col_w + 40
-    draw.text((rx, curr_y), "[板块主线共振] 核心主线中军 [主]", fill=PRIMARY, font=font_h3)
+    draw.text((rx, curr_y), f"[板块主线共振] {data.get('sector_role', 'N/A')}", fill=PRIMARY, font=font_h3)
     sector_details = data.get("sector_details", [
         ("所属行业", "通信设备 / ICT 算力设备与交换机龙头"),
         ("核心概念", "算力基础设施、AI 服务器、CPO 光通信"),
@@ -1077,10 +1077,10 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
     # 4. 模块 03：相对强度 (RS) 与动量引擎
     curr_y = draw_section_header("03  相对强度 (RS Engine) 与动量加速度深度量化", curr_y)
     rs_items = [
-        ("RS 5D 超额", data.get("rs_5d", "+6.8%"), "近5日显著强于大盘", COLOR_UP),
-        ("RS 20D 超额", data.get("rs_20d", "+18.4%"), "波段趋势超额显著", COLOR_UP),
-        ("全市场 RS 分位", data.get("rs_percentile", "Top 12%"), "全市场动量第一梯队", PRIMARY),
-        ("RS 加速度", data.get("rs_acc", "Slope > 0 陡峭"), "新增做多资金持续流入", COLOR_DOWN)
+        ("RS 5D 超额", data.get("rs_5d", "N/A"), data.get("rs_5d_note", "缺少同期基准"), COLOR_WARN),
+        ("RS 20D 超额", data.get("rs_20d", "N/A"), data.get("rs_20d_note", "缺少同期基准"), COLOR_WARN),
+        ("全市场 RS 分位", data.get("rs_percentile", "N/A"), data.get("rs_percentile_note", "缺少横截面股票池"), PRIMARY),
+        ("RS 加速度", data.get("rs_acc", "N/A"), data.get("rs_acc_note", "缺少完整历史行情"), COLOR_WARN)
     ]
     rs_w = (W - 120 - 30) // 4
     for r_i, (l, v, sub, c) in enumerate(rs_items):

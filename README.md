@@ -144,6 +144,14 @@ scripts\update.bat
 
 ---
 
+## 🗺️ 未来演进路线 (Roadmap)
+
+项目正持续从“4 个独立的分析技能”演进为“全天候跨 Skill 交易闭环协同流水线”：
+- 详细设计方案与实施阶段规划见：[📖 跨 Skill 交易闭环协同流水线计划 (docs/ROADMAP_CROSS_SKILL_PIPELINE.md)](docs/ROADMAP_CROSS_SKILL_PIPELINE.md)
+
+---
+
 ## 🤝 贡献与反馈
 
 欢迎提交 PR 或 Issue 共同完善 A 股 AI 策略提示词库！
+

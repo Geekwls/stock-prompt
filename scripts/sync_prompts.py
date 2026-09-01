@@ -3,6 +3,7 @@
 
 import argparse
 import difflib
+import re
 import sys
 from pathlib import Path
 
@@ -13,18 +14,21 @@ if hasattr(sys.stdout, 'reconfigure'):
 ROOT = Path(__file__).resolve().parent.parent
 MAPPINGS = {
     ROOT / ".agents/skills/daily-review/SKILL.md":
-        ROOT / "prompts/daily-review/每天强势板块产业链共振分析.md",
+        ROOT / "prompts/daily-review/A股每日主线与产业链共振复盘.md",
     ROOT / ".agents/skills/market-prediction/SKILL.md":
-        ROOT / "prompts/market-prediction/A股盘前全景策略研判.md",
+        ROOT / "prompts/market-prediction/A股盘前全景研判与概率推演.md",
     ROOT / ".agents/skills/sector-rotation/SKILL.md":
-        ROOT / "prompts/sector-rotation/5日内板块轮动节奏分析.md",
+        ROOT / "prompts/sector-rotation/A股近5日板块轮动与节奏复盘.md",
     ROOT / ".agents/skills/stock-analysis/SKILL.md":
-        ROOT / "prompts/stock-analysis/A股个股深度分析与威科夫结构研判.md",
+        ROOT / "prompts/stock-analysis/A股个股完整诊断与威科夫结构研判.md",
 }
 
 
-def prompt_body(skill_text: str) -> str:
-    """移除 SKILL.md 的 YAML frontmatter，保留完整 Markdown 正文。"""
+INCLUDE_RE = re.compile(r"^[ \t]*<!-- PROMPT_INCLUDE: ([^>]+) -->[ \t]*$", re.MULTILINE)
+
+
+def prompt_body(skill_text: str, skill_path: Path) -> str:
+    """移除 frontmatter，并将 Skill 的本地引用展开为可独立使用的 Prompt。"""
     lines = skill_text.splitlines(keepends=True)
     if not lines or lines[0].strip() != "---":
         raise ValueError("SKILL.md 缺少起始 YAML frontmatter 分隔符")
@@ -34,14 +38,28 @@ def prompt_body(skill_text: str) -> str:
             body = "".join(lines[index + 1:]).lstrip("\r\n").rstrip()
             if not body:
                 raise ValueError("SKILL.md frontmatter 后没有 Markdown 正文")
-            return body + "\n"
+            skill_root = skill_path.parent.resolve()
+
+            def expand_include(match):
+                relative_path = match.group(1).strip()
+                include_path = (skill_root / relative_path).resolve()
+                try:
+                    include_path.relative_to(skill_root)
+                except ValueError as exc:
+                    raise ValueError(f"引用越出 Skill 目录: {relative_path}") from exc
+                if not include_path.is_file():
+                    raise ValueError(f"引用文件不存在: {include_path}")
+                content = include_path.read_text(encoding="utf-8").strip()
+                return f"<!-- 已从 {relative_path} 展开 -->\n\n{content}"
+
+            return INCLUDE_RE.sub(expand_include, body) + "\n"
     raise ValueError("SKILL.md 缺少结束 YAML frontmatter 分隔符")
 
 
 def sync(check_only: bool) -> int:
     drifted = 0
     for skill_path, prompt_path in MAPPINGS.items():
-        expected = prompt_body(skill_path.read_text(encoding="utf-8"))
+        expected = prompt_body(skill_path.read_text(encoding="utf-8"), skill_path)
         actual = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
         label = prompt_path.relative_to(ROOT)
 

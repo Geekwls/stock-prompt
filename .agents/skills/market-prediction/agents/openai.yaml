@@ -1,0 +1,4 @@
+interface:
+  display_name: "A股盘前研判"
+  short_description: "盘前研判市场环境、指数空间、主线机会、竞价变化与概率情景"
+  default_prompt: "使用 $market-prediction 完成今日A股盘前全景研判。"

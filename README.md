@@ -11,20 +11,20 @@
 ```text
 stock-prompt/
 ├── .agents/skills/                    # 🤖 Antigravity / Agent 专用 Skill 目录
-│   ├── market-prediction/             # 🌅 技能 1 (盘前)：大盘点位 + 行业主线 + 竞价全景研判 (V5.0)
-│   ├── daily-review/                  # 🌇 技能 2 (盘后)：每日强势板块产业链共振深度复盘
-│   ├── sector-rotation/               # 🔄 技能 3 (中期)：近5日板块轮动与节奏深度推演
-│   └── stock-analysis/                # 🔍 技能 4 (个股)：个股深度分析与威科夫量价结构研判
+│   ├── market-prediction/             # 🌅 技能 1：A股盘前研判
+│   ├── daily-review/                  # 🌇 技能 2：A股每日复盘
+│   ├── sector-rotation/               # 🔄 技能 3：A股板块轮动
+│   └── stock-analysis/                # 🔍 技能 4：A股个股诊断
 │
 ├── prompts/                           # 📄 从 Skill 母本同步生成的跨平台 Markdown 提示词库
-│   ├── market-prediction/             # 🌅 盘前全景研判
-│   │   └── A股盘前全景策略研判.md
-│   ├── daily-review/                  # 🌇 盘后共振复盘
-│   │   └── 每天强势板块产业链共振分析.md
-│   ├── sector-rotation/               # 🔄 近5日轮动节奏
-│   │   └── 5日内板块轮动节奏分析.md
-│   └── stock-analysis/                # 🔍 个股威科夫研判
-│       └── A股个股深度分析与威科夫结构研判.md
+│   ├── market-prediction/             # 🌅 A股盘前研判
+│   │   └── A股盘前全景研判与概率推演.md
+│   ├── daily-review/                  # 🌇 A股每日复盘
+│   │   └── A股每日主线与产业链共振复盘.md
+│   ├── sector-rotation/               # 🔄 A股板块轮动
+│   │   └── A股近5日板块轮动与节奏复盘.md
+│   └── stock-analysis/                # 🔍 A股个股诊断
+│       └── A股个股完整诊断与威科夫结构研判.md
 │
 ├── scripts/                           # 🛠 自动化工具库
 │   ├── generate_report_card.py        # 🎨 高清极简金融研报长图自动生成脚本 (支持 prediction/daily/rotation/stock)
@@ -44,7 +44,7 @@ stock-prompt/
 项目内置了全自动 Python 研报长图生成器 (`scripts/generate_report_card.py`)，支持将四大核心场景的全量量化数据一键渲染为极简金融研报风长图（支持浅色/深色主题）：
 
 ```bash
-# 1. 个股深度量化与威科夫结构研报长图 (输入任意个股使用)
+# 1. 个股完整诊断与威科夫结构研报长图 (输入任意个股使用)
 python3 scripts/generate_report_card.py --demo --type stock
 
 # 2. 每日收盘强势板块与产业链复盘长图 (15:00 收盘后使用)
@@ -71,6 +71,7 @@ python3 scripts/generate_report_card.py --demo --type stock --theme dark
    - 🗣 *"做一份今天的盘前全景预测（大盘点位+板块机会）"* ➡️ 自动激活 `market-prediction`
    - 🗣 *"帮我深度复盘今天的强势板块与产业链共振"* ➡️ 自动激活 `daily-review`
    - 🗣 *"帮我分析近 5 个交易日的板块轮动和主线节奏"* ➡️ 自动激活 `sector-rotation`
+   - 🗣 *"完整诊断一下这只股票当前的逻辑、结构和风险"* ➡️ 自动激活 `stock-analysis`
 
 ---
 
@@ -96,9 +97,10 @@ python3 scripts/generate_report_card.py --demo --type stock --theme dark
 
 ### 方式五：在网页版 LLM (ChatGPT / DeepSeek / Kimi / Gemini) 中使用
 如果在 Web 页面直接对话：
-1. **盘前（8:30 - 9:15）**：打开 `prompts/market-prediction/A股盘前全景策略研判.md`
-2. **盘后复盘**：打开 `prompts/daily-review/每天强势板块产业链共振分析.md`
-3. **中期节奏分析**：打开 `prompts/sector-rotation/5日内板块轮动节奏分析.md`
+1. **盘前（8:30 - 9:15）**：打开 `prompts/market-prediction/A股盘前全景研判与概率推演.md`
+2. **盘后复盘**：打开 `prompts/daily-review/A股每日主线与产业链共振复盘.md`
+3. **中期节奏分析**：打开 `prompts/sector-rotation/A股近5日板块轮动与节奏复盘.md`
+4. **个股完整诊断**：打开 `prompts/stock-analysis/A股个股完整诊断与威科夫结构研判.md`
 4. 复制完整 Markdown 内容粘贴给大模型。如果模型没有联网功能，请手动附上当天行情数据。
 
 ---
@@ -113,7 +115,7 @@ python3 scripts/generate_report_card.py --demo --type stock --theme dark
 
 ## 🚀 首次安装与一键更新
 
-三份跨平台 Prompt 以 `.agents/skills/*/SKILL.md` 为唯一母本。修改 Skill 后运行：
+四份跨平台 Prompt 以 `.agents/skills/*/SKILL.md` 为唯一母本。修改 Skill 后运行：
 
 ```bash
 python3 scripts/sync_prompts.py
@@ -122,7 +124,7 @@ python3 scripts/sync_prompts.py --check
 
 本仓库内置完整的**独立分发与更新机制**，使用者无需手动拷贝技能文件。
 
-**首次安装**（将三大 Skill 与战报脚本同步到本机全局环境）：
+**首次安装**（将四大 Skill 与战报脚本同步到本机全局环境）：
 
 ```bash
 python3 scripts/install_skills.py
@@ -138,7 +140,7 @@ bash scripts/update.sh
 scripts\update.bat
 ```
 
-脚本会自动从 GitHub main 分支拉取最新代码，随后运行 `install_skills.py` 将 `.agents/skills/` 下的三大技能同步到 `~/.gemini/skills` 与 `~/.gemini/antigravity/skills`，最后通过 `--check` 校验所有脚本副本与母本的 md5 一致。当前版本见 `version.json`，每次更新的内容见 `CHANGELOG.md`。
+脚本会自动从 GitHub main 分支拉取最新代码，随后运行 `install_skills.py` 将 `.agents/skills/` 下的四大技能同步到 `~/.gemini/skills` 与 `~/.gemini/antigravity/skills`，最后通过 `--check` 校验所有脚本副本与母本的 md5 一致。当前版本见 `version.json`，每次更新的内容见 `CHANGELOG.md`。
 
 ---
 

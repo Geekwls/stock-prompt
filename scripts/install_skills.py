@@ -53,7 +53,7 @@ def install_skills(check_only=False):
         if os.path.exists(generator_script):
             shutil.copy2(generator_script, os.path.join(workspace_scripts_dir, "generate_report_card.py"))
 
-    print("\n[SUCCESS] 所有 3 大核心 Skills 均已成功安装到全局及工作区环境！")
+    print("\n[SUCCESS] 所有 4 大核心 Skills 均已成功安装到全局及工作区环境！")
 
 
 def _md5(path):

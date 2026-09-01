@@ -1,0 +1,4 @@
+interface:
+  display_name: "A股个股诊断"
+  short_description: "以八层证据完整诊断个股逻辑、量价结构、公司质量与风险空间"
+  default_prompt: "使用 $stock-analysis 完整诊断这只A股标的。"

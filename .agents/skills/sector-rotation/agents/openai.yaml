@@ -1,0 +1,4 @@
+interface:
+  display_name: "A股板块轮动"
+  short_description: "复盘近5日资金迁移、主线节奏、板块轮动与衰竭风险"
+  default_prompt: "使用 $sector-rotation 复盘A股近5日板块轮动。"

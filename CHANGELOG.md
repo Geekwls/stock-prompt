@@ -1,10 +1,17 @@
 # CHANGELOG (更新日志)
 
+## [Unreleased]
+
+- **统一 Skill 中文命名体系**：四个 Skill 统一使用“A股 + 场景 + 核心任务”的中文展示名，英文机器名保持不变。
+- **统一跨平台 Prompt 文件名**：规范为盘前研判、每日复盘、近5日轮动和个股诊断四类正式名称，并同步更新脚本映射与 README 路径。
+- **补充中文 UI 元数据**：四个 Skill 新增 `agents/openai.yaml`，提供统一的 `display_name`、简短说明和默认调用提示。
+- **个股诊断升级**：`stock-analysis` 扩展为八层证据、双轴诊断与独立证据置信度，并补充公司质量和事件风险。
+
 ## [v5.1.0] - 2026-08-31
 ### 🔍 新增 A 股个股深度分析与威科夫结构研判引擎 (Individual Stock Analysis & Wyckoff Engine)
 - **全新核心技能上线 (`stock-analysis`)**：构建专门针对 A 股个股的 7 层深度研判框架（市场大势顺逆风 → 板块主线共振 → RS 相对强度与动量 → 量价与威科夫结构 Phase A-E / Spring / Test / SOS / LPS / UT / SOW → 价格位置与 Overheat 惩罚 → 风险收益结构与赔率计算 → 7 维证据看板与可证伪假设）。
 - **极简金融研报战报长图扩展**：`generate_report_card.py` 新增 `--type stock` 专属长图渲染能力，支持一键生成极简高定风个股深度研报卡片。
-- **跨平台 Prompt 与 Skill 双向同步**：新增 `prompts/stock-analysis/A股个股深度分析与威科夫结构研判.md`，并通过 `sync_prompts.py` 与 `install_skills.py` 纳入自动化校验与全局分发链。
+- **跨平台 Prompt 与 Skill 双向同步**：新增个股诊断 Prompt，现统一命名为 `prompts/stock-analysis/A股个股完整诊断与威科夫结构研判.md`，并通过 `sync_prompts.py` 与 `install_skills.py` 纳入自动化校验与全局分发链。
 - **灵魂原则确立**：“不要告诉我这只股票会不会涨，告诉我它现在发生了什么、为什么发生、哪些证据支持这个判断，以及什么情况出现意味着这个判断错了。”
 
 ---

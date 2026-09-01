@@ -41,6 +41,7 @@ REQUIRED_FIELDS = {
         "stock_name", "stock_code", "date", "price", "coverage",
         "market_wind", "sector_role", "catalyst_level", "rs_rank",
         "wyckoff_phase", "position_status", "risk_reward_ratio",
+        "logic_health", "structure_timing", "company_risk_status", "company_details",
         "confidence_level", "research_status", "core_logic", "market_details", "sector_details",
         "catalyst_details", "rs_details", "wyckoff_details", "position_table",
         "rr_details", "evidence_map", "fusion_scores",
@@ -194,7 +195,7 @@ def render_report_card(data=None, output_path="report_card.png", theme="light"):
     if data is None:
         data = {}
 
-    title_text = data.get("title", "A股盘前全景量化研判战报 (V5.0)")
+    title_text = data.get("title", "A股盘前全景研判与概率推演战报")
     date_str = data.get("date", datetime.now().strftime("%Y-%m-%d"))
 
     # 1. 标题与状态栏
@@ -908,7 +909,7 @@ def render_sector_rotation_card(data=None, output_path="sector_rotation_card.png
 
 def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png", theme="light"):
     """
-    极简高定风【A股个股深度分析与威科夫结构研判】长图渲染
+    极简高定风【A股个股完整诊断与威科夫结构研判】长图渲染
     """
     is_light = (theme == "light")
 
@@ -961,14 +962,14 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
     coverage_str = str(data.get("coverage", "95%"))
 
     # 1. 标题与状态栏
-    title_display = f"{stock_name} ({stock_code}) 个股深度量化研判"
+    title_display = f"{stock_name} ({stock_code}) 个股完整诊断"
     draw.text((60, 36), title_display, fill=TEXT_MAIN, font=font_title)
     draw_pill(draw, f"现价: ¥{price_str}", (W - 190, 40), bg_color="#eef2ff" if is_light else "#1e1b4b", text_color=PRIMARY, font=font_micro)
     draw_pill(draw, f"基准: {date_str}", (W - 350, 40), bg_color="#f8fafc" if is_light else "#1e293b", text_color=TEXT_MUTED, font=font_micro)
     draw_pill(draw, f"Coverage: {coverage_str}", (W - 500, 40), bg_color="#ecfdf5" if is_light else "#064e3b", text_color=COLOR_DOWN, font=font_micro)
     draw.line([(60, 85), (W - 60, 85)], fill=BORDER_DIVIDER, width=1)
 
-    # 2. 7大核心速览卡片
+    # 2. 8大核心速览卡片
     top_metrics = [
         ("市场大势", data.get("market_wind", "顺风驱动 [顺]"), PRIMARY),
         ("板块主线", data.get("sector_role", "核心主线 [中军]"), COLOR_DOWN),
@@ -976,6 +977,7 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
         ("RS 强度", data.get("rs_rank", "Top 12% [极强]"), COLOR_UP),
         ("威科夫阶段", data.get("wyckoff_phase", "Markup 主升"), PRIMARY),
         ("位置状态", data.get("position_status", "安全支撑区 [优]"), COLOR_DOWN),
+        ("公司风险", data.get("company_risk_status", "中性可控"), COLOR_WARN),
         ("赔率空间", data.get("risk_reward_ratio", "3.8 : 1 [优]"), COLOR_WARN),
     ]
 
@@ -992,11 +994,15 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
 
     # 核心状态定调横幅
     curr_y = 215
-    draw.rounded_rectangle([60, curr_y, W - 60, curr_y + 54], radius=6, fill=BG_SECTION, outline=BORDER_LIGHT, width=1)
-    status_tag = data.get("research_status", "【值得重点跟踪】")
+    draw.rounded_rectangle([60, curr_y, W - 60, curr_y + 72], radius=6, fill=BG_SECTION, outline=BORDER_LIGHT, width=1)
+    logic_health = data.get("logic_health", "稳定")
+    structure_timing = data.get("structure_timing", "等待确认")
+    status_tag = data.get("research_status", f"【逻辑健康度：{logic_health}｜结构位置：{structure_timing}】")
+    conf_level = str(data.get("confidence_level", "中"))
     core_logic_text = data.get("core_logic", "算力中军放量突破吸筹区间，缩量良性回踩 MA20 支撑，相对强度持续走强，具备非对称赔率空间。")
-    draw.text((75, curr_y + 16), f"[研究状态] {status_tag}  |  [核心逻辑] {core_logic_text}", fill=PRIMARY, font=font_small)
-    curr_y += 72
+    draw.text((75, curr_y + 13), f"[双轴诊断] {status_tag}  |  [证据置信度] {conf_level}", fill=PRIMARY, font=font_small)
+    draw.text((75, curr_y + 40), f"[核心逻辑] {core_logic_text}", fill=TEXT_SUB, font=font_micro)
+    curr_y += 90
 
     def draw_section_header(title_text, y):
         draw.rectangle([60, y + 2, 64, y + 20], fill=PRIMARY)
@@ -1053,8 +1059,23 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
     else:
         curr_y += 140
 
-    # 4. 模块 02：相对强度 (RS) 与动量引擎
-    curr_y = draw_section_header("02  相对强度 (RS Engine) 与动量加速度深度量化", curr_y)
+    # 公司质量与事件风险
+    curr_y = draw_section_header("02  公司质量与事件风险 (财务·估值·治理·重大事项)", curr_y)
+    company_details = data.get("company_details", [
+        ("盈利质量", "N/A：待补最新定期报告及同比、环比口径"),
+        ("现金流", "N/A：待核验经营现金流与净利润匹配度"),
+        ("资产负债", "N/A：待核验应收、存货、商誉与有息负债"),
+        ("估值位置", "N/A：待补历史与行业可比估值分位"),
+        ("治理事件", "N/A：待检查减持、解禁、质押、问询与诉讼"),
+    ])
+    draw.text((60, curr_y), f"[公司风险定调] {data.get('company_risk_status', '暂不评级')}", fill=COLOR_WARN, font=font_h3)
+    for c_i, item in enumerate(company_details):
+        if isinstance(item, (list, tuple)) and len(item) >= 2:
+            draw.text((60, curr_y + 24 + c_i * 20), f"• {item[0]}: {item[1]}", fill=TEXT_SUB, font=font_micro)
+    curr_y += 24 + len(company_details) * 20 + 20
+
+    # 4. 模块 03：相对强度 (RS) 与动量引擎
+    curr_y = draw_section_header("03  相对强度 (RS Engine) 与动量加速度深度量化", curr_y)
     rs_items = [
         ("RS 5D 超额", data.get("rs_5d", "+6.8%"), "近5日显著强于大盘", COLOR_UP),
         ("RS 20D 超额", data.get("rs_20d", "+18.4%"), "波段趋势超额显著", COLOR_UP),
@@ -1075,7 +1096,7 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
     curr_y += 30
 
     # 5. 模块 03：量价行为与威科夫结构
-    curr_y = draw_section_header("03  量价行为与威科夫结构深度解析 (Wyckoff & VSA 供求机制)", curr_y)
+    curr_y = draw_section_header("04  量价行为与威科夫结构深度解析 (Wyckoff & VSA 供求机制)", curr_y)
     wyckoff = data.get("wyckoff_details", {}) or {}
     phase = wyckoff.get("phase", "Markup 主升推进阶段 (突破蓄势中继)")
     events = wyckoff.get("events", "前期完成 Spring (Confirmed) 与 Test (Confirmed)，随后放量大阳线打出 SOS (Confirmed)")
@@ -1089,7 +1110,7 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
     curr_y += 100
 
     # 6. 模块 04：价格位置与过热惩罚体检
-    curr_y = draw_section_header("04  价格位置与动态过热惩罚体检 (Position & Dynamic Overheat)", curr_y)
+    curr_y = draw_section_header("05  价格位置与动态过热惩罚体检 (Position & Dynamic Overheat)", curr_y)
     pos_col_x = [60, 240, 420, 600, 800, 970]
     pos_headers = ["评估指标", "实际数值", "安全/过热阈值", "状态定性", "过热惩罚判定", "跟踪指引建议"]
     for h, x in zip(pos_headers, pos_col_x):
@@ -1118,7 +1139,7 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
     curr_y += 15
 
     # 7. 模块 05：风险收益结构与赔率测算
-    curr_y = draw_section_header("05  风险收益结构与空间不对称性测算 (Risk / Reward & Asymmetry)", curr_y)
+    curr_y = draw_section_header("06  风险收益结构与空间不对称性测算 (Risk / Reward & Asymmetry)", curr_y)
     rr_col_x = [60, 240, 420, 600, 800, 970]
     rr_headers = ["结构确认位", "假设失效位", "潜在上升空间", "潜在下行风险", "赔率 (R / R)", "盈亏比定性"]
     for h, x in zip(rr_headers, rr_col_x):
@@ -1142,25 +1163,26 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
         curr_y += 8
 
     # 情景置信度评估
-    conf_level = str(data.get("confidence_level", "High Confidence"))
-    draw.text((60, curr_y + 6), f"[情景置信度] Scenario Confidence: {conf_level}   (基于 7 维同向证据、无一票否决与数据覆盖度综合裁定)", fill=COLOR_DOWN if "High" in conf_level else COLOR_WARN, font=font_small)
+    conf_level = str(data.get("confidence_level", "中"))
+    draw.text((60, curr_y + 6), f"[证据置信度] {conf_level}   (仅描述数据质量与可验证程度，不代表方向或上涨概率)", fill=COLOR_DOWN if conf_level == "高" else COLOR_WARN, font=font_small)
     curr_y += 32
 
     curr_y += 15
 
-    # 8. 模块 06：7层证据采集与1层融合裁决
-    curr_y = draw_section_header("06  7层证据采集与1层融合裁决 (7+1 Decision & Tiered Exit)", curr_y)
+    # 8. 模块 07：8层证据采集与融合裁决
+    curr_y = draw_section_header("07  8层证据采集与融合裁决 (8-Layer Decision & Tiered Exit)", curr_y)
 
     # 左右两栏布局：左侧加权融合评分表，右侧全景证据看板
     fusion_scores = data.get("fusion_scores", [
-        ["L1 市场环境", "15%", "100 (顺风)", "15.0"],
-        ["L2 板块主线", "20%", "100 (主线)", "20.0"],
-        ["L3 催化剂驱动", "15%", "100 (S级)", "15.0"],
-        ["L4 RS 强度", "10%", "100 (极强)", "10.0"],
-        ["L5 威科夫量价", "20%", "100 (供需健康)", "20.0"],
-        ["L6 位置过热", "10%", "60 (温和偏离)", "6.0"],
-        ["L7 赔率空间", "10%", "100 (空间优良)", "10.0"],
-        ["加权融合总分", "100%", "综合评级", "96.0 分 [重点跟踪]"]
+        ["L1 市场环境", "10%", "B (70–84)", "7.0–8.4"],
+        ["L2 板块主线", "12%", "B (70–84)", "8.4–10.1"],
+        ["L3 催化剂质量", "10%", "B (70–84)", "7.0–8.4"],
+        ["L4 RS 强度", "10%", "B (70–84)", "7.0–8.4"],
+        ["L5 威科夫量价", "18%", "C (55–69)", "9.9–12.4"],
+        ["L6 位置过热", "10%", "B (70–84)", "7.0–8.4"],
+        ["L7 赔率空间", "10%", "C (55–69)", "5.5–6.9"],
+        ["L8 公司质量", "20%", "C (55–69)", "11.0–13.8"],
+        ["加权融合总分", "100%", "区间评级", "62.8–76.8"]
     ])
     evidence_map = data.get("evidence_map", [
         ["市场环境", "顺风共振 [顺]"],
@@ -1170,13 +1192,14 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
         ["威科夫阶段", "Markup 主升推进"],
         ["量价特征", "供需健康 [健康]"],
         ["位置与过热", "安全支撑位 [优]"],
-        ["赔率评估", "高赔率 >=3:1 [优]"]
+        ["赔率评估", "高赔率 >=3:1 [优]"],
+        ["公司质量", "中性可控 [待跟踪]"]
     ])
 
     col_w = (W - 120 - 40) // 2
 
-    # 左侧：7层加权融合评分表
-    draw.text((60, curr_y), "[7 层加权融合评分] (优=100 / 中=60 / 差=20)", fill=PRIMARY, font=font_h3)
+    # 左侧：8层加权融合评分表
+    draw.text((60, curr_y), "[8 层加权融合评分] (A–E 区间 / 缺失=N/A)", fill=PRIMARY, font=font_h3)
     fu_y = curr_y + 22
     fu_col_x = [60, 200, 310, 440]
     for h, x in zip(["研判层级", "权重", "得分(定性)", "加权分"], fu_col_x):
@@ -1206,13 +1229,13 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
 
     # 交易跟踪执行条件
     trade = data.get("trade_strategy", {
-        "priority": "早盘回踩 MA20 均线附近缩量企稳分批介入",
-        "trigger": "放量突破关键确认位 29.20 元且 30 分钟不破分时均线",
-        "avoid": "一致性大幅高开盲目追涨跟风"
+        "priority": "观察结构支撑区的量价反馈",
+        "trigger": "收盘或约定周期有效站稳关键确认位，并出现量价匹配",
+        "avoid": "证据未确认或流动性受限时扩大风险暴露"
     })
-    priority = trade.get("priority", "早盘回踩 MA20 均线附近缩量企稳分批介入")
-    trigger = trade.get("trigger", "放量突破关键确认位且 30 分钟不破分时均线")
-    avoid = trade.get("avoid", "一致性大幅高开盲目追涨跟风")
+    priority = trade.get("priority", "观察结构支撑区的量价反馈")
+    trigger = trade.get("trigger", "收盘或约定周期有效站稳关键确认位，并出现量价匹配")
+    avoid = trade.get("avoid", "证据未确认或流动性受限时扩大风险暴露")
     draw.text((60, curr_y), f"[执行条件] 【优先观察】{priority}", fill=PRIMARY, font=font_small)
     curr_y += 24
     draw.text((60, curr_y), f"[确认触发] {trigger}", fill=TEXT_MAIN, font=font_small)
@@ -1222,10 +1245,10 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
 
     # 分级退出纪律（预警/失效/时间止损/浮盈保护）
     exit_plan = data.get("exit_plan", {
-        "warning": "跌破 MA5 (28.10元) 或自高点回撤 2.5% -> 风险暴露削减 1/3~1/2",
-        "invalidation": "放量跌破 27.10 元 (MA20/Spring低点) -> 假设失效退出跟踪",
-        "time_stop": "S级催化窗口 10-15 个交易日，未放量突破 29.20 则退出",
-        "profit_protection": "浮盈达 +1R (约 +4.9%) 后失效位上移至成本价"
+        "warning": "量价效率下降或竞争假设证据增强",
+        "invalidation": "有效跌破关键结构位并反抽失败",
+        "time_stop": "在预设结构观察窗口内未出现确认信号则降级",
+        "profit_protection": "按新结构上移研究失效位，不保证实际成交无损"
     })
     if exit_plan:
         draw.text((60, curr_y), "[分级退出纪律]", fill=PRIMARY, font=font_h3)
@@ -1245,7 +1268,7 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
 
     curr_y += 35
     draw.line([(60, curr_y), (W - 60, curr_y)], fill=BORDER_DIVIDER, width=1)
-    draw.text((60, curr_y + 12), "stock-prompt 个股深度量化研判引擎 | GitHub: Geekwls/stock-prompt", fill=TEXT_MUTED, font=font_micro)
+    draw.text((60, curr_y + 12), "stock-prompt A股个股诊断 | GitHub: Geekwls/stock-prompt", fill=TEXT_MUTED, font=font_micro)
     draw.text((W - 360, curr_y + 12), "免责声明：仅供量化研究参考，不构成任何投资建议", fill=COLOR_UP, font=font_micro)
 
     final_height = save_cropped_card(img, output_path, curr_y + 58)
@@ -1291,4 +1314,3 @@ if __name__ == "__main__":
         render_stock_analysis_card(data=data, output_path=out_file, theme=args.theme)
     else:
         render_report_card(data=data, output_path=out_file, theme=args.theme)
-

@@ -114,6 +114,7 @@ python3 scripts/generate_report_card.py --demo --type stock --theme dark
 1. **严谨的数据覆盖率与防幻觉**：所有提示词均设有 `Data Coverage` 和缺失值规则；关键覆盖率不足时只输出条件情景，不用中性值、0分或示例行情伪造精确结论。
 2. **贝叶斯先验与机会函数双解耦**：大盘四维立体空间点位（ATR波动率 + 筹码POC + 期权对冲墙）界定安全边际，机会评分 (Opportunity Score) 解耦方向与盈亏比。
 3. **多维闭环自检**：引入 Brier Score、校准度 (Calibration) 与锐度 (Sharpness) 持续追踪模型效能。
+4. **个股行情硬门槛**：缺少120日复权OHLCV或同期宽基/行业基准时，L4–L7统一为 `N/A`，不输出威科夫定级、赔率或综合评分。
 
 ---
 

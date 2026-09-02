@@ -46,6 +46,7 @@ REQUIRED_FIELDS = {
         "catalyst_details", "rs_details", "wyckoff_details", "position_table",
         "rr_details", "evidence_map", "fusion_scores",
         "trade_strategy", "exit_plan", "falsification_rule",
+        "next_review_triggers", "evidence_freshness",
     },
 }
 
@@ -63,6 +64,13 @@ def validate_report_data(report_type, data):
             "正式报告缺少必要字段: " + ", ".join(missing)
             + "。请补齐真实数据；如需示例图请显式使用 --demo。"
         )
+    if report_type == "stock":
+        allowed_risks = {"低", "中", "高", "极高", "N/A"}
+        if data["company_risk_status"] not in allowed_risks:
+            raise ValueError("company_risk_status 只能为: 低 / 中 / 高 / 极高 / N/A")
+        triggers = data["next_review_triggers"]
+        if not isinstance(triggers, list) or len(triggers) < 2:
+            raise ValueError("next_review_triggers 至少包含两个可观察的复核条件")
 
 def get_font(size=24, bold=False):
     """跨平台中文字体加载"""
@@ -208,7 +216,7 @@ def render_report_card(data=None, output_path="report_card.png", theme="light"):
     top_metrics = [
         ("Market Regime", data.get("regime", "S3 趋势启动"), PRIMARY),
         ("市场情绪分", f"{data.get('sentiment_score', 78)}/100", COLOR_UP),
-        ("建议仓位区间", data.get("position", "6 ～ 8 成"), COLOR_WARN),
+        ("风险暴露等级", data.get("position", "积极观察"), COLOR_WARN),
         ("综合机会评分", f"{data.get('opportunity_score', 85)}/100", COLOR_UP),
         ("第一核心主线", data.get("top_sector", "半导体/算力 [强化期]"), PRIMARY),
     ]
@@ -524,7 +532,7 @@ def render_daily_review_card(data=None, output_path="daily_review_card.png", the
         ("两市量价健康度", "成交额突破 2.1 万亿，属于放量良性攻坚，无缩量诱多背离"),
         ("主线资金集中度", "前 3 大热点行业成交占比达 24.5%，主力做多合力高度聚焦"),
         ("一日游风险体检", "[低风险] 未触发偷尾盘、无连板等 6 大一日游刹车规则"),
-        ("建议仓位导向", "维持 6 ～ 8 成 区间，积极参与核心主线低吸")
+        ("风险暴露导向", "积极观察，重点验证核心主线分歧承接")
     ])
     for r_i, (t, d) in enumerate(regime_details):
         ry = curr_y + 24 + r_i * 20
@@ -624,7 +632,7 @@ def render_daily_review_card(data=None, output_path="daily_review_card.png", the
 
     # 7. 模块 05：机会评分与三大情景
     curr_y = draw_section_header("05  综合机会评分仪表盘 (Opportunity) 与次日推演三大情景", curr_y)
-    draw.text((60, curr_y), data.get("opportunity_line", "[机会定调] Opportunity Score: 86 / 100 分  |  生命周期: [强化期]  |  建议仓位: 6 ～ 8 成"), fill=TEXT_MAIN, font=font_h3)
+    draw.text((60, curr_y), data.get("opportunity_line", "[机会定调] Opportunity Score: 86 / 100 分  |  生命周期: [强化期]  |  风险暴露: 积极观察"), fill=TEXT_MAIN, font=font_h3)
     curr_y += 28
     draw.text((60, curr_y), data.get("strategy_line", "[核心策略] 主线资金延续评分较高，次日只观察核心中军的分歧承接，避免追高。"), fill=TEXT_SUB, font=font_small)
     curr_y += 32
@@ -977,7 +985,7 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
         ("RS 强度", data.get("rs_rank", "Top 12% [极强]"), COLOR_UP),
         ("威科夫阶段", data.get("wyckoff_phase", "Markup 主升"), PRIMARY),
         ("位置状态", data.get("position_status", "安全支撑区 [优]"), COLOR_DOWN),
-        ("公司风险", data.get("company_risk_status", "中性可控"), COLOR_WARN),
+        ("公司风险", data.get("company_risk_status", "N/A"), COLOR_WARN),
         ("赔率空间", data.get("risk_reward_ratio", "3.8 : 1 [优]"), COLOR_WARN),
     ]
 
@@ -1193,7 +1201,7 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
         ["量价特征", "供需健康 [健康]"],
         ["位置与过热", "安全支撑位 [优]"],
         ["赔率评估", "高赔率 >=3:1 [优]"],
-        ["公司质量", "中性可控 [待跟踪]"]
+        ["公司质量", "N/A [待补数据]"]
     ])
 
     col_w = (W - 120 - 40) // 2

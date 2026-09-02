@@ -1,138 +1,229 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-一键安装/同步 stock-prompt 核心技能到 Antigravity 全局与工作区环境
+"""安装、更新或校验 stock-prompt Skills。
 
-用法:
-  python3 scripts/install_skills.py           安装/同步所有技能
-  python3 scripts/install_skills.py --check   仅校验各副本与母本是否一致（防漂移），不写入
+默认安装到 Gemini、Antigravity 与 Codex。使用 manifest 只清理本项目曾经
+安装、但新版本已删除的文件，不触碰用户自行添加的文件。
 """
 
+import argparse
 import hashlib
+import json
 import os
-import sys
 import shutil
-
-if hasattr(sys.stdout, 'reconfigure'):
-    sys.stdout.reconfigure(encoding='utf-8')
-
-def install_skills(check_only=False):
-    src_workspace_skills = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".agents", "skills"))
-    generator_script = os.path.abspath(os.path.join(os.path.dirname(__file__), "generate_report_card.py"))
-
-    destinations = [
-        os.path.join(os.path.expanduser("~"), ".gemini", "skills"),
-        os.path.join(os.path.expanduser("~"), ".gemini", "antigravity", "skills"),
-    ]
-
-    skill_names = ["daily-review", "market-prediction", "sector-rotation", "stock-analysis"]
-
-    if check_only:
-        return check_consistency(generator_script, src_workspace_skills, destinations, skill_names)
-
-    print("[*] 开始安装 stock-prompt 量化 Skills 到全局与工作区环境...")
-
-    for dest_root in destinations:
-        os.makedirs(dest_root, exist_ok=True)
-        for skill in skill_names:
-            src_dir = os.path.join(src_workspace_skills, skill)
-            dest_dir = os.path.join(dest_root, skill)
-            if os.path.exists(src_dir):
-                shutil.copytree(src_dir, dest_dir, dirs_exist_ok=True)
-                # 确保内置脚本同步
-                scripts_dir = os.path.join(dest_dir, "scripts")
-                os.makedirs(scripts_dir, exist_ok=True)
-                if os.path.exists(generator_script):
-                    shutil.copy2(generator_script, os.path.join(scripts_dir, "generate_report_card.py"))
-                print(f"[OK] 已安装: {skill} -> {dest_dir}")
-
-    # 同时为工作区内部 skill 同步一份 scripts
-    for skill in skill_names:
-        workspace_scripts_dir = os.path.join(src_workspace_skills, skill, "scripts")
-        os.makedirs(workspace_scripts_dir, exist_ok=True)
-        if os.path.exists(generator_script):
-            shutil.copy2(generator_script, os.path.join(workspace_scripts_dir, "generate_report_card.py"))
-
-    print("\n[SUCCESS] 所有 4 大核心 Skills 均已成功安装到全局及工作区环境！")
-    print_usage_guide()
+import sys
+from datetime import datetime
+from pathlib import Path
 
 
-def print_usage_guide():
-    """输出简洁明了的使用指南与常用触发词"""
-    guide = """
-================================================================================
-💡 stock-prompt 4 大核心技能已就绪，在 AI 对话框中直接输入即可触发：
-================================================================================
-
-1. 🌅 盘前全景研判 (建议交易日 08:30–09:15 或 09:25 竞价后使用)
-   💬 触发指令示例:
-      • "帮我做一下今天的A股盘前研判与机会推演"
-      • "看看今天大盘什么环境，市场机会分是多少"
-      • "09:25 竞价出来了，根据竞价数据做后验更新"
-
-2. 🌇 盘后共振复盘 (建议交易日 15:00 收盘后使用)
-   💬 触发指令示例:
-      • "复盘今天的A股市场与主线板块"
-      • "今天有哪些强势板块产业链共振？龙头和中军状态如何？"
-
-3. 🔄 5日板块轮动 (建议 周末 / 月末 / 中期节奏研判使用)
-   💬 触发指令示例:
-      • "分析一下A股近5天的板块轮动与资金迁移节奏"
-      • "当前主线进入衰竭期了吗？下一批补涨方向在哪？"
-
-4. 🔍 个股深度诊断 (任意时刻输入股票代码或名称)
-   💬 触发指令示例:
-      • "分析一下紫光股份 (000938)"
-      • "看看中际旭创现在处于威科夫什么阶段，位置过热吗？"
-      • "分析这只股票当前赔率与风险收益比，值不值得跟踪？"
-
---------------------------------------------------------------------------------
-🎨 战报长图生成:
-   python3 scripts/generate_report_card.py --demo --type [stock|daily|rotation|prediction]
-📄 跨平台使用 (ChatGPT / Claude / Web):
-   直接将 prompts/ 目录下的 Markdown 复制到任何 AI 对话框中即可使用！
-================================================================================
-"""
-    print(guide)
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 
-def _md5(path):
-    with open(path, "rb") as f:
-        return hashlib.md5(f.read()).hexdigest()
+ROOT = Path(__file__).resolve().parent.parent
+SOURCE_ROOT = ROOT / ".agents" / "skills"
+GENERATOR = ROOT / "scripts" / "generate_report_card.py"
+SKILL_NAMES = ("daily-review", "market-prediction", "sector-rotation", "stock-analysis")
+MANIFEST_NAME = ".stock-prompt-manifest.json"
 
 
-def check_consistency(generator_script, src_workspace_skills, destinations, skill_names):
-    """校验母本与各 skill 副本的 generate_report_card.py 是否一致"""
-    if not os.path.exists(generator_script):
-        print(f"[ERR] 母本脚本不存在: {generator_script}")
+def target_roots(target):
+    home = Path.home()
+    codex_root = Path(os.environ.get("CODEX_HOME", home / ".codex")) / "skills"
+    roots = {
+        "gemini": home / ".gemini" / "skills",
+        "antigravity": home / ".gemini" / "antigravity" / "skills",
+        "codex": codex_root,
+    }
+    if target == "all":
+        return list(roots.items())
+    if target == "workspace":
+        return []
+    return [(target, roots[target])]
+
+
+def file_hash(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def source_files():
+    files = {}
+    for skill in SKILL_NAMES:
+        skill_root = SOURCE_ROOT / skill
+        if not skill_root.is_dir():
+            raise FileNotFoundError(f"Skill 母本不存在: {skill_root}")
+        for path in skill_root.rglob("*"):
+            if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc":
+                relative = Path(skill) / path.relative_to(skill_root)
+                files[relative.as_posix()] = path
+        files[f"{skill}/scripts/generate_report_card.py"] = GENERATOR
+    return files
+
+
+def sync_workspace_generator(dry_run=False):
+    changed = 0
+    for skill in SKILL_NAMES:
+        destination = SOURCE_ROOT / skill / "scripts" / GENERATOR.name
+        if destination.exists() and file_hash(destination) == file_hash(GENERATOR):
+            continue
+        changed += 1
+        print(f"[SYNC] {destination.relative_to(ROOT)}")
+        if not dry_run:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(GENERATOR, destination)
+    return changed
+
+
+def load_manifest(root):
+    path = root / MANIFEST_NAME
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        hashes = payload.get("hashes", {})
+        if isinstance(hashes, dict):
+            return hashes
+        return {relative: None for relative in payload.get("managed_files", [])}
+    except (OSError, ValueError, TypeError):
+        print(f"[WARN] 无法读取旧 manifest，不执行旧文件清理: {path}")
+        return {}
+
+
+def write_manifest(root, files):
+    payload = {
+        "format": 1,
+        "project": "stock-prompt",
+        "managed_files": sorted(files),
+        "hashes": {relative: file_hash(source) for relative, source in sorted(files.items())},
+    }
+    path = root / MANIFEST_NAME
+    temporary = root / f"{MANIFEST_NAME}.tmp"
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def remove_empty_parents(path, stop):
+    current = path.parent
+    while current != stop and stop in current.parents:
+        try:
+            current.rmdir()
+        except OSError:
+            break
+        current = current.parent
+
+
+def install_to(label, root, files, dry_run=False):
+    old_manifest = load_manifest(root)
+    old_managed = set(old_manifest)
+    new_managed = set(files)
+    stale = sorted(old_managed - new_managed)
+    changed = []
+
+    for relative, source in files.items():
+        destination = root / relative
+        if not destination.exists() or file_hash(destination) != file_hash(source):
+            changed.append((relative, source, destination))
+
+    print(f"[*] {label}: 新增/更新 {len(changed)}，清理旧文件 {len(stale)}")
+    for relative, _, _ in changed:
+        print(f"  [WRITE] {relative}")
+    for relative in stale:
+        print(f"  [DELETE] {relative}")
+
+    if dry_run:
+        return
+
+    root.mkdir(parents=True, exist_ok=True)
+    backup_candidates = []
+    for relative, _, destination in changed:
+        if not destination.is_file():
+            continue
+        previous_hash = old_manifest.get(relative)
+        if previous_hash is None or file_hash(destination) != previous_hash:
+            backup_candidates.append((relative, destination))
+    if backup_candidates:
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        backup_root = root / ".stock-prompt-backups" / stamp
+        for relative, destination in backup_candidates:
+            backup = backup_root / relative
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(destination, backup)
+        print(f"[BACKUP] 已备份 {len(backup_candidates)} 个用户修改或旧版文件到 {backup_root}")
+    for _, source, destination in changed:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+    for relative in stale:
+        destination = root / relative
+        if destination.is_file():
+            destination.unlink()
+            remove_empty_parents(destination, root)
+    write_manifest(root, files)
+
+
+def check_target(label, root, files):
+    failures = 0
+    for relative, source in files.items():
+        destination = root / relative
+        if not destination.is_file():
+            print(f"[MISS] {label}/{relative}")
+            failures += 1
+        elif file_hash(destination) != file_hash(source):
+            print(f"[DRIFT] {label}/{relative}")
+            failures += 1
+    for relative in sorted(set(load_manifest(root)) - set(files)):
+        print(f"[STALE] {label}/{relative}")
+        failures += 1
+    if failures == 0:
+        print(f"[OK] {label}: Skill 全量文件一致")
+    return failures
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="安装或校验 stock-prompt Skills")
+    parser.add_argument("--check", action="store_true", help="只校验，不写入")
+    parser.add_argument("--dry-run", action="store_true", help="显示计划，不写入")
+    parser.add_argument(
+        "--target",
+        choices=("all", "gemini", "antigravity", "codex", "workspace"),
+        default="all",
+        help="安装目标；workspace 只同步仓库内报告卡脚本",
+    )
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+    if not GENERATOR.is_file():
+        print(f"[ERR] 报告卡母本不存在: {GENERATOR}")
         return 1
 
-    master_md5 = _md5(generator_script)
-    print(f"[*] 母本: {generator_script}\n    md5: {master_md5}\n")
+    if args.check:
+        failures = 0
+        master_hash = file_hash(GENERATOR)
+        for skill in SKILL_NAMES:
+            bundled = SOURCE_ROOT / skill / "scripts" / GENERATOR.name
+            if not bundled.is_file() or file_hash(bundled) != master_hash:
+                print(f"[DRIFT] workspace/{skill}/scripts/{GENERATOR.name}")
+                failures += 1
+        files = source_files()
+        for label, root in target_roots(args.target):
+            failures += check_target(label, root, files)
+        if failures:
+            print(f"[FAIL] 共发现 {failures} 处缺失、漂移或残留")
+            return 1
+        print("[SUCCESS] Skill 一致性检查通过")
+        return 0
 
-    targets = []
-    for skill in skill_names:
-        targets.append((f"workspace/{skill}", os.path.join(src_workspace_skills, skill, "scripts", "generate_report_card.py")))
-        for dest_root in destinations:
-            targets.append((f"{os.path.basename(dest_root)}/{skill}", os.path.join(dest_root, skill, "scripts", "generate_report_card.py")))
-
-    drifted = 0
-    for label, path in targets:
-        if not os.path.exists(path):
-            print(f"[MISS] {label}: 副本不存在 -> {path}")
-            drifted += 1
-        elif _md5(path) != master_md5:
-            print(f"[DRIFT] {label}: 与母本不一致 -> {path}")
-            drifted += 1
-        else:
-            print(f"[OK] {label}: 一致")
-
-    if drifted:
-        print(f"\n[FAIL] {drifted} 处副本漂移或缺失。请修改后重新运行: python3 scripts/install_skills.py")
-        return 1
-    print("\n[SUCCESS] 所有副本与母本一致。")
+    sync_workspace_generator(args.dry_run)
+    files = source_files()
+    for label, root in target_roots(args.target):
+        install_to(label, root, files, args.dry_run)
+    print("[SUCCESS] 演练完成，未写入文件" if args.dry_run else "[SUCCESS] Skill 安装/同步完成")
     return 0
 
 
 if __name__ == "__main__":
-    install_skills(check_only="--check" in sys.argv)
+    raise SystemExit(main())

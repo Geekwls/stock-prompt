@@ -26,9 +26,13 @@ stock-prompt/
 │   └── stock-analysis/                # 🔍 A股个股诊断
 │       └── A股个股完整诊断与威科夫结构研判.md
 │
+├── contracts/                         # 📐 四个 Skill 共用研究契约的项目级母本
+│   └── common-research-contract.md
+│
 ├── scripts/                           # 🛠 自动化工具库
 │   ├── generate_report_card.py        # 🎨 高清极简金融研报长图自动生成脚本 (支持 prediction/daily/rotation/stock)
-│   ├── install_skills.py              # 🚀 一键安装/校验所有技能到 Antigravity 全局环境
+│   ├── install_skills.py              # 🚀 一键安装/校验所有技能到 Gemini / Antigravity / Codex
+│   ├── sync_skill_contracts.py         # 🔁 公共研究契约同步及漂移检查
 │   ├── sync_prompts.py                # 🔁 Skill → Prompt 同步及漂移检查
 │   ├── update.bat                     # 🔄 Windows 自动更新脚本
 │   └── update.sh                      # 🔄 Linux/Mac 自动更新脚本
@@ -101,7 +105,7 @@ python3 scripts/generate_report_card.py --demo --type stock --theme dark
 2. **盘后复盘**：打开 `prompts/daily-review/A股每日主线与产业链共振复盘.md`
 3. **中期节奏分析**：打开 `prompts/sector-rotation/A股近5日板块轮动与节奏复盘.md`
 4. **个股完整诊断**：打开 `prompts/stock-analysis/A股个股完整诊断与威科夫结构研判.md`
-4. 复制完整 Markdown 内容粘贴给大模型。如果模型没有联网功能，请手动附上当天行情数据。
+5. 复制完整 Markdown 内容粘贴给大模型。如果模型没有联网功能，请手动附上当天行情数据。
 
 ---
 
@@ -118,16 +122,24 @@ python3 scripts/generate_report_card.py --demo --type stock --theme dark
 四份跨平台 Prompt 以 `.agents/skills/*/SKILL.md` 为唯一母本。修改 Skill 后运行：
 
 ```bash
+python3 scripts/sync_skill_contracts.py
 python3 scripts/sync_prompts.py
+python3 scripts/sync_skill_contracts.py --check
 python3 scripts/sync_prompts.py --check
 ```
 
 本仓库内置完整的**独立分发与更新机制**，使用者无需手动拷贝技能文件。
 
-**首次安装**（将四大 Skill 与战报脚本同步到本机全局环境）：
+**首次安装**（默认同步到 Gemini、Antigravity 与 Codex；manifest 只清理本项目曾管理的旧文件）：
 
 ```bash
 python3 scripts/install_skills.py
+
+# 只安装到指定平台
+python3 scripts/install_skills.py --target codex
+
+# 先查看将新增、更新或删除哪些项目管理文件
+python3 scripts/install_skills.py --dry-run
 ```
 
 **日常更新**（上游发布新版本后，一条命令完成 拉取代码 ➡️ 同步全局副本 ➡️ 防漂移校验）：
@@ -140,7 +152,7 @@ bash scripts/update.sh
 scripts\update.bat
 ```
 
-脚本会自动从 GitHub main 分支拉取最新代码，随后运行 `install_skills.py` 将 `.agents/skills/` 下的四大技能同步到 `~/.gemini/skills` 与 `~/.gemini/antigravity/skills`，最后通过 `--check` 校验所有脚本副本与母本的 md5 一致。当前版本见 `version.json`，每次更新的内容见 `CHANGELOG.md`。
+更新脚本会先检查本地修改；存在未提交内容时停止，避免覆盖用户定制。随后以 fast-forward 方式拉取 GitHub main，并运行 `install_skills.py` 将四大技能同步到 Gemini、Antigravity 与 Codex。安装器通过 manifest 清理旧版本残留，只处理本项目记录的文件；`--check` 会校验完整 Skill 文件，而不只是报告卡脚本。当前版本见 `version.json`，每次更新的内容见 `CHANGELOG.md`。
 
 ---
 
@@ -154,4 +166,3 @@ scripts\update.bat
 ## 🤝 贡献与反馈
 
 欢迎提交 PR 或 Issue 共同完善 A 股 AI 策略提示词库！
-

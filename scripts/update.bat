@@ -10,6 +10,13 @@ cd /d "%REPO_DIR%"
 
 echo 🔍 正在检查本地版本与远程 repository 状态...
 
+for /f "delims=" %%a in ('git status --porcelain') do (
+    echo ❌ 检测到尚未提交的本地修改。为避免覆盖你的自定义内容，本次更新已停止。
+    echo    请先提交、暂存或备份这些修改，再重新运行更新脚本。
+    pause
+    exit /b 1
+)
+
 if exist "%REPO_DIR%\version.json" (
     for /f "tokens=2 delims=:," %%a in ('findstr /c:"latest" "%REPO_DIR%\version.json"') do (
         set "LOCAL_VER=%%~a"
@@ -19,7 +26,7 @@ if exist "%REPO_DIR%\version.json" (
 
 echo 🔄 正在从 GitHub (main 分支) 拉取最新 Skill 代码...
 
-git pull origin main
+git pull --ff-only origin main
 
 if not %ERRORLEVEL% EQU 0 (
     echo ❌ 更新失败，请检查网络设置或 Git 配置。

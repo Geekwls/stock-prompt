@@ -12,6 +12,12 @@ cd "$REPO_DIR"
 
 echo "🔍 正在检查本地版本与远程 repository 状态..."
 
+if [ -n "$(git status --porcelain)" ]; then
+    echo "❌ 检测到尚未提交的本地修改。为避免覆盖你的自定义内容，本次更新已停止。"
+    echo "   请先提交、暂存或备份这些修改，再重新运行更新脚本。"
+    exit 1
+fi
+
 if [ -f "$REPO_DIR/version.json" ]; then
     LOCAL_VER=$(grep -o '"latest": "[^"]*"' "$REPO_DIR/version.json" | cut -d'"' -f4)
     echo "📌 本地当前版本: v${LOCAL_VER}"
@@ -26,7 +32,7 @@ REMOTE_HASH=$(git rev-parse origin/main)
 if [ "$LOCAL_HASH" = "$REMOTE_HASH" ]; then
     echo "✅ 本地 stock-prompt 技能库已经是最新版！"
 else
-    git pull origin main
+    git pull --ff-only origin main
     if [ -f "$REPO_DIR/version.json" ]; then
         NEW_VER=$(grep -o '"latest": "[^"]*"' "$REPO_DIR/version.json" | cut -d'"' -f4)
         echo "🎉 成功更新至最新版本: v${NEW_VER}"

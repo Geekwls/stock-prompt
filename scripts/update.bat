@@ -36,13 +36,16 @@ if not %ERRORLEVEL% EQU 0 (
 
 echo ✅ 成功更新至最新版本！
 echo.
-echo 🛠 正在同步技能到本机全局环境 (Antigravity / Gemini)...
+echo 🛠 正在同步技能到本机全局环境 (Gemini / Antigravity / Codex)...
 
 where python >nul 2>nul
 if %ERRORLEVEL% EQU 0 (
-    python scripts\install_skills.py
-    python scripts\install_skills.py --check
-    echo ✅ 全局技能副本已同步并通过一致性校验。
+    python scripts\install_skills.py && python scripts\install_skills.py --check
+    if %ERRORLEVEL% EQU 0 (
+        echo ✅ 全局技能副本已同步并通过一致性校验。
+    ) else (
+        echo [WARN] 全局同步未完全成功，可稍后手动运行: python scripts\install_skills.py
+    )
 ) else (
     echo [WARN] 未检测到 Python，跳过全局同步（仓库内技能已是最新）。
 )

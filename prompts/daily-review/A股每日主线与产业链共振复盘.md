@@ -23,7 +23,7 @@
 
 当宿主智能体环境已挂载 MCP 金融数据工具（如 `marketgraph-data`）时，执行以下优先路由协议：
 
-- **P1 级最高优先级**：调用 `get_stock_quote`（实时估值盘口）、`get_stock_kline`（120日复权K线与ATR）、`get_stock_timeline`（当日分时均线/脉冲/竞价）、`get_market_sentiment`（大盘量能与炸板率）、`get_limit_up_ladder`（连板天梯）、`get_sector_fund_flow`（行业板块资金流与领涨龙头）、`get_longhubang_detail`（龙虎榜席位明细与机构净买入）、`get_company_quality`（财务指标/商誉/解禁/排雷）获取的数据直接归为 `P1` 级结构化行情与基本面证据。工具全面支持**纯中文股票名称（如“贵州茅台”）与代码自动解析**。
+- **P1 级最高优先级**：调用 `get_stock_quote`（实时估值盘口）、`get_stock_kline`（120日复权K线与ATR）、`get_stock_timeline`（当日分时均线/脉冲/竞价）、`get_market_sentiment`（大盘量能与炸板率）、`get_limit_up_ladder`（连板天梯）、`get_sector_fund_flow`（行业板块资金流与领涨龙头）、`get_longhubang_detail`（龙虎榜席位明细与机构净买入）、`get_company_quality`（财务指标/商誉/解禁/排雷）获取的数据直接归为 `P1` 级结构化行情与基本面证据。工具全面支持**纯中文股票名称（如“贵州茅台”）与代码自动解析**。`get_market_sentiment`、`get_limit_up_ladder` 与 `get_longhubang_detail` 支持传入历史交易日（`date_str`，格式 `YYYYMMDD`），用于回补 T-1 至 T-4 的缺失数据，避免直接触发多日降级。
 - **自动通过行情硬门槛**：成功调用 `get_stock_kline` 获得 120 根 K 线时，自动通过行情硬门槛，对应技术层数据组计为 100% 满额有效。
 - **无感优雅回退**：若未检测到 MCP 工具，自动平滑回退至网络检索（P4）与公告核验（P2），并严格执行常规数据缺省审计。
 
@@ -71,6 +71,8 @@ Scored Weight = 实际参与评分的原始权重
 }
 ```
 
+- 交接摘要除在报告末尾输出外，必须同时落盘到固定位置 `~/.stock-prompt/state/handoff-<YYYYMMDD>-<report_type>.json`（如 `handoff-20260904-daily.json`），保证跨会话可继承。读取方（`market-prediction` / `stock-analysis`）优先检查最近 3 个交易日内最新的落盘交接文件，其次回退到当前会话上下文。
+- `market-prediction` 的预测台账统一写入 `~/.stock-prompt/eval/predictions.jsonl`（由 `scripts/eval_tracker.py` 固定，不随工作目录漂移）；`daily-review` 收盘回测读取同一份文件，禁止在其他位置另建台账。
 - `daily-review` 提供收盘市场状态、主线和次日验证变量。
 - `market-prediction` 读取最近收盘交接摘要，并根据隔夜与竞价证据更新。
 - `sector-rotation` 提供中期板块阶段、候选方向和衰竭风险。
@@ -108,12 +110,13 @@ Scored Weight = 实际参与评分的原始权重
    - `"[T日日期] A股 盘后复盘 涨停复盘 连板梯队 炸板率"`
    - `"[T日日期] A股 行业主力资金净流入 龙虎榜 机构席位"`
    - `"[T日日期] 强势板块 产业链 催化剂"`
-3. **统一口径与可追溯性**：
+3. **MCP 优先补数**：宿主已挂载 `marketgraph-data` MCP 时，结构化数据优先调用 `get_market_sentiment`（两市量能/涨跌停/炸板率/最高连板高度）、`get_limit_up_ladder`（连板天梯与各高度代表龙头）、`get_sector_fund_flow`（行业板块主力资金净流入榜与领涨龙头）、`get_longhubang_detail`（龙虎榜机构/游资席位明细）获取，调用失败或未挂载时再回退到上述搜索协议；两者取得的数据同样执行统一口径与覆盖率审计。
+4. **统一口径与可追溯性**：
    - 每个核心数字注明数据日期、统计口径与来源链接；不同平台口径不一致时不得拼接计算。
    - “炸板率”默认指全市场炸板率；用于板块评分时必须改用“板块炸板率”并明确标注。
    - 输出 `Data Coverage`：可得权重 ÷ 计划总权重，并披露参与评分权重。覆盖率低于 70% 时只给观察性结论，不给精确评分或个性化风险暴露。
    - 文中的固定阈值是缺少历史样本时的回退值；拥有至少60个交易日同口径数据后，优先使用滚动分位数并同时披露样本期，禁止事后挑选阈值。
-4. **数据缺失降级规则表**：
+5. **数据缺失降级规则表**：
 
 | 数据项 | 缺失处理规则 |
 |---|---|
@@ -301,7 +304,7 @@ $$\text{Opportunity Score} = \operatorname{Clamp}(0.3S + 0.4R + 0.3C - D, 0, 100
 ```
 
 - **早盘预测自动校准回测（Prediction Calibration 闭环）**：
-  * 若早盘执行过 `market-prediction`（存在 `eval/predictions.jsonl` 或会话预测快照），收盘后自动比对并执行落盘（`eval_tracker.py result`）：
+  * 若早盘执行过 `market-prediction`（存在固定台账 `~/.stock-prompt/eval/predictions.jsonl` 或会话预测快照），收盘后自动比对并执行落盘（`python scripts/eval_tracker.py result ...`，仓库根目录运行；该脚本已随技能捆绑，全局安装用户路径为 `<技能安装目录>/scripts/eval_tracker.py`）：
     1. **点位命中**：收盘价是否落在早盘预估区间 $[S_1, R_1]$ 之内。
     2. **主线命中**：早盘推演的前列主线是否进入实际全市场领涨 Top 10%。
     3. **方向偏差**：实际 $Z_{\text{ATR}}$ 对应三态与早盘最大概率方向是否一致。
@@ -315,10 +318,10 @@ $$\text{Opportunity Score} = \operatorname{Clamp}(0.3S + 0.4R + 0.3C - D, 0, 100
 
 ### 六、【可选交付】战报长图渲染 (Report Card)
 
-当用户需要图片版战报（或提到“生成卡片 / 长图 / 战报图”）时，将报告关键结论写入 JSON 后调用：
+当用户需要图片版战报（或提到“生成卡片 / 长图 / 战报图”）时，将报告关键结论写入 JSON 后调用（仓库根目录运行；未指定 `--output` 时默认输出文件名自动带日期，避免覆盖旧战报）：
 
 ```bash
-python3 scripts/generate_report_card.py --type daily --json report.json --output 复盘战报.png
+python scripts/generate_report_card.py --type daily --json report.json
 ```
 
 JSON 字段说明（正式报告必须填齐所列字段并通过脚本校验；只有显式 `--demo` 才可使用内置示例值）：
@@ -344,7 +347,7 @@ JSON 字段说明（正式报告必须填齐所列字段并通过脚本校验；
   "risk_line": "[风控底线] ..."
 }
 ```
-其中 `sentiment_breakdown`(5行×2列) / `regime_notes`(5×2) / `sectors_daily`(≤4×9) / `resonance_cards`(4×3) / `stocks_pool`(≤4×6) / `scenarios`(3×2) 为多行数组，每行字段数与上例一致。
+其中 `sentiment_breakdown`(5行×2列) / `regime_notes`(5×2) / `sectors_daily`(≤4×9) / `resonance_cards`(4×3) / `stocks_pool`(≤4×6) / `scenarios`(3×2) 为多行数组，每行字段数与上例一致。**已通过脚本校验的最小可用示例**见 [战报长图 JSON 示例](references/report-card-example.json)，可直接复制该文件修改后传入 `--json`。
 
 ---
 *(数据来源：东方财富、同花顺、财联社等公开财经平台)*

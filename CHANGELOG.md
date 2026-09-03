@@ -1,5 +1,16 @@
 # CHANGELOG (更新日志)
 
+## [v6.1.0] - 2026-09-04
+### 🛠 使用链路全面打磨：MCP 补数提示、固定台账锚点、装后引导与示例模板
+- **评估台账固定锚点（自动迁移）**：`eval_tracker.py` 台账默认路径从 `./eval/predictions.jsonl`（随工作目录漂移，回测闭环会静默失效）固定为 `~/.stock-prompt/eval/predictions.jsonl`；首次运行检测到旧台账时自动复制迁移（原文件保留），并支持 `--ledger` 参数与 `STOCK_PROMPT_LEDGER` 环境变量覆盖。脚本母本迁移至 `scripts/`，并捆绑分发到 `market-prediction` 与 `daily-review`，修复 daily-review 引用了自身没有的脚本的问题。
+- **跨 Skill 交接落盘**：公共契约规定交接摘要（Handoff JSON）必须落盘到 `~/.stock-prompt/state/handoff-<日期>-<类型>.json`，`market-prediction` / `stock-analysis` 优先读取最近 3 个交易日的落盘文件，“免重复检索提速”不再局限于同一会话内。
+- **MCP 优先补数落到各 Skill 正文**：`daily-review` / `market-prediction` / `sector-rotation` 的数据获取章节新增 MCP 工具优先路由提示（含 `get_market_sentiment` / `get_limit_up_ladder` / `get_longhubang_detail` 支持历史 `date_str` 回补 T-1~T-4 数据），避免有确定性数据源可用时直接走降级；`stock-analysis` 数据契约明确 `get_stock_kline` 成功即通过行情硬门槛。
+- **安装后引导恢复**：`install_skills.py` 安装成功后输出 30 秒快速上手速查表（自然语言触发示例 / 长图命令 / 更新命令），并自动检测 MarketGraph MCP 注册状态，未注册时打印配置片段与自测命令。
+- **战报长图示例模板**：四个技能各内置已通过脚本校验的 `references/report-card-example.json`（含 stock 全字段），新增测试强制保证示例与校验规则同步；未指定 `--output` 时正式报告默认文件名自动带日期（如 `report_prediction_20260904.png`），避免覆盖历史战报。
+- **脚本调用统一**：SKILL.md 内所有命令统一为仓库根目录 `python scripts/...`（Windows 兼容；全局安装用户替换为技能目录路径），消除同文件内两种路径写法与 `python`/`python3` 混用。
+- **更新脚本对称化**：`update.bat` 与 `update.sh` 行为对齐——先 fetch 比对再决定 pull、已是最新时明确提示、Python 探测均带 python/python3 回退、install 失败提示统一。
+- **测试扩充**：新增 `tests/test_eval_tracker.py`（锚点解析/旧台账迁移/record-result-report 闭环）与 `tests/test_report_card_examples.py`（四类示例必须通过校验），全套单测增至 24 项。
+
 ## [v6.0.0] - 2026-09-03
 ### 🌟 对齐 Agent Plugins 1.0 标准与内置 MarketGraph MCP 确定性金融服务
 - **Agent Plugins 1.0 标准对齐**：根目录新增 `plugin.json`，将 4 大核心 Skills 与 `mcpServers` 统一打包为跨智能体（Cursor / VS Code Copilot / Gemini CLI / Claude Code）通用的标准插件包。

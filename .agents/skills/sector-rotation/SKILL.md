@@ -39,7 +39,8 @@ description: >-
    - `"[T日日期] A股 5日复盘 成交额 资金流向 行业主力资金"`
    - `"[T日日期] 近5日 领涨板块 领跌板块 板块轮动"`
    - `"[T日日期] 龙虎榜 机构席位 游资席位 净买入"`
-3. **多日数据缺失处理规则**：
+3. **MCP 历史回补优先**：宿主已挂载 `marketgraph-data` MCP 时，T-1 至 T-4 的历史缺失数据优先用 `get_market_sentiment` 与 `get_limit_up_ladder` 回补（两者均支持传历史交易日 `date_str`，格式 YYYYMMDD），当日板块资金流用 `get_sector_fund_flow`、席位数据用 `get_longhubang_detail`（同样支持历史日期）。先用 MCP 补数、补不齐的部分才走上述搜索与降级规则，禁止在有 MCP 可用的情况下直接判定“历史数据缺失”。
+4. **多日数据缺失处理规则**：
    - 若仅能提供部分天数数据（如仅有 T日 与 T-1日 ），**禁止凭空编造历史天数**。
    - 计划权重为 T日40%、T-1日30%、T-2日20%、T-3与T-4各5%。缺失日期不得“估算”；仅在至少覆盖 3 日且原始权重覆盖率 ≥70% 时，对已取得日期的权重重新归一化。否则只做定性观察，不输出5日分数。
    - 每日核心数字注明日期、统计口径与来源链接；不同平台的板块分类或资金流口径不一致时不得直接拼接。
@@ -180,10 +181,10 @@ $$S_{5d}=\frac{\sum_{d=T-4}^{T}w_ds_d}{\sum w_d},\quad w=[0.05,0.05,0.20,0.30,0.
 
 ### 五、【可选交付】战报长图渲染 (Report Card)
 
-当用户需要图片版战报（或提到“生成卡片 / 长图 / 战报图”）时，将报告关键结论写入 JSON 后调用：
+当用户需要图片版战报（或提到“生成卡片 / 长图 / 战报图”）时，将报告关键结论写入 JSON 后调用（仓库根目录运行；未指定 `--output` 时默认输出文件名自动带日期，避免覆盖旧战报）：
 
 ```bash
-python3 scripts/generate_report_card.py --type rotation --json report.json --output 轮动战报.png
+python scripts/generate_report_card.py --type rotation --json report.json
 ```
 
 JSON 字段说明（正式报告必须填齐所列字段并通过脚本校验；只有显式 `--demo` 才可使用内置示例值）：
@@ -205,7 +206,7 @@ JSON 字段说明（正式报告必须填齐所列字段并通过脚本校验；
   "watchlist": [["高低切潜力主线", "板块", "标的 (代码)", "竞价验证关注点", "操作策略导向"]]
 }
 ```
-其中 `summary`(5×2) / `volume_5d`(5×5) / `fund_flow`(≤5×2) / `sei_breakdown`(4×3) / `sentiment_5d`(5×7) / `watchlist`(≤4×5) 为多行数组，每行字段数与上例一致。
+其中 `summary`(5×2) / `volume_5d`(5×5) / `fund_flow`(≤5×2) / `sei_breakdown`(4×3) / `sentiment_5d`(5×7) / `watchlist`(≤4×5) 为多行数组，每行字段数与上例一致。**已通过脚本校验的最小可用示例**见 [战报长图 JSON 示例](references/report-card-example.json)，可直接复制该文件修改后传入 `--json`。
 
 ---
 *(数据来源：东方财富、同花顺、财联社等公开财经平台)*

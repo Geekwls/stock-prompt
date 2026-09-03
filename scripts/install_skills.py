@@ -21,9 +21,20 @@ if hasattr(sys.stdout, "reconfigure"):
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE_ROOT = ROOT / ".agents" / "skills"
-GENERATOR = ROOT / "scripts" / "generate_report_card.py"
 SKILL_NAMES = ("daily-review", "market-prediction", "sector-rotation", "stock-analysis")
 MANIFEST_NAME = ".stock-prompt-manifest.json"
+# 母本位于 scripts/ 下的公共脚本，按 skill 捆绑分发（安装后每个技能目录自带可用副本）。
+BUNDLED_SCRIPTS = {
+    "generate_report_card.py": (ROOT / "scripts" / "generate_report_card.py", SKILL_NAMES),
+    "eval_tracker.py": (ROOT / "scripts" / "eval_tracker.py", ("market-prediction", "daily-review")),
+}
+MCP_SERVER = ROOT / "mcp" / "marketgraph-mcp" / "server.py"
+MCP_CONFIG_CANDIDATES = (
+    Path.home() / ".gemini" / "antigravity" / "mcp_config.json",
+    Path.home() / ".gemini" / "mcp_config.json",
+    Path.home() / ".cursor" / "mcp.json",
+    Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "config.toml",
+)
 
 
 def target_roots(target):
@@ -59,21 +70,26 @@ def source_files():
             if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc":
                 relative = Path(skill) / path.relative_to(skill_root)
                 files[relative.as_posix()] = path
-        files[f"{skill}/scripts/generate_report_card.py"] = GENERATOR
+    for name, (source, skills) in BUNDLED_SCRIPTS.items():
+        if not source.is_file():
+            raise FileNotFoundError(f"捆绑脚本母本不存在: {source}")
+        for skill in skills:
+            files[f"{skill}/scripts/{name}"] = source
     return files
 
 
-def sync_workspace_generator(dry_run=False):
+def sync_workspace_scripts(dry_run=False):
     changed = 0
-    for skill in SKILL_NAMES:
-        destination = SOURCE_ROOT / skill / "scripts" / GENERATOR.name
-        if destination.exists() and file_hash(destination) == file_hash(GENERATOR):
-            continue
-        changed += 1
-        print(f"[SYNC] {destination.relative_to(ROOT)}")
-        if not dry_run:
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(GENERATOR, destination)
+    for name, (source, skills) in BUNDLED_SCRIPTS.items():
+        for skill in skills:
+            destination = SOURCE_ROOT / skill / "scripts" / name
+            if destination.exists() and file_hash(destination) == file_hash(source):
+                continue
+            changed += 1
+            print(f"[SYNC] {destination.relative_to(ROOT)}")
+            if not dry_run:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
     return changed
 
 
@@ -194,20 +210,57 @@ def parse_args():
     return parser.parse_args()
 
 
+def mcp_registered():
+    for config in MCP_CONFIG_CANDIDATES:
+        try:
+            if config.is_file() and "marketgraph" in config.read_text(encoding="utf-8", errors="ignore"):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def print_post_install_guide():
+    print()
+    print("=" * 62)
+    print("🚀 stock-prompt 四大技能已就绪 —— 30 秒快速上手")
+    print("=" * 62)
+    print("🗣 直接用自然语言提问，Agent 会自动激活对应技能：")
+    print('   盘前 8:30-9:15 : "做一份今天的盘前全景预测"')
+    print('   收盘 15:00 后  : "帮我深度复盘今天的强势板块与产业链共振"')
+    print('   周五 / 周末    : "分析近 5 个交易日的板块轮动和主线节奏"')
+    print('   任意时段       : "诊断 300308" / "中际旭创现在能买吗"')
+    print("🎨 战报长图（仓库根目录运行）:")
+    print("   python scripts/generate_report_card.py --demo --type stock")
+    print("🔄 日常更新: bash scripts/update.sh （Windows: scripts\\update.bat）")
+    print()
+    if MCP_SERVER.is_file() and not mcp_registered():
+        print("🔌 [建议] 尚未检测到 MarketGraph MCP 数据网关注册。")
+        print("   配置后 stock-analysis 可自动通过行情硬门槛（120日K线/龙虎榜/财务排雷）：")
+        print("   在宿主 MCP 配置（如 ~/.gemini/antigravity/mcp_config.json）加入：")
+        print(f'     "marketgraph-data": {{"command": "python", "args": ["{MCP_SERVER}"]}}')
+        print("   快速自测: python mcp/marketgraph-mcp/server.py --test get_stock_kline 贵州茅台")
+        print("   完整说明: mcp/marketgraph-mcp/README.md")
+    elif MCP_SERVER.is_file():
+        print("🔌 已检测到 MarketGraph MCP 注册，个股诊断数据链路就绪。")
+
+
 def main():
     args = parse_args()
-    if not GENERATOR.is_file():
-        print(f"[ERR] 报告卡母本不存在: {GENERATOR}")
+    missing = [str(source) for source, _ in BUNDLED_SCRIPTS.values() if not source.is_file()]
+    if missing:
+        print(f"[ERR] 捆绑脚本母本不存在: {', '.join(missing)}")
         return 1
 
     if args.check:
         failures = 0
-        master_hash = file_hash(GENERATOR)
-        for skill in SKILL_NAMES:
-            bundled = SOURCE_ROOT / skill / "scripts" / GENERATOR.name
-            if not bundled.is_file() or file_hash(bundled) != master_hash:
-                print(f"[DRIFT] workspace/{skill}/scripts/{GENERATOR.name}")
-                failures += 1
+        for name, (source, skills) in BUNDLED_SCRIPTS.items():
+            master_hash = file_hash(source)
+            for skill in skills:
+                bundled = SOURCE_ROOT / skill / "scripts" / name
+                if not bundled.is_file() or file_hash(bundled) != master_hash:
+                    print(f"[DRIFT] workspace/{skill}/scripts/{name}")
+                    failures += 1
         files = source_files()
         for label, root in target_roots(args.target):
             failures += check_target(label, root, files)
@@ -217,11 +270,16 @@ def main():
         print("[SUCCESS] Skill 一致性检查通过")
         return 0
 
-    sync_workspace_generator(args.dry_run)
+    sync_workspace_scripts(args.dry_run)
     files = source_files()
     for label, root in target_roots(args.target):
         install_to(label, root, files, args.dry_run)
-    print("[SUCCESS] 演练完成，未写入文件" if args.dry_run else "[SUCCESS] Skill 安装/同步完成")
+    if args.dry_run:
+        print("[SUCCESS] 演练完成，未写入文件")
+    else:
+        print("[SUCCESS] Skill 安装/同步完成")
+        if args.target != "workspace":
+            print_post_install_guide()
     return 0
 
 

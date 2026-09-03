@@ -40,7 +40,7 @@ description: >-
 收到股票代码或名称后，按以下顺序执行：
 
 1. 识别证券代码、交易所、证券简称与研判时点；名称有歧义时先消歧。
-2. **上下文继承检查 (Context Inheritance)**：若前序会话中已存在当日 `daily-review` / `sector-rotation` 交接摘要（Handoff JSON）或复盘结论，直接继承已确立的 L1（市场环境 Market Regime）与 L2（板块共振与角色定位）结论，并在覆盖率表中标记为【继承自前序复盘】，免去大盘重复检索，直接下钻 L3–L8。
+2. **上下文继承检查 (Context Inheritance)**：若前序会话中已存在当日 `daily-review` / `sector-rotation` 交接摘要（Handoff JSON）或复盘结论，或固定落盘位置 `~/.stock-prompt/state/handoff-*.json` 存在最近 3 个交易日内的交接文件，直接继承已确立的 L1（市场环境 Market Regime）与 L2（板块共振与角色定位）结论，并在覆盖率表中标记为【继承自前序复盘】，免去大盘重复检索，直接下钻 L3–L8。
 3. 记录用户场景（新观察 / 已持仓 / 复盘 / 事件跟踪）、分析周期、成本价与仓位（如用户提供）；未提供时不得臆测。
 4. 建立数据清单、复权口径和覆盖率，执行硬数据门槛。
 5. 完成 L1–L8 八层证据采集，并为关键事实分配证据编号。
@@ -180,10 +180,10 @@ Data Coverage 与 Scored Weight 是否分别可复算
 
 <!-- PROMPT_INCLUDE: references/report-card-schema.md -->
 
-然后执行：
+然后执行（仓库根目录运行；未指定 `--output` 时默认输出文件名自动带日期）：
 
 ```bash
-python scripts/generate_report_card.py --type stock --json <stock_data.json> --output stock_card.png
+python scripts/generate_report_card.py --type stock --json <stock_data.json>
 ```
 
-支持 `--theme light` 与 `--theme dark`。正式报告不得使用渲染器演示默认值。
+支持 `--theme light` 与 `--theme dark`。正式报告不得使用渲染器演示默认值。**已通过脚本校验的最小可用 JSON 示例**见 [个股报告卡 JSON 示例](references/report-card-example.json)，可直接复制修改后传入 `--json`。

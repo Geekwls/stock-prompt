@@ -13,7 +13,7 @@
 
 当宿主智能体环境已挂载 MCP 金融数据工具（如 `marketgraph-data`）时，执行以下优先路由协议：
 
-- **P1 级最高优先级**：调用 `get_stock_quote`（实时估值盘口）、`get_stock_kline`（120日复权K线与ATR）、`get_stock_timeline`（当日分时均线/脉冲/竞价）、`get_market_sentiment`（大盘量能与炸板率）、`get_limit_up_ladder`（连板天梯）、`get_sector_fund_flow`（行业板块资金流与领涨龙头）、`get_longhubang_detail`（龙虎榜席位明细与机构净买入）、`get_company_quality`（财务指标/商誉/解禁/排雷）获取的数据直接归为 `P1` 级结构化行情与基本面证据。工具全面支持**纯中文股票名称（如“贵州茅台”）与代码自动解析**。
+- **P1 级最高优先级**：调用 `get_stock_quote`（实时估值盘口）、`get_stock_kline`（120日复权K线与ATR）、`get_stock_timeline`（当日分时均线/脉冲/竞价）、`get_market_sentiment`（大盘量能与炸板率）、`get_limit_up_ladder`（连板天梯）、`get_sector_fund_flow`（行业板块资金流与领涨龙头）、`get_longhubang_detail`（龙虎榜席位明细与机构净买入）、`get_company_quality`（财务指标/商誉/解禁/排雷）获取的数据直接归为 `P1` 级结构化行情与基本面证据。工具全面支持**纯中文股票名称（如“贵州茅台”）与代码自动解析**。`get_market_sentiment`、`get_limit_up_ladder` 与 `get_longhubang_detail` 支持传入历史交易日（`date_str`，格式 `YYYYMMDD`），用于回补 T-1 至 T-4 的缺失数据，避免直接触发多日降级。
 - **自动通过行情硬门槛**：成功调用 `get_stock_kline` 获得 120 根 K 线时，自动通过行情硬门槛，对应技术层数据组计为 100% 满额有效。
 - **无感优雅回退**：若未检测到 MCP 工具，自动平滑回退至网络检索（P4）与公告核验（P2），并严格执行常规数据缺省审计。
 
@@ -61,6 +61,8 @@ Scored Weight = 实际参与评分的原始权重
 }
 ```
 
+- 交接摘要除在报告末尾输出外，必须同时落盘到固定位置 `~/.stock-prompt/state/handoff-<YYYYMMDD>-<report_type>.json`（如 `handoff-20260904-daily.json`），保证跨会话可继承。读取方（`market-prediction` / `stock-analysis`）优先检查最近 3 个交易日内最新的落盘交接文件，其次回退到当前会话上下文。
+- `market-prediction` 的预测台账统一写入 `~/.stock-prompt/eval/predictions.jsonl`（由 `scripts/eval_tracker.py` 固定，不随工作目录漂移）；`daily-review` 收盘回测读取同一份文件，禁止在其他位置另建台账。
 - `daily-review` 提供收盘市场状态、主线和次日验证变量。
 - `market-prediction` 读取最近收盘交接摘要，并根据隔夜与竞价证据更新。
 - `sector-rotation` 提供中期板块阶段、候选方向和衰竭风险。

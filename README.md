@@ -54,20 +54,22 @@ stock-prompt/
 
 ```bash
 # 1. 个股完整诊断与威科夫结构研报长图 (输入任意个股使用)
-python3 scripts/generate_report_card.py --demo --type stock
+python scripts/generate_report_card.py --demo --type stock
 
 # 2. 每日收盘强势板块与产业链复盘长图 (15:00 收盘后使用)
-python3 scripts/generate_report_card.py --demo --type daily
+python scripts/generate_report_card.py --demo --type daily
 
 # 3. 5 日板块轮动与主线节奏复盘长图 (周五/周末/月末使用)
-python3 scripts/generate_report_card.py --demo --type rotation
+python scripts/generate_report_card.py --demo --type rotation
 
 # 4. 盘前全景量化推演战报长图 (08:30-09:15 使用)
-python3 scripts/generate_report_card.py --demo --type prediction
+python scripts/generate_report_card.py --demo --type prediction
 
 # 5. 深色科技风卡片 (末尾加上 --theme dark)
-python3 scripts/generate_report_card.py --demo --type stock --theme dark
+python scripts/generate_report_card.py --demo --type stock --theme dark
 ```
+
+> Linux/macOS 环境请将 `python` 替换为 `python3`。正式报告通过 `--json` 传入完整数据（各技能内置已通过校验的最小示例 `references/report-card-example.json`，可直接复制修改）；未指定 `--output` 时输出文件名自动带日期，不会覆盖历史战报。
 
 ---
 
@@ -158,7 +160,9 @@ bash scripts/update.sh
 scripts\update.bat
 ```
 
-更新脚本会先检查本地修改；存在未提交内容时停止，避免覆盖用户定制。随后以 fast-forward 方式拉取 GitHub main，并运行 `install_skills.py` 将四大技能同步到 Gemini、Antigravity 与 Codex。安装器通过 manifest 清理旧版本残留，只处理本项目记录的文件；`--check` 会校验完整 Skill 文件，而不只是报告卡脚本。当前版本见 `version.json`，每次更新的内容见 `CHANGELOG.md`。
+更新脚本会先检查本地修改；存在未提交内容时停止，避免覆盖用户定制。随后先比对远程再以 fast-forward 方式拉取 GitHub main，并运行 `install_skills.py` 将四大技能同步到 Gemini、Antigravity 与 Codex。安装器通过 manifest 清理旧版本残留，只处理本项目记录的文件；`--check` 会校验完整 Skill 文件，而不只是报告卡脚本。
+
+安装成功后会自动打印 **30 秒快速上手速查表**，并检测 MarketGraph MCP 数据网关的注册状态——未注册时会给出配置片段与自测命令（手动配置见 [mcp/marketgraph-mcp/README.md](mcp/marketgraph-mcp/README.md)）。配置 MCP 后，`stock-analysis` 的 120 日行情硬门槛可由 `get_stock_kline` 自动通过，`sector-rotation` / `daily-review` 也可用 MCP 工具回补 T-1~T-4 历史数据。当前版本见 `version.json`，每次更新的内容见 `CHANGELOG.md`。
 
 ---
 

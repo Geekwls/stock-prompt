@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/agent-plugin-1.0.json",
+  "name": "a-stock-research",
+  "version": "6.0.0",
+  "description": "A-Share Quantitative & Wyckoff Research Protocol for Autonomous Agents (Agent Plugins 1.0)",
+  "homepage": "https://github.com/Geekwls/stock-prompt",
+  "skills": [
+    "./.agents/skills/daily-review",
+    "./.agents/skills/market-prediction",
+    "./.agents/skills/sector-rotation",
+    "./.agents/skills/stock-analysis"
+  ],
+  "mcpServers": {
+    "marketgraph-data": {
+      "command": "python3",
+      "args": ["${pluginRoot}/mcp/marketgraph-mcp/server.py"]
+    }
+  }
+}

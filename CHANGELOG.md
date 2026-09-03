@@ -1,7 +1,13 @@
 # CHANGELOG (更新日志)
 
-## [Unreleased]
+## [v6.0.0] - 2026-09-03
+### 🌟 对齐 Agent Plugins 1.0 标准与内置 MarketGraph MCP 确定性金融服务
+- **Agent Plugins 1.0 标准对齐**：根目录新增 `plugin.json`，将 4 大核心 Skills 与 `mcpServers` 统一打包为跨智能体（Cursor / VS Code Copilot / Gemini CLI / Claude Code）通用的标准插件包。
+- **内置原生金融数据 MCP (`mcp/marketgraph-mcp`)**：零注册、免 Token、零第三方外部依赖（基于 Python 3.8+ 标准库与腾讯/东财公开网关），提供 120 日前复权 K 线、ATR(14)、MA20/50、实时盘口、全市场炸板率与连板天梯。
+- **打通 P1 级确定性数据闭环**：公共研究契约新增 MCP 优先路由协议，成功获取 120 根 K 线时自动通过行情硬门槛，彻底解决网页搜索不稳定与行情缺失问题。
+- **自动化测试集扩展**：新增 `tests/test_mcp_server.py`，全套回归单测增至 13 项并通过一致性校验。
 
+## [v5.1.1] - 2026-09-02
 - **统一四 Skill 研究契约**：新增证据编号、数据时点、加权覆盖率、缺失值、风险暴露与跨 Skill 交接规范，并自动同步为各 Skill 的自包含 reference。
 - **降低伪精确与角色误导**：移除虚构实盘履历，将默认固定仓位比例改为风险暴露等级；只有用户提供账户风险参数后才允许给出条件化仓位情景。
 - **安装更新安全化**：安装器新增 Codex 目标、manifest 残留清理、用户修改自动备份、`--dry-run` 与全量文件校验；更新脚本增加脏工作区保护和 fast-forward 限制。

@@ -10,6 +10,11 @@
 
 ```text
 stock-prompt/
+├── plugin.json                       # 🌟 核心入口：Agent Plugins 1.0 标准插件清单 (兼容 Cursor/Copilot/Gemini)
+│
+├── mcp/                              # 🔌 确定性金融事实层 (零配置、免Token本地 MCP 服务端)
+│   └── marketgraph-mcp/              # 直连腾讯证券与东财打板网关 (120日K线/ATR/炸板率/盘口)
+│
 ├── .agents/skills/                    # 🤖 Antigravity / Agent 专用 Skill 目录
 │   ├── market-prediction/             # 🌅 技能 1：A股盘前研判
 │   ├── daily-review/                  # 🌇 技能 2：A股每日复盘

@@ -15,8 +15,14 @@ import time
 import math
 import urllib.request
 import urllib.error
+import urllib.parse
 from datetime import datetime, date
 from typing import Dict, Any, List, Optional
+
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
 
 # -----------------------------------------------------------------------------
 # 1. 基础配置与轻量内存缓存 (TTL Cache，防止频繁请求)
@@ -50,25 +56,58 @@ def http_get(url: str, timeout: int = 4, encoding: str = "utf-8") -> str:
             return content.decode("gbk", errors="ignore")
 
 
+def resolve_symbol_by_name(keyword: str) -> Optional[str]:
+    """通过智能证券联想网关，将纯中文股票名称解析为标准代码 (如 '贵州茅台' -> 'sh600519')"""
+    clean = keyword.strip()
+    cache_key = f"symbol_lookup_{clean}"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+
+    url = f"http://smartbox.gtimg.cn/s3/?t=all&q={urllib.parse.quote(clean)}"
+    try:
+        raw = http_get(url, timeout=3, encoding="gbk")
+        if '="' in raw:
+            val = raw.split('="')[1].rstrip('";\n ')
+            items = val.split("^")
+            for item in items:
+                parts = item.split("~")
+                if len(parts) >= 3:
+                    mkt, code, name = parts[0], parts[1], parts[2]
+                    if mkt in ("sh", "sz", "bj"):
+                        res = f"{mkt}{code}"
+                        set_cached(cache_key, res, ttl=86400)
+                        return res
+    except Exception:
+        pass
+    return None
+
+
 def normalize_symbol(symbol: str) -> str:
-    """标准化证券代码为腾讯前缀格式: sh600519, sz300308, bj830000"""
+    """标准化证券代码为腾讯前缀格式: sh600519, sz300308, bj830000；支持纯中文名称自动解析"""
     clean = symbol.strip().lower()
-    if clean.startswith(("sh", "sz", "bj")):
+    if clean.startswith(("sh", "sz", "bj")) and len(clean) >= 8 and clean[2:].isdigit():
         return clean
     if "." in clean:
         parts = clean.split(".")
-        if parts[1] in ("sh", "sz", "bj"):
-            return f"{parts[1]}{parts[0]}"
-        if parts[0] in ("sh", "sz", "bj"):
-            return f"{parts[0]}{parts[1]}"
+        if len(parts) == 2:
+            if parts[1] in ("sh", "sz", "bj"):
+                return f"{parts[1]}{parts[0]}"
+            if parts[0] in ("sh", "sz", "bj"):
+                return f"{parts[0]}{parts[1]}"
     code = clean.split(".")[0]
-    if code.startswith(("6", "9", "5", "11")):
-        return f"sh{code}"
-    elif code.startswith(("0", "3", "12", "15", "16", "18")):
-        return f"sz{code}"
-    elif code.startswith(("4", "8")):
-        return f"bj{code}"
-    return f"sz{code}"
+    if code.isdigit():
+        if code.startswith(("6", "9", "5", "11")):
+            return f"sh{code}"
+        elif code.startswith(("0", "3", "12", "15", "16", "18")):
+            return f"sz{code}"
+        elif code.startswith(("4", "8")):
+            return f"bj{code}"
+    # 若非纯数字代码，尝试中文名称联想解析
+    resolved = resolve_symbol_by_name(symbol)
+    if resolved:
+        return resolved
+    return clean
 
 
 def safe_float(val: Any, default: Optional[float] = 0.0) -> Optional[float]:
@@ -376,24 +415,557 @@ def fetch_limit_up_ladder(date_str: Optional[str] = None) -> Dict[str, Any]:
         return {"error": f"获取连板天梯失败: {str(e)}"}
 
 
+def fetch_sector_fund_flow(count: int = 20) -> Dict[str, Any]:
+    """
+    获取 A 股全行业板块主力资金流向、涨跌幅排行与领涨龙头
+    直供 daily-review L2 强势板块定位与 sector-rotation 5日资金迁移分析
+    """
+    cache_key = f"sector_fund_flow_{count}"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+
+    url = (
+        "http://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=100&po=1&np=1"
+        "&ut=b2884a393a59ad64002292a3e90d46a5&fltt=2&invt=2&fid=f62&fs=m:90+t:2+f:!50"
+        "&fields=f12,f14,f2,f3,f62,f184,f204,f205"
+    )
+    try:
+        raw = http_get(url)
+        data = json.loads(raw).get("data", {}).get("diff", [])
+        if not data:
+            return {"error": "未获取到行业资金流数据"}
+
+        sectors = []
+        for item in data:
+            net_inflow_yuan = safe_float(item.get("f62"), 0.0)
+            net_inflow_billion = round(net_inflow_yuan / 100000000.0, 2)
+            sectors.append({
+                "code": item.get("f12"),
+                "name": item.get("f14"),
+                "change_pct": f"{safe_float(item.get('f3'), 0.0):+.2f}%",
+                "change_val": safe_float(item.get("f3"), 0.0),
+                "net_inflow_billion": net_inflow_billion,
+                "net_inflow_ratio": f"{safe_float(item.get('f184'), 0.0):+.2f}%",
+                "top_stock_name": item.get("f204", "--"),
+                "top_stock_code": item.get("f205", "--"),
+            })
+
+        sorted_by_inflow = sorted(sectors, key=lambda x: x["net_inflow_billion"], reverse=True)
+        top_inflows = sorted_by_inflow[:count]
+        top_outflows = sorted_by_inflow[-count:][::-1]
+
+        sorted_by_gain = sorted(sectors, key=lambda x: x["change_val"], reverse=True)
+        top_gainers = sorted_by_gain[:count]
+        top_losers = sorted_by_gain[-count:][::-1]
+
+        res = {
+            "source": "P1_Eastmoney_Sector_Fund_Flow",
+            "total_sectors_tracked": len(sectors),
+            "top_inflow_sectors": [
+                {
+                    "rank": i + 1,
+                    "name": s["name"],
+                    "code": s["code"],
+                    "change_pct": s["change_pct"],
+                    "net_inflow_billion": f"{s['net_inflow_billion']:+.2f} 亿",
+                    "inflow_ratio": s["net_inflow_ratio"],
+                    "leading_stock": f"{s['top_stock_name']}({s['top_stock_code']})",
+                }
+                for i, s in enumerate(top_inflows)
+            ],
+            "top_outflow_sectors": [
+                {
+                    "rank": i + 1,
+                    "name": s["name"],
+                    "code": s["code"],
+                    "change_pct": s["change_pct"],
+                    "net_outflow_billion": f"{s['net_inflow_billion']:+.2f} 亿",
+                    "leading_stock": f"{s['top_stock_name']}({s['top_stock_code']})",
+                }
+                for i, s in enumerate(top_outflows)
+            ],
+            "top_gainer_sectors": [
+                {
+                    "rank": i + 1,
+                    "name": s["name"],
+                    "change_pct": s["change_pct"],
+                    "net_inflow": f"{s['net_inflow_billion']:+.2f} 亿",
+                    "leader": f"{s['top_stock_name']}({s['top_stock_code']})",
+                }
+                for i, s in enumerate(top_gainers)
+            ],
+            "top_loser_sectors": [
+                {
+                    "rank": i + 1,
+                    "name": s["name"],
+                    "change_pct": s["change_pct"],
+                    "net_inflow": f"{s['net_inflow_billion']:+.2f} 亿",
+                }
+                for i, s in enumerate(top_losers)
+            ],
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        set_cached(cache_key, res)
+        return res
+    except Exception as e:
+        return {"error": f"获取行业资金流向出错: {str(e)}"}
+
+
+def fetch_longhubang_detail(symbol: Optional[str] = None, date_str: Optional[str] = None) -> Dict[str, Any]:
+    """
+    获取 A 股交易所公开龙虎榜席位明细（全市场概览或个股前五大买卖席位穿透）
+    直供 daily-review 席位品质与 stock-analysis L5 筹码结构
+    """
+    clean_symbol = symbol.strip() if symbol else ""
+    if clean_symbol:
+        code_only = clean_symbol.split(".")[0].replace("sh", "").replace("sz", "").replace("bj", "")
+    else:
+        code_only = ""
+
+    cache_key = f"lhb_{code_only}_{date_str or 'latest'}"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+
+    headers = {"User-Agent": USER_AGENT}
+    try:
+        if code_only:
+            filter_expr = f'(SECURITY_CODE="{code_only}")'
+            buy_url = (
+                "https://datacenter-web.eastmoney.com/api/data/v1/get?"
+                + urllib.parse.urlencode({
+                    "reportName": "RPT_BILLBOARD_DAILYDETAILSBUY",
+                    "columns": "ALL",
+                    "pageNumber": 1,
+                    "pageSize": 5,
+                    "sortTypes": -1,
+                    "sortColumns": "TRADE_DATE",
+                    "filter": filter_expr,
+                    "source": "WEB",
+                    "client": "WEB",
+                })
+            )
+            sell_url = (
+                "https://datacenter-web.eastmoney.com/api/data/v1/get?"
+                + urllib.parse.urlencode({
+                    "reportName": "RPT_BILLBOARD_DAILYDETAILSSELL",
+                    "columns": "ALL",
+                    "pageNumber": 1,
+                    "pageSize": 5,
+                    "sortTypes": -1,
+                    "sortColumns": "TRADE_DATE",
+                    "filter": filter_expr,
+                    "source": "WEB",
+                    "client": "WEB",
+                })
+            )
+            summary_url = (
+                "https://datacenter-web.eastmoney.com/api/data/v1/get?"
+                + urllib.parse.urlencode({
+                    "reportName": "RPT_BILLBOARD_DAILYDETAILS",
+                    "columns": "ALL",
+                    "pageNumber": 1,
+                    "pageSize": 1,
+                    "sortTypes": -1,
+                    "sortColumns": "TRADE_DATE",
+                    "filter": filter_expr,
+                    "source": "WEB",
+                    "client": "WEB",
+                })
+            )
+            req_b = urllib.request.Request(buy_url, headers=headers)
+            with urllib.request.urlopen(req_b, timeout=4) as resp_b:
+                buy_rows = json.loads(resp_b.read().decode("utf-8")).get("result", {}).get("data", []) or []
+
+            req_s = urllib.request.Request(sell_url, headers=headers)
+            with urllib.request.urlopen(req_s, timeout=4) as resp_s:
+                sell_rows = json.loads(resp_s.read().decode("utf-8")).get("result", {}).get("data", []) or []
+
+            req_sum = urllib.request.Request(summary_url, headers=headers)
+            with urllib.request.urlopen(req_sum, timeout=4) as resp_sum:
+                sum_rows = json.loads(resp_sum.read().decode("utf-8")).get("result", {}).get("data", []) or []
+
+            if not buy_rows and not sell_rows and not sum_rows:
+                return {
+                    "source": "P1_Eastmoney_LHB_Details",
+                    "symbol": symbol,
+                    "status": "未上榜 / 近期无龙虎榜记录",
+                    "explanation": "标的近期未触发龙虎榜披露标准 (日涨跌偏离度达7%或日换手达20%等)",
+                }
+
+            sum_item = sum_rows[0] if sum_rows else {}
+            trade_date = (sum_item.get("TRADE_DATE") or (buy_rows[0].get("TRADE_DATE") if buy_rows else "近期"))[:10]
+
+            def parse_seat(row):
+                dept_name = row.get("OPERATEDEPT_NAME", "")
+                buy_amt = round(safe_float(row.get("BUY"), 0.0) / 10000.0, 2)
+                sell_amt = round(safe_float(row.get("SELL"), 0.0) / 10000.0, 2)
+                net_amt = round(safe_float(row.get("NET"), 0.0) / 10000.0, 2)
+                seat_type = "机构专用" if "机构" in dept_name else ("北向专用" if ("深股通" in dept_name or "沪股通" in dept_name) else "游资营业部")
+                return {
+                    "seat_name": dept_name,
+                    "seat_type": seat_type,
+                    "buy_wan": f"{buy_amt:+.2f} 万",
+                    "sell_wan": f"{sell_amt:+.2f} 万",
+                    "net_wan": f"{net_amt:+.2f} 万",
+                }
+
+            buyer_seats = [parse_seat(r) for r in buy_rows]
+            seller_seats = [parse_seat(r) for r in sell_rows]
+
+            org_buy = sum(safe_float(r.get("BUY"), 0.0) for r in buy_rows if "机构" in r.get("OPERATEDEPT_NAME", ""))
+            org_sell = sum(safe_float(r.get("SELL"), 0.0) for r in sell_rows if "机构" in r.get("OPERATEDEPT_NAME", ""))
+            org_net_wan = round((org_buy - org_sell) / 10000.0, 2)
+
+            res = {
+                "source": "P1_Eastmoney_LHB_Details",
+                "symbol": symbol,
+                "name": sum_item.get("SECURITY_NAME_ABBR", symbol),
+                "trade_date": trade_date,
+                "explanation": sum_item.get("EXPLANATION", "上榜异动"),
+                "total_lhb_buy_million": round(safe_float(sum_item.get("TOTAL_BUY"), 0.0) / 1000000.0, 2),
+                "total_lhb_sell_million": round(safe_float(sum_item.get("TOTAL_SELL"), 0.0) / 1000000.0, 2),
+                "total_lhb_net_million": round(safe_float(sum_item.get("TOTAL_NET"), 0.0) / 1000000.0, 2),
+                "org_seat_net_wan": f"{org_net_wan:+.2f} 万元",
+                "seat_quality_judgment": "顶级合力(机构/外资+游资)" if org_net_wan > 0 else "游资博弈/散户接盘",
+                "top5_buyers": buyer_seats,
+                "top5_sellers": seller_seats,
+            }
+            set_cached(cache_key, res)
+            return res
+
+        else:
+            filter_expr = f'(TRADE_DATE=\'{date_str}\')' if date_str else ""
+            params = {
+                "reportName": "RPT_BILLBOARD_DAILYDETAILS",
+                "columns": "ALL",
+                "pageNumber": 1,
+                "pageSize": 20,
+                "sortTypes": -1,
+                "sortColumns": "TOTAL_NET",
+                "source": "WEB",
+                "client": "WEB",
+            }
+            if filter_expr:
+                params["filter"] = filter_expr
+
+            url = "https://datacenter-web.eastmoney.com/api/data/v1/get?" + urllib.parse.urlencode(params)
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                data_rows = json.loads(resp.read().decode("utf-8")).get("result", {}).get("data", []) or []
+
+            stocks = []
+            for r in data_rows:
+                net_amt_wan = round(safe_float(r.get("TOTAL_NET"), 0.0) / 10000.0, 2)
+                stocks.append({
+                    "code": r.get("SECURITY_CODE"),
+                    "name": r.get("SECURITY_NAME_ABBR"),
+                    "change_pct": f"{safe_float(r.get('CHANGE_RATE'), 0.0):+.2f}%",
+                    "close_price": safe_float(r.get("CLOSE_PRICE"), 0.0),
+                    "net_inflow_wan": f"{net_amt_wan:+.2f} 万",
+                    "turnover_rate": f"{safe_float(r.get('TURNRATE'), 0.0):.2f}%",
+                    "reason": r.get("EXPLANATION", ""),
+                })
+
+            res = {
+                "source": "P1_Eastmoney_LHB_Daily_Summary",
+                "date": date_str or (data_rows[0].get("TRADE_DATE", "")[:10] if data_rows else datetime.now().strftime("%Y-%m-%d")),
+                "total_stocks_on_list": len(stocks),
+                "top_net_buy_stocks": stocks[:10],
+            }
+            set_cached(cache_key, res)
+            return res
+
+    except Exception as e:
+        return {"error": f"获取龙虎榜席位明细出错: {str(e)}"}
+
+
+def fetch_company_quality(symbol: str) -> Dict[str, Any]:
+    """
+    获取 A 股个股基本面质量、财务指标、商誉、解禁与排雷数据
+    直接满足 stock-analysis L8 公司质量与事件风险评估
+    """
+    clean_symbol = symbol.strip()
+    code_only = clean_symbol.split(".")[0].replace("sh", "").replace("sz", "").replace("bj", "")
+    cache_key = f"quality_{code_only}"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+
+    headers = {"User-Agent": USER_AGENT}
+    try:
+        fina_url = (
+            "https://datacenter-web.eastmoney.com/api/data/v1/get?"
+            + urllib.parse.urlencode({
+                "reportName": "RPT_F10_FINANCE_MAINFINADATA",
+                "columns": "ALL",
+                "pageNumber": 1,
+                "pageSize": 2,
+                "sortTypes": -1,
+                "sortColumns": "REPORT_DATE",
+                "filter": f'(SECURITY_CODE="{code_only}")',
+                "source": "WEB",
+                "client": "WEB",
+            })
+        )
+        req_f = urllib.request.Request(fina_url, headers=headers)
+        with urllib.request.urlopen(req_f, timeout=4) as resp_f:
+            fina_rows = json.loads(resp_f.read().decode("utf-8")).get("result", {}).get("data", []) or []
+
+        lift_url = (
+            "https://datacenter-web.eastmoney.com/api/data/v1/get?"
+            + urllib.parse.urlencode({
+                "reportName": "RPT_LIFT_STAGE",
+                "columns": "ALL",
+                "pageNumber": 1,
+                "pageSize": 5,
+                "sortTypes": 1,
+                "sortColumns": "FREE_DATE",
+                "filter": f'(SECURITY_CODE="{code_only}")',
+                "source": "WEB",
+                "client": "WEB",
+            })
+        )
+        req_l = urllib.request.Request(lift_url, headers=headers)
+        with urllib.request.urlopen(req_l, timeout=4) as resp_l:
+            lift_rows = json.loads(resp_l.read().decode("utf-8")).get("result", {}).get("data", []) or []
+
+        balance_url = (
+            "https://datacenter-web.eastmoney.com/api/data/v1/get?"
+            + urllib.parse.urlencode({
+                "reportName": "RPT_DMSK_FN_BALANCE",
+                "columns": "ALL",
+                "pageNumber": 1,
+                "pageSize": 1,
+                "sortTypes": -1,
+                "sortColumns": "REPORT_DATE",
+                "filter": f'(SECURITY_CODE="{code_only}")',
+                "source": "WEB",
+                "client": "WEB",
+            })
+        )
+        req_b = urllib.request.Request(balance_url, headers=headers)
+        with urllib.request.urlopen(req_b, timeout=4) as resp_b:
+            balance_rows = json.loads(resp_b.read().decode("utf-8")).get("result", {}).get("data", []) or []
+
+        f0 = fina_rows[0] if fina_rows else {}
+        b0 = balance_rows[0] if balance_rows else {}
+
+        report_period = f0.get("REPORT_DATE_NAME", "最新报告期")
+        revenue_billion = round(safe_float(f0.get("TOTALOPERATEREVE"), 0.0) / 100000000.0, 2)
+        revenue_yoy = f"{safe_float(f0.get('TOTALOPERATEREVETZ'), 0.0):+.2f}%"
+        net_profit_million = round(safe_float(f0.get("PARENTNETPROFIT"), 0.0) / 10000.0, 2)
+        net_profit_yoy = f"{safe_float(f0.get('PARENTNETPROFITTZ'), 0.0):+.2f}%"
+        roe_weighted = f"{safe_float(f0.get('ROEJQ'), 0.0):.2f}%"
+        gross_margin = f"{safe_float(f0.get('XSMLL'), 0.0):.2f}%"
+        debt_ratio = f"{safe_float(f0.get('ZCFZL'), 0.0):.2f}%"
+        operating_cashflow_per_share = round(safe_float(f0.get("MGJYXJJE"), 0.0), 2)
+
+        goodwill_yuan = safe_float(b0.get("GOODWILL"), 0.0)
+        total_equity_yuan = safe_float(b0.get("TOTAL_EQUITY"), 1.0)
+        goodwill_million = round(goodwill_yuan / 10000.0, 2)
+        goodwill_ratio = round((goodwill_yuan / total_equity_yuan) * 100.0, 2) if total_equity_yuan > 0 else 0.0
+
+        future_lifts = []
+        now_date = datetime.now().strftime("%Y-%m-%d")
+        for lr in lift_rows:
+            free_date_str = str(lr.get("FREE_DATE", ""))[:10]
+            future_lifts.append({
+                "lift_date": free_date_str,
+                "lift_shares_wan": round(safe_float(lr.get("CURRENT_FREE_SHARES"), 0.0), 2),
+                "ratio_of_total_shares": f"{(safe_float(lr.get('TOTAL_RATIO'), 0.0) * 100):.2f}%",
+                "shares_type": lr.get("FREE_SHARES_TYPE", "首发原股东/定增"),
+                "is_future": free_date_str >= now_date,
+            })
+
+        is_annual = ("年报" in report_period)
+        audit_opinion_status = "标准无保留意见 (年度审计)" if is_annual else "未经审计 (中报/季报)"
+
+        debt_val = safe_float(f0.get("ZCFZL"), 0.0)
+        risk_level = "低"
+        risk_reasons = []
+        if debt_val > 70:
+            risk_level = "高"
+            risk_reasons.append(f"资产负债率偏高 ({debt_ratio})")
+        elif debt_val > 50:
+            risk_level = "中"
+            risk_reasons.append(f"资产负债率中等 ({debt_ratio})")
+        if goodwill_ratio > 30:
+            risk_level = "高"
+            risk_reasons.append(f"商誉占净资产比例过高 ({goodwill_ratio}%)")
+        if not risk_reasons:
+            risk_reasons.append("财务结构稳健，无重大商誉减值与高杠杆风险")
+
+        res = {
+            "source": "P1_Eastmoney_Company_Quality_Gateway",
+            "symbol": symbol,
+            "name": f0.get("SECURITY_NAME_ABBR", symbol),
+            "report_period": report_period,
+            "financial_summary": {
+                "revenue_billion": f"{revenue_billion} 亿元",
+                "revenue_yoy": revenue_yoy,
+                "net_profit_wan": f"{net_profit_million} 万元",
+                "net_profit_yoy": net_profit_yoy,
+                "gross_margin": gross_margin,
+                "weighted_roe": roe_weighted,
+                "debt_to_assets_ratio": debt_ratio,
+                "operating_cashflow_per_share": f"{operating_cashflow_per_share} 元",
+            },
+            "balance_and_goodwill": {
+                "goodwill_million": f"{goodwill_million} 万元",
+                "goodwill_to_equity_ratio": f"{goodwill_ratio:.2f}%",
+                "inventory_million": f"{round(safe_float(b0.get('INVENTORY'), 0.0) / 10000.0, 2)} 万元",
+            },
+            "restricted_shares_lifting": future_lifts[:3],
+            "audit_opinion_status": audit_opinion_status,
+            "company_risk_level": risk_level,
+            "company_risk_assessment": "；".join(risk_reasons),
+        }
+        set_cached(cache_key, res)
+        return res
+
+    except Exception as e:
+        return {"error": f"获取公司质量排雷数据出错: {str(e)}"}
+
+
+def fetch_stock_timeline(symbol: str) -> Dict[str, Any]:
+    """
+    获取 A 股个股当日分时走势全景、分时均线 (VWAP)、盘口放量脉冲与集合竞价数据
+    支持数字代码或纯中文名称 (如 '301489', '贵州茅台')
+    直供 market-prediction 竞价承接力研判与 stock-analysis 分时异动研判
+    """
+    ts_code = normalize_symbol(symbol)
+    mkt = "1" if ts_code.startswith("sh") else "0"
+    code = ts_code[2:] if len(ts_code) > 2 and ts_code.startswith(("sh", "sz", "bj")) else ts_code
+
+    cache_key = f"timeline_{ts_code}"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+
+    secid = f"{mkt}.{code}"
+    url = f"http://push2.eastmoney.com/api/qt/stock/trends2/get?secid={secid}&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13&fields2=f51,f52,f53,f54,f55,f56,f57,f58"
+    try:
+        raw = http_get(url, timeout=4)
+        res_json = json.loads(raw)
+        data = res_json.get("data", {})
+        if not data or not data.get("trends"):
+            return {"error": f"未获取到 {symbol} 的分时走势数据"}
+
+        trends = data.get("trends", [])
+        pre_close = safe_float(data.get("preClose"), 0.0)
+        stock_name = data.get("name", symbol)
+
+        parsed_points = []
+        max_price = -1.0
+        min_price = 9999999.0
+        max_time = ""
+        min_time = ""
+        morning_point = None
+
+        for item in trends:
+            parts = item.split(",")
+            if len(parts) < 8:
+                continue
+            tm_str = parts[0]
+            c_p = safe_float(parts[2], 0.0)
+            h_p = safe_float(parts[3], 0.0)
+            l_p = safe_float(parts[4], 0.0)
+            vol_hand = safe_float(parts[5], 0.0)
+            amt_yuan = safe_float(parts[6], 0.0)
+            avg_p = safe_float(parts[7], 0.0)
+
+            if "09:25" in tm_str:
+                morning_point = {
+                    "time": tm_str,
+                    "auction_price": c_p,
+                    "auction_change_pct": f"{((c_p - pre_close) / pre_close * 100):+.2f}%" if pre_close > 0 else "0.00%",
+                }
+
+            if h_p > max_price:
+                max_price = h_p
+                max_time = tm_str
+            if l_p < min_price and l_p > 0:
+                min_price = l_p
+                min_time = tm_str
+
+            parsed_points.append({
+                "time": tm_str,
+                "price": c_p,
+                "volume": vol_hand,
+                "amount": amt_yuan,
+                "avg_price": avg_p,
+            })
+
+        if not parsed_points:
+            return {"error": "分时数据点解析为空"}
+
+        latest = parsed_points[-1]
+        latest_price = latest["price"]
+        latest_avg = latest["avg_price"]
+        latest_change_pct = f"{((latest_price - pre_close) / pre_close * 100):+.2f}%" if pre_close > 0 else "0.00%"
+        bias_to_avg = f"{((latest_price - latest_avg) / latest_avg * 100):+.2f}%" if latest_avg > 0 else "0.00%"
+
+        sorted_by_amt = sorted(parsed_points, key=lambda x: x["amount"], reverse=True)
+        top_surge = [
+            {
+                "time": p["time"],
+                "price": p["price"],
+                "minute_amount_million": f"{round(p['amount'] / 1000000.0, 2)} 百万",
+                "avg_price": p["avg_price"],
+            }
+            for p in sorted_by_amt[:3]
+        ]
+
+        if latest_price > latest_avg and safe_float(latest_change_pct.rstrip('%')) > 0:
+            timeline_status = "强势放量：全天站上分时均线上方运行"
+        elif latest_price < latest_avg:
+            timeline_status = "弱势承压：处于分时均线下方震荡"
+        else:
+            timeline_status = "震荡拉锯：紧贴分时均线缠绕"
+
+        res = {
+            "source": "P1_Eastmoney_Intraday_Timeline",
+            "symbol": code,
+            "ts_code": ts_code,
+            "name": stock_name,
+            "pre_close": pre_close,
+            "latest_price": latest_price,
+            "change_pct": latest_change_pct,
+            "intraday_avg_price": latest_avg,
+            "bias_to_avg_line": bias_to_avg,
+            "intraday_high": f"{max_price} ({max_time})",
+            "intraday_low": f"{min_price} ({min_time})",
+            "morning_call_auction": morning_point or "9:25 未录入",
+            "intraday_strength_label": timeline_status,
+            "volume_surge_moments": top_surge,
+            "total_intraday_points": len(parsed_points),
+        }
+        set_cached(cache_key, res)
+        return res
+    except Exception as e:
+        return {"error": f"获取分时走势失败: {str(e)}"}
+
+
 # -----------------------------------------------------------------------------
 # 3. 标准 MCP JSON-RPC 2.0 协议处理器 (stdio 管道)
 # -----------------------------------------------------------------------------
 SERVER_INFO = {
     "name": "marketgraph-data",
-    "version": "1.0.0",
+    "version": "1.2.0",
 }
 
 AVAILABLE_TOOLS = [
     {
         "name": "get_stock_quote",
-        "description": "获取 A 股个股实时行情、PE(TTM)、PB、总市值、流通市值、换手率与五档盘口（毫秒级直连）",
+        "description": "获取 A 股个股实时行情、PE(TTM)、PB、总市值、流通市值、换手率与五档盘口（支持代码或中文名，毫秒级直连）",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "symbol": {
                     "type": "string",
-                    "description": "股票代码或简称，例如 '300308', '000938.SZ', 'sh600519'",
+                    "description": "股票代码或简称，例如 '300308', '000938.SZ', 'sh600519', '贵州茅台'",
                 }
             },
             "required": ["symbol"],
@@ -401,19 +973,33 @@ AVAILABLE_TOOLS = [
     },
     {
         "name": "get_stock_kline",
-        "description": "获取 A 股个股 120 日连续前复权日K线、MA20、MA50、ATR14与Bias偏离度（完全满足 stock-analysis 行情硬门槛）",
+        "description": "获取 A 股个股 120 日连续前复权日K线、MA20、MA50、ATR14与Bias偏离度（支持代码或中文名，完全满足 stock-analysis 行情硬门槛）",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "symbol": {
                     "type": "string",
-                    "description": "股票代码，例如 '300308'",
+                    "description": "股票代码或中文名，例如 '300308', '中际旭创'",
                 },
                 "count": {
                     "type": "integer",
                     "description": "K 线根数，默认 120",
                     "default": 120,
                 },
+            },
+            "required": ["symbol"],
+        },
+    },
+    {
+        "name": "get_stock_timeline",
+        "description": "获取 A 股个股当日分时全景、分时均价线 (VWAP)、盘中量能脉冲时刻与 9:25 集合竞价承接力（支持代码或中文名）",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "股票代码或中文名，例如 '301489', '贵州茅台', '中际旭创'",
+                }
             },
             "required": ["symbol"],
         },
@@ -444,6 +1030,51 @@ AVAILABLE_TOOLS = [
             },
         },
     },
+    {
+        "name": "get_sector_fund_flow",
+        "description": "获取 A 股全行业板块主力资金净流入榜、流出榜、涨幅榜、跌幅榜及领涨龙头股票（直供复盘与轮动）",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer",
+                    "description": "返回的行业板块数量，默认 20",
+                    "default": 20,
+                }
+            },
+        },
+    },
+    {
+        "name": "get_longhubang_detail",
+        "description": "获取 A 股交易所公开龙虎榜席位明细（全市场当日上榜概览或指定个股前5大买卖席位穿透，支持代码或中文名）",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "股票代码或中文名，例如 '301489', '思泉新材'，省略时返回全市场龙虎榜概览",
+                },
+                "date_str": {
+                    "type": "string",
+                    "description": "交易日期 YYYY-MM-DD，省略则为最新交易日",
+                },
+            },
+        },
+    },
+    {
+        "name": "get_company_quality",
+        "description": "获取 A 股个股基本面质量财务指标（营收/净利同比、ROE、毛利率、负债率）、商誉占比、限售解禁日与审计意见状态（支持代码或中文名）",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "股票代码或中文名，例如 '301489', '思泉新材'",
+                }
+            },
+            "required": ["symbol"],
+        },
+    },
 ]
 
 
@@ -452,10 +1083,18 @@ def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         return fetch_stock_quote(arguments.get("symbol", ""))
     elif name == "get_stock_kline":
         return fetch_stock_kline(arguments.get("symbol", ""), arguments.get("count", 120))
+    elif name == "get_stock_timeline":
+        return fetch_stock_timeline(arguments.get("symbol", ""))
     elif name == "get_market_sentiment":
         return fetch_market_sentiment(arguments.get("date_str"))
     elif name == "get_limit_up_ladder":
         return fetch_limit_up_ladder(arguments.get("date_str"))
+    elif name == "get_sector_fund_flow":
+        return fetch_sector_fund_flow(arguments.get("count", 20))
+    elif name == "get_longhubang_detail":
+        return fetch_longhubang_detail(arguments.get("symbol"), arguments.get("date_str"))
+    elif name == "get_company_quality":
+        return fetch_company_quality(arguments.get("symbol", ""))
     else:
         return {"error": f"未知工具: {name}"}
 
@@ -572,12 +1211,21 @@ if __name__ == "__main__":
             out = fetch_stock_quote(target_symbol)
         elif tool_name == "get_stock_kline":
             out = fetch_stock_kline(target_symbol, 120)
+        elif tool_name == "get_stock_timeline":
+            out = fetch_stock_timeline(target_symbol)
         elif tool_name == "get_market_sentiment":
             out = fetch_market_sentiment()
         elif tool_name == "get_limit_up_ladder":
             out = fetch_limit_up_ladder()
+        elif tool_name == "get_sector_fund_flow":
+            out = fetch_sector_fund_flow()
+        elif tool_name == "get_longhubang_detail":
+            out = fetch_longhubang_detail(target_symbol)
+        elif tool_name == "get_company_quality":
+            out = fetch_company_quality(target_symbol)
         else:
             out = {"error": "未知工具"}
         print(json.dumps(out, ensure_ascii=False, indent=2))
     else:
         run_stdio_server()
+

@@ -15,7 +15,7 @@
 
 当宿主智能体环境已挂载 MCP 金融数据工具（如 `marketgraph-data`）时，执行以下优先路由协议：
 
-- **P1 级最高优先级**：调用 `get_stock_kline`（120日复权K线与ATR）、`get_stock_quote`（实时估值盘口）、`get_market_sentiment`（大盘量能与炸板率）、`get_limit_up_ladder`（连板天梯）获取的数据直接归为 `P1` 级结构化行情证据。
+- **P1 级最高优先级**：调用 `get_stock_quote`（实时估值盘口）、`get_stock_kline`（120日复权K线与ATR）、`get_stock_timeline`（当日分时均线/脉冲/竞价）、`get_market_sentiment`（大盘量能与炸板率）、`get_limit_up_ladder`（连板天梯）、`get_sector_fund_flow`（行业板块资金流与领涨龙头）、`get_longhubang_detail`（龙虎榜席位明细与机构净买入）、`get_company_quality`（财务指标/商誉/解禁/排雷）获取的数据直接归为 `P1` 级结构化行情与基本面证据。工具全面支持**纯中文股票名称（如“贵州茅台”）与代码自动解析**。
 - **自动通过行情硬门槛**：成功调用 `get_stock_kline` 获得 120 根 K 线时，自动通过行情硬门槛，对应技术层数据组计为 100% 满额有效。
 - **无感优雅回退**：若未检测到 MCP 工具，自动平滑回退至网络检索（P4）与公告核验（P2），并严格执行常规数据缺省审计。
 

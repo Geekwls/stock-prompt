@@ -20,14 +20,24 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         self.assertEqual(SERVER.normalize_symbol("600519.SH"), "sh600519")
         self.assertEqual(SERVER.normalize_symbol("830000"), "bj830000")
 
+    @patch.object(SERVER, "http_get")
+    def test_resolve_symbol_by_name(self, mock_get):
+        mock_get.return_value = 'v_hint="sh~600519~贵州茅台~gzmt~GP-A";\n'
+        res = SERVER.normalize_symbol("贵州茅台")
+        self.assertEqual(res, "sh600519")
+
     def test_tools_schema_validity(self):
         tools = SERVER.AVAILABLE_TOOLS
-        self.assertGreaterEqual(len(tools), 4)
+        self.assertGreaterEqual(len(tools), 8)
         tool_names = {t["name"] for t in tools}
         self.assertIn("get_stock_quote", tool_names)
         self.assertIn("get_stock_kline", tool_names)
+        self.assertIn("get_stock_timeline", tool_names)
         self.assertIn("get_market_sentiment", tool_names)
         self.assertIn("get_limit_up_ladder", tool_names)
+        self.assertIn("get_sector_fund_flow", tool_names)
+        self.assertIn("get_longhubang_detail", tool_names)
+        self.assertIn("get_company_quality", tool_names)
         for t in tools:
             self.assertIn("description", t)
             self.assertIn("inputSchema", t)
@@ -100,6 +110,29 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         self.assertGreater(kline["atr14"], 0)
 
     @patch.object(SERVER, "http_get")
+    def test_fetch_stock_timeline_parsing(self, mock_get):
+        mock_trends = [
+            "2026-09-03 09:25,100.00,102.00,102.00,100.00,500,5100000.00,102.000",
+            "2026-09-03 09:30,102.00,103.00,103.50,101.50,1000,10300000.00,102.500",
+            "2026-09-03 15:00,103.00,105.00,105.00,103.00,2000,21000000.00,103.500",
+        ]
+        mock_resp = {
+            "data": {
+                "name": "测试股",
+                "preClose": 100.0,
+                "trends": mock_trends,
+            }
+        }
+        mock_get.return_value = json.dumps(mock_resp)
+
+        res = SERVER.fetch_stock_timeline("300308")
+        self.assertEqual(res["name"], "测试股")
+        self.assertEqual(res["latest_price"], 105.0)
+        self.assertEqual(res["change_pct"], "+5.00%")
+        self.assertEqual(res["morning_call_auction"]["auction_change_pct"], "+2.00%")
+        self.assertEqual(res["intraday_strength_label"], "强势放量：全天站上分时均线上方运行")
+
+    @patch.object(SERVER, "http_get")
     def test_fetch_market_sentiment_parsing(self, mock_get):
         mock_get.return_value = 'v_s_sh000001="1~上证指数~000001~3850.20~+12.30~+0.32~120000~45000000";v_s_sz399001="1~深证成指~399001~11500.50~+25.10~+0.22~150000~55000000";'
         
@@ -123,6 +156,67 @@ class MarketGraphMCPServerTest(unittest.TestCase):
             self.assertEqual(res["zb_count"], 1)
             self.assertEqual(res["exact_break_rate"], "33.33%")
             self.assertEqual(res["max_ladder_height"], "3 连板")
+
+    @patch.object(SERVER, "http_get")
+    def test_fetch_sector_fund_flow(self, mock_get):
+        mock_sectors = [
+            {"f12": "BK001", "f14": "半导体", "f3": 3.5, "f62": 2500000000.0, "f184": 5.2, "f204": "寒武纪", "f205": "688256"},
+            {"f12": "BK002", "f14": "医药生物", "f3": -1.2, "f62": -1500000000.0, "f184": -3.1, "f204": "药明康德", "f205": "603259"},
+        ]
+        mock_get.return_value = json.dumps({"data": {"diff": mock_sectors}})
+        res = SERVER.fetch_sector_fund_flow(count=5)
+        self.assertEqual(res["total_sectors_tracked"], 2)
+        self.assertEqual(res["top_inflow_sectors"][0]["name"], "半导体")
+        self.assertEqual(res["top_inflow_sectors"][0]["net_inflow_billion"], "+25.00 亿")
+        self.assertEqual(res["top_outflow_sectors"][0]["name"], "医药生物")
+
+    def test_fetch_longhubang_detail_parsing(self):
+        class MockResp:
+            def __init__(self, payload):
+                self.payload = json.dumps(payload).encode("utf-8")
+            def read(self):
+                return self.payload
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+
+        mock_buy = {"result": {"data": [{"OPERATEDEPT_NAME": "机构专用", "BUY": 50000000, "SELL": 1000000, "NET": 49000000}]}}
+        mock_sell = {"result": {"data": [{"OPERATEDEPT_NAME": "东方证券拉萨营业部", "BUY": 1000000, "SELL": 20000000, "NET": -19000000}]}}
+        mock_sum = {"result": {"data": [{"SECURITY_NAME_ABBR": "思泉新材", "TRADE_DATE": "2026-09-03 00:00:00", "TOTAL_BUY": 100000000, "TOTAL_SELL": 50000000, "TOTAL_NET": 50000000}]}}
+
+        with patch("urllib.request.urlopen", side_effect=[MockResp(mock_buy), MockResp(mock_sell), MockResp(mock_sum)]):
+            res = SERVER.fetch_longhubang_detail(symbol="301489")
+            self.assertEqual(res["name"], "思泉新材")
+            self.assertEqual(res["top5_buyers"][0]["seat_type"], "机构专用")
+            self.assertEqual(res["seat_quality_judgment"], "顶级合力(机构/外资+游资)")
+
+    def test_fetch_company_quality_parsing(self):
+        class MockResp:
+            def __init__(self, payload):
+                self.payload = json.dumps(payload).encode("utf-8")
+            def read(self):
+                return self.payload
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+
+        mock_fina = {"result": {"data": [{
+            "SECURITY_NAME_ABBR": "思泉新材", "REPORT_DATE_NAME": "2026中报",
+            "TOTALOPERATEREVE": 521000000, "TOTALOPERATEREVETZ": 34.95,
+            "PARENTNETPROFIT": 33610000, "PARENTNETPROFITTZ": 10.17,
+            "ROEJQ": 3.0, "XSMLL": 30.28, "ZCFZL": 34.5, "MGJYXJJE": 0.94
+        }]}}
+        mock_lift = {"result": {"data": [{"FREE_DATE": "2026-10-24", "CURRENT_FREE_SHARES": 2969.61, "TOTAL_RATIO": 0.2554, "FREE_SHARES_TYPE": "首发限售"}]}}
+        mock_balance = {"result": {"data": [{"GOODWILL": 0, "TOTAL_EQUITY": 1123000000, "INVENTORY": 271280000}]}}
+
+        with patch("urllib.request.urlopen", side_effect=[MockResp(mock_fina), MockResp(mock_lift), MockResp(mock_balance)]):
+            res = SERVER.fetch_company_quality(symbol="301489")
+            self.assertEqual(res["report_period"], "2026中报")
+            self.assertEqual(res["financial_summary"]["revenue_billion"], "5.21 亿元")
+            self.assertEqual(res["company_risk_level"], "低")
+            self.assertEqual(res["audit_opinion_status"], "未经审计 (中报/季报)")
 
     def test_unknown_tool_returns_error(self):
         res = SERVER.handle_tool_call("unknown_tool", {})

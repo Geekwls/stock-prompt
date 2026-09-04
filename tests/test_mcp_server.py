@@ -84,12 +84,16 @@ class MarketGraphMCPServerTest(unittest.TestCase):
 
     @patch.object(SERVER, "http_get")
     def test_fetch_stock_kline_and_indicators(self, mock_get):
-        # 构造连续 260 根日 K 线序列 (包含1年完整周期)
+        # 构造连续 760 根日 K 线序列 (包含3年完整大周期)
         mock_bars = []
         base_price = 100.0
-        for i in range(260):
-            date_str = f"2025-{((i // 22) + 1):02d}-{(i % 22 + 1):02d}"
-            p = base_price + i * 0.5
+        for i in range(760):
+            year = 2023 + (i // 250)
+            day_in_year = i % 250
+            month = (day_in_year // 22) + 1
+            day = (day_in_year % 22) + 1
+            date_str = f"{year}-{month:02d}-{day:02d}"
+            p = base_price + i * 0.2
             mock_bars.append([date_str, f"{p:.2f}", f"{p+1:.2f}", f"{p+2:.2f}", f"{p-1:.2f}", "10000"])
         mock_resp = {
             "data": {
@@ -100,8 +104,8 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         }
         mock_get.return_value = json.dumps(mock_resp)
 
-        kline = SERVER.fetch_stock_kline("300308", count=250)
-        self.assertEqual(kline["valid_bars"], 250)
+        kline = SERVER.fetch_stock_kline("300308", count=750)
+        self.assertEqual(kline["valid_bars"], 750)
         self.assertTrue(kline["hard_gate_passed"])
         self.assertTrue(kline["compact_mode"])
         self.assertEqual(len(kline["recent_30_bars"]), 30)
@@ -110,8 +114,19 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         self.assertIn("ma50", kline)
         self.assertIsNotNone(kline["ma120_half_year"])
         self.assertIsNotNone(kline["ma250_year_line"])
+        self.assertIsNotNone(kline["ma500_2year_line"])
         self.assertIn("atr14", kline)
         self.assertIn("bias_ma20", kline)
+        self.assertIn("bias_ma250_year", kline)
+        self.assertIn("bias_ma500_2year", kline)
+        self.assertIn("high_3y", kline)
+        self.assertIn("low_3y", kline)
+        self.assertIn("percentile_3y", kline)
+        self.assertIn("weekly_timeframe", kline)
+        self.assertGreaterEqual(kline["weekly_timeframe"]["total_weeks"], 100)
+        self.assertIn("weekly_alignment", kline["weekly_timeframe"])
+        self.assertIsNotNone(kline["weekly_timeframe"]["weekly_ma10"])
+        self.assertIsNotNone(kline["weekly_timeframe"]["weekly_ma30"])
         self.assertGreater(kline["atr14"], 0)
         self.assertEqual(kline["adjustment"], "qfq")
         self.assertIn("wyckoff_multi_timeframe", kline)
@@ -121,10 +136,10 @@ class MarketGraphMCPServerTest(unittest.TestCase):
 
         # 测试 full 模式 (compact=False)
         SERVER.CACHE_STORE.clear()
-        kline_full = SERVER.fetch_stock_kline("300308", count=250, compact=False)
+        kline_full = SERVER.fetch_stock_kline("300308", count=750, compact=False)
         self.assertFalse(kline_full["compact_mode"])
         self.assertIn("bars", kline_full)
-        self.assertEqual(len(kline_full["bars"]), 250)
+        self.assertEqual(len(kline_full["bars"]), 750)
 
     @patch.object(SERVER, "http_get")
     def test_kline_rejects_unadjusted_fallback(self, mock_get):

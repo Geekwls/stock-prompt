@@ -197,19 +197,106 @@ def fetch_stock_quote(symbol: str) -> Dict[str, Any]:
         return {"error": f"解析个股行情出错: {str(e)}"}
 
 
+def aggregate_daily_to_weekly(bars: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    在内存中将前复权日K线无损聚合成周K线（0ms网络开销），计算周线均线系统与多周期共振趋势
+    """
+    if not bars:
+        return {"data_status": "insufficient_data"}
+
+    from collections import OrderedDict
+    weeks_dict = OrderedDict()
+
+    for bar in bars:
+        date_str = bar.get("date", "")
+        try:
+            dt = datetime.strptime(date_str, "%Y-%m-%d")
+            iso_year, iso_week, _ = dt.isocalendar()
+            key = (iso_year, iso_week)
+        except Exception:
+            key = date_str[:7]
+
+        if key not in weeks_dict:
+            weeks_dict[key] = []
+        weeks_dict[key].append(bar)
+
+    weekly_bars = []
+    for key, day_list in weeks_dict.items():
+        w_open = day_list[0]["open"]
+        w_close = day_list[-1]["close"]
+        w_high = max(d["high"] for d in day_list)
+        w_low = min(d["low"] for d in day_list)
+        w_vol = sum(d["volume"] for d in day_list)
+        w_date = day_list[-1]["date"]
+        weekly_bars.append({
+            "date": w_date,
+            "open": round(w_open, 2),
+            "close": round(w_close, 2),
+            "high": round(w_high, 2),
+            "low": round(w_low, 2),
+            "volume": round(w_vol, 2),
+        })
+
+    num_weeks = len(weekly_bars)
+    if num_weeks == 0:
+        return {"data_status": "insufficient_data"}
+
+    w_closes = [wb["close"] for wb in weekly_bars]
+    latest_w_close = w_closes[-1]
+
+    # 周均线: MA10 (约50日线，中期波段趋势) / MA30 (约150日线，大级别牛熊分水岭)
+    weekly_ma10 = round(sum(w_closes[-10:]) / 10.0, 2) if num_weeks >= 10 else None
+    weekly_ma30 = round(sum(w_closes[-30:]) / 30.0, 2) if num_weeks >= 30 else None
+
+    # 周线趋势状态判定
+    if weekly_ma10 and weekly_ma30:
+        if latest_w_close >= weekly_ma10 and weekly_ma10 >= weekly_ma30:
+            weekly_alignment = "BULLISH_UPTREND"  # 周线多头排列，主升大趋势
+        elif latest_w_close <= weekly_ma10 and weekly_ma10 <= weekly_ma30:
+            weekly_alignment = "BEARISH_DOWNTREND"  # 周线空头排列，下行大趋势
+        elif latest_w_close >= weekly_ma10 and weekly_ma10 < weekly_ma30:
+            weekly_alignment = "REBOUND_TESTING_RESISTANCE"  # 周线超跌反弹，测试长期均线阻力
+        else:
+            weekly_alignment = "CONSOLIDATION"  # 周线震荡整理
+    else:
+        weekly_alignment = "NEUTRAL"
+
+    # 周线高低区间 (近52周 / 约1年)
+    w52_high = max([wb["high"] for wb in weekly_bars[-min(52, num_weeks):]])
+    w52_low = min([wb["low"] for wb in weekly_bars[-min(52, num_weeks):]])
+
+    return {
+        "total_weeks": num_weeks,
+        "latest_week_date": weekly_bars[-1]["date"],
+        "latest_week_close": latest_w_close,
+        "weekly_ma10": weekly_ma10,
+        "weekly_ma30": weekly_ma30,
+        "weekly_alignment": weekly_alignment,
+        "bias_weekly_ma10": f"{((latest_w_close - weekly_ma10) / weekly_ma10 * 100):+.2f}%" if weekly_ma10 else "N/A",
+        "bias_weekly_ma30": f"{((latest_w_close - weekly_ma30) / weekly_ma30 * 100):+.2f}%" if weekly_ma30 else "N/A",
+        "high_52_weeks": w52_high,
+        "low_52_weeks": w52_low,
+        "summary": f"周线共振: 覆盖 {num_weeks} 周; 趋势定调: {weekly_alignment}; MA10: {weekly_ma10}, MA30: {weekly_ma30}",
+    }
+
+
 def compute_wyckoff_signals(
     bars: List[Dict[str, Any]],
     ma20: float,
     ma50: float,
     ma120: Optional[float],
     ma250: Optional[float],
+    ma500: Optional[float],
     atr14: float,
     latest_close: float,
     bias_ma20: float,
     high_year: float,
     low_year: float,
+    high_3y: float,
+    low_3y: float,
+    weekly_info: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """预计算双层威科夫时空模型（宏观大周期定性 + 微观量价结构），消除大模型数值对比幻觉"""
+    """预计算三层威科夫时空模型（3年宏观大周期 + 周线共振大势 + 60日微观交易区间与量价触发），消除大模型数值对比幻觉"""
     valid_count = len(bars)
     if valid_count < 20:
         return {"data_status": "insufficient_bars"}
@@ -224,26 +311,44 @@ def compute_wyckoff_signals(
     latest_low = lows[-1]
     bar_range = latest_high - latest_low if latest_high > latest_low else 0.01
 
-    # 1. 宏观威科夫大周期定调 (Macro Wyckoff Phase, 基于年线/半年线与年内分位点)
+    # 1. 宏观威科夫大周期定调 (Macro Wyckoff Phase, 结合 3年大时空坐标与 MA250/MA500)
+    range_3y = high_3y - low_3y if high_3y > low_3y else 1.0
+    percentile_3y = round((latest_close - low_3y) / range_3y * 100, 1)
+
     year_range = high_year - low_year if high_year > low_year else 1.0
     year_percentile = round((latest_close - low_year) / year_range * 100, 1)
 
     bias_ma250 = round((latest_close - ma250) / ma250 * 100, 2) if ma250 else None
     bias_ma120 = round((latest_close - ma120) / ma120 * 100, 2) if ma120 else None
+    bias_ma500 = round((latest_close - ma500) / ma500 * 100, 2) if ma500 else None
 
-    if ma250 and ma120:
-        if latest_close > ma250 and ma120 >= ma250 * 0.98 and year_percentile >= 50.0:
-            macro_phase = "STAGE_2_MARKUP_BULLISH"  # 大级别牛市主升浪 (站稳年线上方)
-        elif latest_close < ma250 and ma120 <= ma250 * 1.02 and year_percentile <= 45.0:
-            macro_phase = "STAGE_4_MARKDOWN_BEARISH"  # 大级别空头阴跌通道 (年线压制)
-        elif year_percentile <= 25.0:
-            macro_phase = "STAGE_1_MACRO_ACCUMULATION"  # 1~2年历史大底吸筹区 (沉淀筑底)
-        elif year_percentile >= 80.0:
-            macro_phase = "STAGE_3_MACRO_DISTRIBUTION"  # 1~2年高位筹码派发区 (筑顶风险)
+    if ma250 and ma500:
+        if latest_close >= ma250 and ma250 >= ma500 * 0.98 and percentile_3y >= 50.0:
+            macro_phase = "STAGE_2_MACRO_MARKUP_BULLISH"  # 站稳年线与两年线之上，3年大级别牛市主升
+        elif latest_close <= ma250 and ma250 <= ma500 * 1.02 and percentile_3y <= 40.0:
+            if percentile_3y <= 20.0:
+                macro_phase = "STAGE_1_MACRO_ACCUMULATION"  # 3年历史大底部吸筹区 (铁底沉淀蓄势)
+            else:
+                macro_phase = "STAGE_4_MACRO_MARKDOWN_BEARISH"  # 3年大级别空头阴跌通道 (年线/两年线强压)
+        elif percentile_3y <= 25.0:
+            macro_phase = "STAGE_1_MACRO_ACCUMULATION"  # 3年周期极度低估与大吸筹区
+        elif percentile_3y >= 85.0:
+            macro_phase = "STAGE_3_MACRO_DISTRIBUTION"  # 3年高位筹码派发区 (天花板筑顶风险)
         else:
-            macro_phase = "STAGE_REACCUMULATION_OR_CONSOLIDATION"  # 宏观大中继整理区
+            macro_phase = "STAGE_REACCUMULATION_OR_CONSOLIDATION"  # 3年中继箱体震荡整理
+    elif ma250:
+        if latest_close >= ma250 and year_percentile >= 50.0:
+            macro_phase = "STAGE_2_MARKUP_BULLISH"
+        elif latest_close <= ma250 and year_percentile <= 40.0:
+            macro_phase = "STAGE_1_MACRO_ACCUMULATION" if percentile_3y <= 25.0 else "STAGE_4_MARKDOWN_BEARISH"
+        elif percentile_3y <= 25.0:
+            macro_phase = "STAGE_1_MACRO_ACCUMULATION"
+        elif percentile_3y >= 80.0:
+            macro_phase = "STAGE_3_MACRO_DISTRIBUTION"
+        else:
+            macro_phase = "STAGE_REACCUMULATION_OR_CONSOLIDATION"
     else:
-        macro_phase = "STAGE_1_MACRO_ACCUMULATION" if year_percentile <= 30.0 else "STAGE_2_MARKUP_BULLISH"
+        macro_phase = "STAGE_1_MACRO_ACCUMULATION" if percentile_3y <= 30.0 else "STAGE_2_MARKUP_BULLISH"
 
     # 2. 中微观局部交易区间 (Trading Range, 观察近 60 日震荡箱体)
     tr_window = min(60, valid_count)
@@ -293,9 +398,13 @@ def compute_wyckoff_signals(
     else:
         bias_status = "NORMAL_RANGE"
 
+    weekly_summary_str = weekly_info.get("summary", "") if weekly_info else ""
+
     return {
         "macro_wyckoff_phase": macro_phase,
+        "percentile_3y": f"{percentile_3y}%",
         "year_price_percentile": f"{year_percentile}%",
+        "bias_ma500": f"{bias_ma500:+.2f}%" if bias_ma500 is not None else "N/A",
         "bias_ma250": f"{bias_ma250:+.2f}%" if bias_ma250 is not None else "N/A",
         "bias_ma120": f"{bias_ma120:+.2f}%" if bias_ma120 is not None else "N/A",
         "trading_range_60d": {
@@ -314,18 +423,19 @@ def compute_wyckoff_signals(
             "bias_status": bias_status,
         },
         "summary": (
-            f"宏观阶段: {macro_phase} (年内分位: {year_percentile}%, 年线乖离: {bias_ma250 if bias_ma250 is not None else 'N/A'}%); "
+            f"宏观阶段: {macro_phase} (3年分位: {percentile_3y}%, 1年分位: {year_percentile}%, 年线乖离: {bias_ma250 if bias_ma250 is not None else 'N/A'}%, 两年线乖离: {bias_ma500 if bias_ma500 is not None else 'N/A'}%); "
             f"60日箱体: {tr_location} ({tr_position_pct}%位置); "
             f"量能: {'地量萎缩' if volume_dry_up else ('放量异动' if volume_expansion else '量能平稳')}({vol_ratio_to_ma20}x MA20); "
             f"形态: {'[Spring测试]' if spring_detected else ''}{'[UT假突破风险]' if upthrust_detected else ''}{'[筹码紧凑吸收]' if absorption_detected else ''}{'无异常形态' if not (spring_detected or upthrust_detected or absorption_detected) else ''}"
+            + (f"; {weekly_summary_str}" if weekly_summary_str else "")
         ),
     }
 
 
-def fetch_stock_kline(symbol: str, count: int = 250, compact: bool = True) -> Dict[str, Any]:
+def fetch_stock_kline(symbol: str, count: int = 750, compact: bool = True) -> Dict[str, Any]:
     """
-    获取 250 日 (1年) 至 500 日 (2年) 前复权日K线、全套均线矩阵 (MA20/50/120/250) 与双层威科夫时空模型
-    默认开启 compact=True 瘦身模式（保留核心统计与最近30日K线，兼顾微观博弈与宏观全景），直接满足行情硬门槛
+    获取 750 日 (约3年) 前复权日K线、全套均线矩阵 (MA20/50/120/250/500)、3年宏观时空坐标、内存周线共振与双层威科夫模型
+    默认开启 compact=True 瘦身模式（保留3年宏观全景指标、周线共振趋势与最近30日微观K线），直接完美满足行情硬门槛
     """
     ts_code = normalize_symbol(symbol)
     cache_key = f"kline_{ts_code}_{count}_{compact}"
@@ -333,8 +443,8 @@ def fetch_stock_kline(symbol: str, count: int = 250, compact: bool = True) -> Di
     if cached:
         return cached
 
-    if not isinstance(count, int) or not 20 <= count <= 500:
-        return {"error": "count 必须是 20 至 500 的整数", "data_status": "unavailable"}
+    if not isinstance(count, int) or not 20 <= count <= 800:
+        return {"error": "count 必须是 20 至 800 的整数", "data_status": "unavailable"}
     url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={ts_code},day,,,{count},qfq"
     try:
         raw = http_get(url)
@@ -366,11 +476,12 @@ def fetch_stock_kline(symbol: str, count: int = 250, compact: bool = True) -> Di
         highs = [b["high"] for b in bars]
         lows = [b["low"] for b in bars]
 
-        # 计算全周期均线矩阵: MA20 / MA50 / MA120 (半年线) / MA250 (年线)
+        # 计算全周期均线矩阵: MA20 / MA50 / MA120 (半年线) / MA250 (年线) / MA500 (两年线)
         ma20 = sum(closes[-20:]) / min(20, valid_count) if valid_count >= 5 else closes[-1]
         ma50 = sum(closes[-50:]) / min(50, valid_count) if valid_count >= 10 else closes[-1]
         ma120 = round(sum(closes[-120:]) / 120.0, 2) if valid_count >= 100 else None
         ma250 = round(sum(closes[-250:]) / 250.0, 2) if valid_count >= 200 else None
+        ma500 = round(sum(closes[-500:]) / 500.0, 2) if valid_count >= 400 else None
 
         latest_close = closes[-1]
         bias_ma20 = (latest_close - ma20) / ma20 * 100 if ma20 else 0.0
@@ -386,13 +497,19 @@ def fetch_stock_kline(symbol: str, count: int = 250, compact: bool = True) -> Di
             trs.append(tr)
         atr14 = sum(trs[-14:]) / min(14, len(trs)) if trs else (highs[-1] - lows[-1])
 
-        # 1年与2年高低区间
+        # 3年历史高低区间 (750根日线) 与 1年高低区间 (250根)
+        high_3y = max(highs[-min(750, valid_count):])
+        low_3y = min(lows[-min(750, valid_count):])
         high_year = max(highs[-min(250, valid_count):])
         low_year = min(lows[-min(250, valid_count):])
 
-        # 预计算双层威科夫宏观与微观信号
+        # 内存无损聚合周线多周期共振体系
+        weekly_analysis = aggregate_daily_to_weekly(bars)
+
+        # 预计算三层威科夫宏观与微观信号
         wyckoff_signals = compute_wyckoff_signals(
-            bars, ma20, ma50, ma120, ma250, atr14, latest_close, bias_ma20, high_year, low_year
+            bars, ma20, ma50, ma120, ma250, ma500, atr14, latest_close, bias_ma20,
+            high_year, low_year, high_3y, low_3y, weekly_analysis
         )
 
         res = {
@@ -410,19 +527,25 @@ def fetch_stock_kline(symbol: str, count: int = 250, compact: bool = True) -> Di
             "ma50": round(ma50, 2),
             "ma120_half_year": ma120,
             "ma250_year_line": ma250,
+            "ma500_2year_line": ma500,
             "bias_ma20": f"{bias_ma20:+.2f}%",
             "bias_ma50": f"{bias_ma50:+.2f}%",
             "bias_ma250_year": wyckoff_signals["bias_ma250"],
+            "bias_ma500_2year": wyckoff_signals["bias_ma500"],
             "atr14": round(atr14, 2),
             "atr14_pct": f"{(atr14 / latest_close * 100):.2f}%",
             "high_120": max(highs[-min(120, valid_count):]),
             "low_120": min(lows[-min(120, valid_count):]),
             "high_year": high_year,
             "low_year": low_year,
+            "high_3y": high_3y,
+            "low_3y": low_3y,
+            "percentile_3y": wyckoff_signals["percentile_3y"],
             "recent_5d_return": f"{((closes[-1] - closes[-min(5, valid_count)]) / closes[-min(5, valid_count)] * 100):+.2f}%",
             "recent_20d_return": f"{((closes[-1] - closes[-min(20, valid_count)]) / closes[-min(20, valid_count)] * 100):+.2f}%",
+            "weekly_timeframe": weekly_analysis,
             "wyckoff_multi_timeframe": wyckoff_signals,
-            "bars_summary": f"已检验 {valid_count} 根前复权日K线 (含半年线MA120/年线MA250宏观视界)，完全通过行情硬门槛" + (" [精简视图：附最近30日K线]" if compact else " [完整视图：附全量K线]"),
+            "bars_summary": f"已检验 {valid_count} 根前复权日K线 (覆盖3年宏观时空，含MA120/MA250/MA500均线矩阵及周线共振)，完全通过行情硬门槛" + (" [精简视图：附最近30日K线]" if compact else " [完整视图：附全量K线]"),
         }
 
         # Token 瘦身模式：精简模式下返回最近 30 根 K 线 (约6周，完整展现局部 TR 结构)
@@ -1167,7 +1290,7 @@ AVAILABLE_TOOLS = [
     },
     {
         "name": "get_stock_kline",
-        "description": "获取 A 股个股 250 日 (1年) 乃至 500 日 (2年) 连续前复权日K线、全套均线矩阵 (MA20/50/120/250) 与双层威科夫时空模型（宏观牛熊阶段+微观60日交易区间）（支持代码或中文名，完全满足行情硬门槛）",
+        "description": "获取 A 股个股 750 日 (3年) 连续前复权日K线、全套均线矩阵 (MA20/50/120/250/500)、3年宏观时空坐标、内存无损周线共振与三层威科夫时空模型（宏观牛熊阶段+周线大势+微观60日交易区间与量价触发）（支持代码或中文名，完全满足行情硬门槛）",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -1177,14 +1300,14 @@ AVAILABLE_TOOLS = [
                 },
                 "count": {
                     "type": "integer",
-                    "description": "K 线根数，默认 250 (1年，含年线MA250/半年线MA120)；可设为 500 查看2年大级别筑底周期",
-                    "default": 250,
+                    "description": "K 线根数，默认 750 (整整3年宏观时空，含MA120/MA250/MA500两年线与周线共振)；支持 20 至 800 根自由调节",
+                    "default": 750,
                     "minimum": 20,
-                    "maximum": 500,
+                    "maximum": 800,
                 },
                 "compact": {
                     "type": "boolean",
-                    "description": "是否开启 Token 瘦身精简模式（默认 true，附最近30日K线与核心指标，节省80% Token；传 false 则返回 250 根全量日线数组）",
+                    "description": "是否开启 Token 瘦身精简模式（默认 true，附最近30日K线、3年宏观时空坐标与周线共振指标，节省85% Token；传 false 则返回全量日线数组）",
                     "default": True,
                 },
             },
@@ -1297,7 +1420,7 @@ def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     elif name == "get_stock_kline":
         return fetch_stock_kline(
             arguments.get("symbol", ""),
-            arguments.get("count", 250),
+            arguments.get("count", 750),
             arguments.get("compact", True)
         )
     elif name == "get_stock_timeline":
@@ -1435,7 +1558,7 @@ if __name__ == "__main__":
             out = fetch_stock_quote(target_symbol)
         elif tool_name == "get_stock_kline":
             is_compact = True if len(sys.argv) <= 4 or sys.argv[4] != "full" else False
-            out = fetch_stock_kline(target_symbol, 250, compact=is_compact)
+            out = fetch_stock_kline(target_symbol, 750, compact=is_compact)
         elif tool_name == "get_stock_timeline":
             out = fetch_stock_timeline(target_symbol)
         elif tool_name == "get_market_sentiment":

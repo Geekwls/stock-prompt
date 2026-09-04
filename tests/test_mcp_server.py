@@ -84,11 +84,11 @@ class MarketGraphMCPServerTest(unittest.TestCase):
 
     @patch.object(SERVER, "http_get")
     def test_fetch_stock_kline_and_indicators(self, mock_get):
-        # 构造连续 125 根日 K 线序列
+        # 构造连续 260 根日 K 线序列 (包含1年完整周期)
         mock_bars = []
         base_price = 100.0
-        for i in range(125):
-            date_str = f"2026-01-{i+1:02d}" if i < 30 else f"2026-03-{i-29:02d}"
+        for i in range(260):
+            date_str = f"2025-{((i // 22) + 1):02d}-{(i % 22 + 1):02d}"
             p = base_price + i * 0.5
             mock_bars.append([date_str, f"{p:.2f}", f"{p+1:.2f}", f"{p+2:.2f}", f"{p-1:.2f}", "10000"])
         mock_resp = {
@@ -100,15 +100,31 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         }
         mock_get.return_value = json.dumps(mock_resp)
 
-        kline = SERVER.fetch_stock_kline("300308", count=120)
-        self.assertEqual(kline["valid_bars"], 120)
+        kline = SERVER.fetch_stock_kline("300308", count=250)
+        self.assertEqual(kline["valid_bars"], 250)
         self.assertTrue(kline["hard_gate_passed"])
+        self.assertTrue(kline["compact_mode"])
+        self.assertEqual(len(kline["recent_30_bars"]), 30)
+        self.assertNotIn("bars", kline)
         self.assertIn("ma20", kline)
         self.assertIn("ma50", kline)
+        self.assertIsNotNone(kline["ma120_half_year"])
+        self.assertIsNotNone(kline["ma250_year_line"])
         self.assertIn("atr14", kline)
         self.assertIn("bias_ma20", kline)
         self.assertGreater(kline["atr14"], 0)
         self.assertEqual(kline["adjustment"], "qfq")
+        self.assertIn("wyckoff_multi_timeframe", kline)
+        self.assertIn("macro_wyckoff_phase", kline["wyckoff_multi_timeframe"])
+        self.assertIn("trading_range_60d", kline["wyckoff_multi_timeframe"])
+        self.assertIn("summary", kline["wyckoff_multi_timeframe"])
+
+        # 测试 full 模式 (compact=False)
+        SERVER.CACHE_STORE.clear()
+        kline_full = SERVER.fetch_stock_kline("300308", count=250, compact=False)
+        self.assertFalse(kline_full["compact_mode"])
+        self.assertIn("bars", kline_full)
+        self.assertEqual(len(kline_full["bars"]), 250)
 
     @patch.object(SERVER, "http_get")
     def test_kline_rejects_unadjusted_fallback(self, mock_get):

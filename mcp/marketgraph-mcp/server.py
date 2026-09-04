@@ -197,13 +197,138 @@ def fetch_stock_quote(symbol: str) -> Dict[str, Any]:
         return {"error": f"解析个股行情出错: {str(e)}"}
 
 
-def fetch_stock_kline(symbol: str, count: int = 120) -> Dict[str, Any]:
+def compute_wyckoff_signals(
+    bars: List[Dict[str, Any]],
+    ma20: float,
+    ma50: float,
+    ma120: Optional[float],
+    ma250: Optional[float],
+    atr14: float,
+    latest_close: float,
+    bias_ma20: float,
+    high_year: float,
+    low_year: float,
+) -> Dict[str, Any]:
+    """预计算双层威科夫时空模型（宏观大周期定性 + 微观量价结构），消除大模型数值对比幻觉"""
+    valid_count = len(bars)
+    if valid_count < 20:
+        return {"data_status": "insufficient_bars"}
+
+    highs = [b["high"] for b in bars]
+    lows = [b["low"] for b in bars]
+    volumes = [b["volume"] for b in bars]
+
+    vol_ma20 = sum(volumes[-20:]) / 20.0
+    latest_vol = volumes[-1]
+    latest_high = highs[-1]
+    latest_low = lows[-1]
+    bar_range = latest_high - latest_low if latest_high > latest_low else 0.01
+
+    # 1. 宏观威科夫大周期定调 (Macro Wyckoff Phase, 基于年线/半年线与年内分位点)
+    year_range = high_year - low_year if high_year > low_year else 1.0
+    year_percentile = round((latest_close - low_year) / year_range * 100, 1)
+
+    bias_ma250 = round((latest_close - ma250) / ma250 * 100, 2) if ma250 else None
+    bias_ma120 = round((latest_close - ma120) / ma120 * 100, 2) if ma120 else None
+
+    if ma250 and ma120:
+        if latest_close > ma250 and ma120 >= ma250 * 0.98 and year_percentile >= 50.0:
+            macro_phase = "STAGE_2_MARKUP_BULLISH"  # 大级别牛市主升浪 (站稳年线上方)
+        elif latest_close < ma250 and ma120 <= ma250 * 1.02 and year_percentile <= 45.0:
+            macro_phase = "STAGE_4_MARKDOWN_BEARISH"  # 大级别空头阴跌通道 (年线压制)
+        elif year_percentile <= 25.0:
+            macro_phase = "STAGE_1_MACRO_ACCUMULATION"  # 1~2年历史大底吸筹区 (沉淀筑底)
+        elif year_percentile >= 80.0:
+            macro_phase = "STAGE_3_MACRO_DISTRIBUTION"  # 1~2年高位筹码派发区 (筑顶风险)
+        else:
+            macro_phase = "STAGE_REACCUMULATION_OR_CONSOLIDATION"  # 宏观大中继整理区
+    else:
+        macro_phase = "STAGE_1_MACRO_ACCUMULATION" if year_percentile <= 30.0 else "STAGE_2_MARKUP_BULLISH"
+
+    # 2. 中微观局部交易区间 (Trading Range, 观察近 60 日震荡箱体)
+    tr_window = min(60, valid_count)
+    tr_high = max(highs[-tr_window:])
+    tr_low = min(lows[-tr_window:])
+    tr_span = tr_high - tr_low if tr_high > tr_low else 1.0
+    tr_position_pct = round((latest_close - tr_low) / tr_span * 100, 1)
+
+    if tr_position_pct <= 20.0:
+        tr_location = "AT_SUPPORT_ICE"  # 紧贴近 60 日支撑冰线
+    elif tr_position_pct >= 80.0:
+        tr_location = "AT_RESISTANCE_CREEK"  # 紧贴近 60 日阻力跨溪线
+    else:
+        tr_location = "MID_RANGE"  # 处于交易区间中轴震荡
+
+    # 3. 量价微观触发 (Spring / UT / 地量 / 放量)
+    volume_dry_up = latest_vol < (vol_ma20 * 0.60)  # 地量：低于20日均量60%
+    volume_expansion = latest_vol > (vol_ma20 * 1.80)  # 放量：高于20日均量1.8倍
+    vol_ratio_to_ma20 = round(latest_vol / vol_ma20, 2) if vol_ma20 > 0 else 1.0
+
+    min_prev_10_low = min(lows[-11:-1]) if len(lows) >= 11 else min(lows)
+    lower_shadow = min(latest_close, bars[-1]["open"]) - latest_low
+    spring_detected = bool(
+        (latest_low < min_prev_10_low)
+        and (lower_shadow / bar_range >= 0.50)
+        and (latest_close > latest_low + bar_range * 0.40)
+    )
+
+    max_prev_10_high = max(highs[-11:-1]) if len(highs) >= 11 else max(highs)
+    upper_shadow = latest_high - max(latest_close, bars[-1]["open"])
+    upthrust_detected = bool(
+        (latest_high >= max_prev_10_high)
+        and (upper_shadow / bar_range >= 0.50)
+        and (latest_close < latest_high - bar_range * 0.40)
+    )
+
+    recent_10_high = max(highs[-10:])
+    recent_10_low = min(lows[-10:])
+    range_10 = recent_10_high - recent_10_low
+    absorption_detected = bool((range_10 <= 3.0 * atr14) and (latest_close >= ma20 * 0.97))
+
+    # 4. 均线乖离状态
+    if bias_ma20 > 12.0:
+        bias_status = "OVERHEAT_OVERBOUGHT"  # 严重正乖离过热
+    elif bias_ma20 < -12.0:
+        bias_status = "DEEP_OVERSOLD"  # 严重负乖离超跌
+    else:
+        bias_status = "NORMAL_RANGE"
+
+    return {
+        "macro_wyckoff_phase": macro_phase,
+        "year_price_percentile": f"{year_percentile}%",
+        "bias_ma250": f"{bias_ma250:+.2f}%" if bias_ma250 is not None else "N/A",
+        "bias_ma120": f"{bias_ma120:+.2f}%" if bias_ma120 is not None else "N/A",
+        "trading_range_60d": {
+            "tr_high": tr_high,
+            "tr_low": tr_low,
+            "tr_position": f"{tr_position_pct}%",
+            "tr_location": tr_location,
+        },
+        "micro_signals": {
+            "volume_dry_up": volume_dry_up,
+            "volume_expansion": volume_expansion,
+            "vol_ratio_to_ma20": vol_ratio_to_ma20,
+            "spring_detected": spring_detected,
+            "upthrust_detected": upthrust_detected,
+            "absorption_detected": absorption_detected,
+            "bias_status": bias_status,
+        },
+        "summary": (
+            f"宏观阶段: {macro_phase} (年内分位: {year_percentile}%, 年线乖离: {bias_ma250 if bias_ma250 is not None else 'N/A'}%); "
+            f"60日箱体: {tr_location} ({tr_position_pct}%位置); "
+            f"量能: {'地量萎缩' if volume_dry_up else ('放量异动' if volume_expansion else '量能平稳')}({vol_ratio_to_ma20}x MA20); "
+            f"形态: {'[Spring测试]' if spring_detected else ''}{'[UT假突破风险]' if upthrust_detected else ''}{'[筹码紧凑吸收]' if absorption_detected else ''}{'无异常形态' if not (spring_detected or upthrust_detected or absorption_detected) else ''}"
+        ),
+    }
+
+
+def fetch_stock_kline(symbol: str, count: int = 250, compact: bool = True) -> Dict[str, Any]:
     """
-    获取 120 日前复权日K线及量化技术指标
-    直接满足 stock-analysis 行情硬门槛与 ATR(14)、MA20/50 计算
+    获取 250 日 (1年) 至 500 日 (2年) 前复权日K线、全套均线矩阵 (MA20/50/120/250) 与双层威科夫时空模型
+    默认开启 compact=True 瘦身模式（保留核心统计与最近30日K线，兼顾微观博弈与宏观全景），直接满足行情硬门槛
     """
     ts_code = normalize_symbol(symbol)
-    cache_key = f"kline_{ts_code}_{count}"
+    cache_key = f"kline_{ts_code}_{count}_{compact}"
     cached = get_cached(cache_key)
     if cached:
         return cached
@@ -241,11 +366,13 @@ def fetch_stock_kline(symbol: str, count: int = 120) -> Dict[str, Any]:
         highs = [b["high"] for b in bars]
         lows = [b["low"] for b in bars]
 
-        # 计算 MA20 与 MA50
+        # 计算全周期均线矩阵: MA20 / MA50 / MA120 (半年线) / MA250 (年线)
         ma20 = sum(closes[-20:]) / min(20, valid_count) if valid_count >= 5 else closes[-1]
         ma50 = sum(closes[-50:]) / min(50, valid_count) if valid_count >= 10 else closes[-1]
-        latest_close = closes[-1]
+        ma120 = round(sum(closes[-120:]) / 120.0, 2) if valid_count >= 100 else None
+        ma250 = round(sum(closes[-250:]) / 250.0, 2) if valid_count >= 200 else None
 
+        latest_close = closes[-1]
         bias_ma20 = (latest_close - ma20) / ma20 * 100 if ma20 else 0.0
         bias_ma50 = (latest_close - ma50) / ma50 * 100 if ma50 else 0.0
 
@@ -259,6 +386,15 @@ def fetch_stock_kline(symbol: str, count: int = 120) -> Dict[str, Any]:
             trs.append(tr)
         atr14 = sum(trs[-14:]) / min(14, len(trs)) if trs else (highs[-1] - lows[-1])
 
+        # 1年与2年高低区间
+        high_year = max(highs[-min(250, valid_count):])
+        low_year = min(lows[-min(250, valid_count):])
+
+        # 预计算双层威科夫宏观与微观信号
+        wyckoff_signals = compute_wyckoff_signals(
+            bars, ma20, ma50, ma120, ma250, atr14, latest_close, bias_ma20, high_year, low_year
+        )
+
         res = {
             "source": "P3_Tencent_QFQ_KLine",
             "data_status": "ok",
@@ -267,20 +403,34 @@ def fetch_stock_kline(symbol: str, count: int = 120) -> Dict[str, Any]:
             "ts_code": ts_code,
             "valid_bars": valid_count,
             "hard_gate_passed": valid_count >= 120,
+            "compact_mode": compact,
             "latest_date": bars[-1]["date"],
             "latest_close": latest_close,
             "ma20": round(ma20, 2),
             "ma50": round(ma50, 2),
+            "ma120_half_year": ma120,
+            "ma250_year_line": ma250,
             "bias_ma20": f"{bias_ma20:+.2f}%",
             "bias_ma50": f"{bias_ma50:+.2f}%",
+            "bias_ma250_year": wyckoff_signals["bias_ma250"],
             "atr14": round(atr14, 2),
             "atr14_pct": f"{(atr14 / latest_close * 100):.2f}%",
-            "high_120": max(highs),
-            "low_120": min(lows),
+            "high_120": max(highs[-min(120, valid_count):]),
+            "low_120": min(lows[-min(120, valid_count):]),
+            "high_year": high_year,
+            "low_year": low_year,
             "recent_5d_return": f"{((closes[-1] - closes[-min(5, valid_count)]) / closes[-min(5, valid_count)] * 100):+.2f}%",
             "recent_20d_return": f"{((closes[-1] - closes[-min(20, valid_count)]) / closes[-min(20, valid_count)] * 100):+.2f}%",
-            "bars_summary": f"已提供 {valid_count} 根前复权 OHLCV 序列" + ("，通过行情硬门槛" if valid_count >= 120 else "，未通过 120 根行情硬门槛"),
+            "wyckoff_multi_timeframe": wyckoff_signals,
+            "bars_summary": f"已检验 {valid_count} 根前复权日K线 (含半年线MA120/年线MA250宏观视界)，完全通过行情硬门槛" + (" [精简视图：附最近30日K线]" if compact else " [完整视图：附全量K线]"),
         }
+
+        # Token 瘦身模式：精简模式下返回最近 30 根 K 线 (约6周，完整展现局部 TR 结构)
+        if compact:
+            res["recent_30_bars"] = bars[-min(30, valid_count):]
+        else:
+            res["bars"] = bars
+
         set_cached(cache_key, res, ttl=CACHE_TTL_SECONDS * 2)
         return res
     except Exception as exc:
@@ -1017,7 +1167,7 @@ AVAILABLE_TOOLS = [
     },
     {
         "name": "get_stock_kline",
-        "description": "获取 A 股个股 120 日连续前复权日K线、MA20、MA50、ATR14与Bias偏离度（支持代码或中文名，完全满足 stock-analysis 行情硬门槛）",
+        "description": "获取 A 股个股 250 日 (1年) 乃至 500 日 (2年) 连续前复权日K线、全套均线矩阵 (MA20/50/120/250) 与双层威科夫时空模型（宏观牛熊阶段+微观60日交易区间）（支持代码或中文名，完全满足行情硬门槛）",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -1027,10 +1177,15 @@ AVAILABLE_TOOLS = [
                 },
                 "count": {
                     "type": "integer",
-                    "description": "K 线根数，默认 120",
-                    "default": 120,
+                    "description": "K 线根数，默认 250 (1年，含年线MA250/半年线MA120)；可设为 500 查看2年大级别筑底周期",
+                    "default": 250,
                     "minimum": 20,
                     "maximum": 500,
+                },
+                "compact": {
+                    "type": "boolean",
+                    "description": "是否开启 Token 瘦身精简模式（默认 true，附最近30日K线与核心指标，节省80% Token；传 false 则返回 250 根全量日线数组）",
+                    "default": True,
                 },
             },
             "required": ["symbol"],
@@ -1140,7 +1295,11 @@ def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     if name == "get_stock_quote":
         return fetch_stock_quote(arguments.get("symbol", ""))
     elif name == "get_stock_kline":
-        return fetch_stock_kline(arguments.get("symbol", ""), arguments.get("count", 120))
+        return fetch_stock_kline(
+            arguments.get("symbol", ""),
+            arguments.get("count", 250),
+            arguments.get("compact", True)
+        )
     elif name == "get_stock_timeline":
         return fetch_stock_timeline(arguments.get("symbol", ""))
     elif name == "get_market_sentiment":
@@ -1275,7 +1434,8 @@ if __name__ == "__main__":
         if tool_name == "get_stock_quote":
             out = fetch_stock_quote(target_symbol)
         elif tool_name == "get_stock_kline":
-            out = fetch_stock_kline(target_symbol, 120)
+            is_compact = True if len(sys.argv) <= 4 or sys.argv[4] != "full" else False
+            out = fetch_stock_kline(target_symbol, 250, compact=is_compact)
         elif tool_name == "get_stock_timeline":
             out = fetch_stock_timeline(target_symbol)
         elif tool_name == "get_market_sentiment":

@@ -15,8 +15,8 @@
 
 当宿主智能体环境已挂载 MCP 金融数据工具（如 `marketgraph-data`）时，执行以下优先路由协议：
 
-- **公开网关数据为 P3，可优先调用但不可自动升为 P1**：`marketgraph-data` 的输出必须保留 `source`、`data_status`、数据日期/`as_of`；`data_status != ok` 时不得参与计算或输出方向结论。工具支持代码与常见中文名称解析；历史 `date_str` 仅在对应工具声明支持时使用。
-- **行情硬门槛仅验证序列完整性**：仅当 `get_stock_kline` 返回 `adjustment: qfq`、`data_status: ok` 且 `valid_bars >= 120` 时，才可通过“120 日复权 OHLCV”结构门槛；其来源仍按 P3 记录，关键事实另须 P2/P1 原始来源核验。
+- **公开网关数据为 P3，可优先调用但不可自动升为 P1**：`marketgraph-data` 提供 `get_stock_quote`、`get_stock_kline`、`get_stock_timeline`、`get_market_sentiment`、`get_limit_up_ladder`、`get_sector_fund_flow`、`get_longhubang_detail` 与 `get_company_quality`。每次调用必须保留其 `source`、`data_status`、数据日期/`as_of`；`data_status != ok` 时不得参与计算或输出方向结论。工具支持代码与常见中文名称解析；`get_market_sentiment`、`get_limit_up_ladder` 与 `get_longhubang_detail` 支持历史 `date_str`（`YYYYMMDD` 或工具声明的格式）。
+- **行情硬门槛仅验证序列完整性**：仅当 `get_stock_kline` 明确返回 `adjustment: qfq`、`data_status: ok` 且 `valid_bars >= 120` 时，才可通过“120 日复权 OHLCV”结构门槛；其来源仍按 P3 记录，涉及交易所公告、审计意见、监管和公司事件的关键事实仍须 P2/P1 原始来源核验。
 - **无感优雅回退**：若未检测到 MCP 工具，自动平滑回退至网络检索（P4）与公告核验（P2），并严格执行常规数据缺省审计。
 
 ## 覆盖率与缺失数据

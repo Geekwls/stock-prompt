@@ -23,8 +23,8 @@
 
 当宿主智能体环境已挂载 MCP 金融数据工具（如 `marketgraph-data`）时，执行以下优先路由协议：
 
-- **P1 级最高优先级**：调用 `get_stock_quote`（实时估值盘口）、`get_stock_kline`（120日复权K线与ATR）、`get_stock_timeline`（当日分时均线/脉冲/竞价）、`get_market_sentiment`（大盘量能与炸板率）、`get_limit_up_ladder`（连板天梯）、`get_sector_fund_flow`（行业板块资金流与领涨龙头）、`get_longhubang_detail`（龙虎榜席位明细与机构净买入）、`get_company_quality`（财务指标/商誉/解禁/排雷）获取的数据直接归为 `P1` 级结构化行情与基本面证据。工具全面支持**纯中文股票名称（如“贵州茅台”）与代码自动解析**。`get_market_sentiment`、`get_limit_up_ladder` 与 `get_longhubang_detail` 支持传入历史交易日（`date_str`，格式 `YYYYMMDD`），用于回补 T-1 至 T-4 的缺失数据，避免直接触发多日降级。
-- **自动通过行情硬门槛**：成功调用 `get_stock_kline` 获得 120 根 K 线时，自动通过行情硬门槛，对应技术层数据组计为 100% 满额有效。
+- **公开网关数据为 P3，可优先调用但不可自动升为 P1**：`marketgraph-data` 提供 `get_stock_quote`、`get_stock_kline`、`get_stock_timeline`、`get_market_sentiment`、`get_limit_up_ladder`、`get_sector_fund_flow`、`get_longhubang_detail` 与 `get_company_quality`。每次调用必须保留其 `source`、`data_status`、数据日期/`as_of`；`data_status != ok` 时不得参与计算或输出方向结论。工具支持代码与常见中文名称解析；`get_market_sentiment`、`get_limit_up_ladder` 与 `get_longhubang_detail` 支持历史 `date_str`（`YYYYMMDD` 或工具声明的格式）。
+- **行情硬门槛仅验证序列完整性**：仅当 `get_stock_kline` 明确返回 `adjustment: qfq`、`data_status: ok` 且 `valid_bars >= 120` 时，才可通过“120 日复权 OHLCV”结构门槛；其来源仍按 P3 记录，涉及交易所公告、审计意见、监管和公司事件的关键事实仍须 P2/P1 原始来源核验。
 - **无感优雅回退**：若未检测到 MCP 工具，自动平滑回退至网络检索（P4）与公告核验（P2），并严格执行常规数据缺省审计。
 
 ## 覆盖率与缺失数据

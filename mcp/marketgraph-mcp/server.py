@@ -30,6 +30,11 @@ if hasattr(sys.stderr, 'reconfigure'):
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 CACHE_STORE: Dict[str, Dict[str, Any]] = {}
 CACHE_TTL_SECONDS = 180  # 盘中常规缓存 3 分钟
+MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
+ALLOWED_HTTP_HOSTS = {
+    "smartbox.gtimg.cn", "qt.gtimg.cn", "web.ifzq.gtimg.cn",
+    "push2ex.eastmoney.com", "push2.eastmoney.com", "datacenter-web.eastmoney.com",
+}
 
 
 def get_cached(key: str) -> Optional[Any]:
@@ -47,9 +52,14 @@ def set_cached(key: str, data: Any, ttl: int = CACHE_TTL_SECONDS):
 
 
 def http_get(url: str, timeout: int = 4, encoding: str = "utf-8") -> str:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "https" or parsed.hostname not in ALLOWED_HTTP_HOSTS:
+        raise ValueError("仅允许访问预设的 HTTPS 金融数据源")
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        content = resp.read()
+        content = resp.read(MAX_HTTP_RESPONSE_BYTES + 1)
+        if len(content) > MAX_HTTP_RESPONSE_BYTES:
+            raise ValueError("上游响应超过大小限制")
         try:
             return content.decode(encoding)
         except UnicodeDecodeError:
@@ -64,7 +74,7 @@ def resolve_symbol_by_name(keyword: str) -> Optional[str]:
     if cached:
         return cached
 
-    url = f"http://smartbox.gtimg.cn/s3/?t=all&q={urllib.parse.quote(clean)}"
+    url = f"https://smartbox.gtimg.cn/s3/?t=all&q={urllib.parse.quote(clean)}"
     try:
         raw = http_get(url, timeout=3, encoding="gbk")
         if '="' in raw:
@@ -130,8 +140,11 @@ def fetch_stock_quote(symbol: str) -> Dict[str, Any]:
     if cached:
         return cached
 
-    url = f"http://qt.gtimg.cn/q={ts_code}"
-    raw = http_get(url)
+    url = f"https://qt.gtimg.cn/q={ts_code}"
+    try:
+        raw = http_get(url)
+    except Exception as exc:
+        return {"error": f"行情上游不可用: {type(exc).__name__}", "data_status": "unavailable"}
     if "~" not in raw:
         return {"error": f"未找到证券代码数据: {symbol}"}
 
@@ -156,7 +169,8 @@ def fetch_stock_quote(symbol: str) -> Dict[str, Any]:
         amplitude = safe_float(parts[43], 0.0) if len(parts) > 43 else 0.0
 
         res = {
-            "source": "P1_Tencent_Securities",
+            "source": "P3_Tencent_Public_Gateway",
+            "data_status": "ok",
             "symbol": symbol,
             "ts_code": ts_code,
             "name": parts[1] if len(parts) > 1 else symbol,
@@ -194,15 +208,17 @@ def fetch_stock_kline(symbol: str, count: int = 120) -> Dict[str, Any]:
     if cached:
         return cached
 
-    url = f"http://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={ts_code},day,,,{count},qfq"
-    raw = http_get(url)
+    if not isinstance(count, int) or not 20 <= count <= 500:
+        return {"error": "count 必须是 20 至 500 的整数", "data_status": "unavailable"}
+    url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={ts_code},day,,,{count},qfq"
     try:
+        raw = http_get(url)
         data = json.loads(raw)
         root = data.get("data", {}).get(ts_code, {})
-        # 优先读取 qfqday (前复权日线)，无复权则回退到 day
-        bars_raw = root.get("qfqday") or root.get("day") or []
+        # 仅接受明确返回的前复权序列，不能以未复权序列伪装通过硬门槛。
+        bars_raw = root.get("qfqday") or []
         if not bars_raw:
-            return {"error": f"未获取到前复权 K 线序列: {symbol}"}
+            return {"error": f"未获取到前复权 K 线序列: {symbol}", "data_status": "unavailable"}
 
         # 格式化每根 K 线: [日期, 开盘, 收盘, 最高, 最低, 成交量]
         bars = []
@@ -244,7 +260,9 @@ def fetch_stock_kline(symbol: str, count: int = 120) -> Dict[str, Any]:
         atr14 = sum(trs[-14:]) / min(14, len(trs)) if trs else (highs[-1] - lows[-1])
 
         res = {
-            "source": "P1_Tencent_QFQ_KLine",
+            "source": "P3_Tencent_QFQ_KLine",
+            "data_status": "ok",
+            "adjustment": "qfq",
             "symbol": symbol,
             "ts_code": ts_code,
             "valid_bars": valid_count,
@@ -261,12 +279,12 @@ def fetch_stock_kline(symbol: str, count: int = 120) -> Dict[str, Any]:
             "low_120": min(lows),
             "recent_5d_return": f"{((closes[-1] - closes[-min(5, valid_count)]) / closes[-min(5, valid_count)] * 100):+.2f}%",
             "recent_20d_return": f"{((closes[-1] - closes[-min(20, valid_count)]) / closes[-min(20, valid_count)] * 100):+.2f}%",
-            "bars_summary": f"已提供连续 {valid_count} 交易日前复权 OHLCV 序列，完全通过行情硬门槛",
+            "bars_summary": f"已提供 {valid_count} 根前复权 OHLCV 序列" + ("，通过行情硬门槛" if valid_count >= 120 else "，未通过 120 根行情硬门槛"),
         }
         set_cached(cache_key, res, ttl=CACHE_TTL_SECONDS * 2)
         return res
-    except Exception as e:
-        return {"error": f"解析前复权日K线出错: {str(e)}"}
+    except Exception as exc:
+        return {"error": f"获取或解析前复权日K线出错: {type(exc).__name__}", "data_status": "unavailable"}
 
 
 EM_UT = "7eea3edcaed734bea9cbfc24409ed989"
@@ -292,64 +310,76 @@ def fetch_market_sentiment(date_str: Optional[str] = None) -> Dict[str, Any]:
     dt_count = 0
     max_height = 0
     headers = {"User-Agent": USER_AGENT}
+    unavailable_sources: List[str] = []
 
     try:
         # 涨停池
-        zt_url = f"http://push2ex.eastmoney.com/getTopicZTPool?ut={EM_UT}&dpt={EM_DPT}&Pageindex=0&pagesize=500&sort=fbt:asc&date={date_str}"
+        zt_url = f"https://push2ex.eastmoney.com/getTopicZTPool?ut={EM_UT}&dpt={EM_DPT}&Pageindex=0&pagesize=500&sort=fbt:asc&date={date_str}"
         req_zt = urllib.request.Request(zt_url, headers=headers)
         with urllib.request.urlopen(req_zt, timeout=4) as resp:
             zt_data = json.loads(resp.read().decode("utf-8")).get("data", {}).get("pool", [])
             zt_count = len(zt_data)
             if zt_data:
                 max_height = max([int(x.get("lbc", 1)) for x in zt_data])
-    except Exception:
-        pass
+    except Exception as exc:
+        unavailable_sources = [f"涨停池: {type(exc).__name__}"]
 
     try:
         # 炸板池
-        zb_url = f"http://push2ex.eastmoney.com/getTopicZBPool?ut={EM_UT}&dpt={EM_DPT}&Pageindex=0&pagesize=500&sort=fbt:asc&date={date_str}"
+        zb_url = f"https://push2ex.eastmoney.com/getTopicZBPool?ut={EM_UT}&dpt={EM_DPT}&Pageindex=0&pagesize=500&sort=fbt:asc&date={date_str}"
         req_zb = urllib.request.Request(zb_url, headers=headers)
         with urllib.request.urlopen(req_zb, timeout=4) as resp:
             zb_data = json.loads(resp.read().decode("utf-8")).get("data", {}).get("pool", [])
             zb_count = len(zb_data)
-    except Exception:
-        pass
+    except Exception as exc:
+        unavailable_sources.append(f"炸板池: {type(exc).__name__}")
 
     try:
         # 跌停池
-        dt_url = f"http://push2ex.eastmoney.com/getTopicDTPool?ut={EM_UT}&dpt={EM_DPT}&Pageindex=0&pagesize=500&sort=fund:asc&date={date_str}"
+        dt_url = f"https://push2ex.eastmoney.com/getTopicDTPool?ut={EM_UT}&dpt={EM_DPT}&Pageindex=0&pagesize=500&sort=fund:asc&date={date_str}"
         req_dt = urllib.request.Request(dt_url, headers=headers)
         with urllib.request.urlopen(req_dt, timeout=4) as resp:
             dt_data = json.loads(resp.read().decode("utf-8")).get("data", {}).get("pool", [])
             dt_count = len(dt_data)
-    except Exception:
-        pass
+    except Exception as exc:
+        unavailable_sources.append(f"跌停池: {type(exc).__name__}")
 
     # 2. 抓取腾讯大盘指数成交额 (上证 + 深证)
     sh_amount = 0.0
     sz_amount = 0.0
     sh_change = "0.00%"
     try:
-        idx_url = "http://qt.gtimg.cn/q=s_sh000001,s_sz399001,s_sz399006"
+        idx_url = "https://qt.gtimg.cn/q=s_sh000001,s_sz399001,s_sz399006"
         idx_raw = http_get(idx_url)
         lines = [line for line in idx_raw.split(";") if line.strip()]
         for line in lines:
             if "s_sh000001" in line:
                 p = line.split("~")
-                sh_change = f"{float(p[5]):+.2f}%"
-                sh_amount = float(p[9]) / 10000.0  # 亿元
+                sh_change = f"{float(p[5].strip('\\\"')):+.2f}%"
+                sh_amount = float(p[9].strip('\\\"')) / 10000.0  # 亿元
             elif "s_sz399001" in line:
                 p = line.split("~")
-                sz_amount = float(p[9]) / 10000.0  # 亿元
-    except Exception:
-        pass
+                sz_amount = float(p[9].strip('\\\"')) / 10000.0  # 亿元
+    except Exception as exc:
+        unavailable_sources.append(f"指数成交额: {type(exc).__name__}")
+
+    if unavailable_sources:
+        return {
+            "source": "P3_Public_Financial_Gateways",
+            "data_status": "partial",
+            "date": date_str,
+            "unavailable_sources": unavailable_sources,
+            "message": "部分上游数据不可用，不能据此计算市场情绪结论。",
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
 
     total_turnover = sh_amount + sz_amount
     total_touch = zt_count + zb_count
     break_rate = (zb_count / total_touch * 100) if total_touch > 0 else 0.0
 
     res = {
-        "source": "P1_Public_Financial_Gateways",
+        "source": "P3_Public_Financial_Gateways",
+        "data_status": "ok",
         "date": date_str,
         "sh_index_change": sh_change,
         "total_turnover_billion": round(total_turnover, 2),
@@ -375,7 +405,7 @@ def fetch_limit_up_ladder(date_str: Optional[str] = None) -> Dict[str, Any]:
     if cached:
         return cached
 
-    url = f"http://push2ex.eastmoney.com/getTopicZTPool?ut={EM_UT}&dpt={EM_DPT}&Pageindex=0&pagesize=500&sort=fbt:asc&date={date_str}"
+    url = f"https://push2ex.eastmoney.com/getTopicZTPool?ut={EM_UT}&dpt={EM_DPT}&Pageindex=0&pagesize=500&sort=fbt:asc&date={date_str}"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         with urllib.request.urlopen(req, timeout=4) as resp:
@@ -403,7 +433,8 @@ def fetch_limit_up_ladder(date_str: Optional[str] = None) -> Dict[str, Any]:
             })
 
         res = {
-            "source": "P1_Eastmoney_LimitUp_Ladder",
+            "source": "P3_Eastmoney_LimitUp_Ladder",
+            "data_status": "ok",
             "date": date_str,
             "total_limit_up": len(data),
             "max_height": max(ladder.keys()) if ladder else 0,
@@ -426,7 +457,7 @@ def fetch_sector_fund_flow(count: int = 20) -> Dict[str, Any]:
         return cached
 
     url = (
-        "http://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=100&po=1&np=1"
+        "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=100&po=1&np=1"
         "&ut=b2884a393a59ad64002292a3e90d46a5&fltt=2&invt=2&fid=f62&fs=m:90+t:2+f:!50"
         "&fields=f12,f14,f2,f3,f62,f184,f204,f205"
     )
@@ -460,7 +491,8 @@ def fetch_sector_fund_flow(count: int = 20) -> Dict[str, Any]:
         top_losers = sorted_by_gain[-count:][::-1]
 
         res = {
-            "source": "P1_Eastmoney_Sector_Fund_Flow",
+            "source": "P3_Eastmoney_Sector_Fund_Flow",
+            "data_status": "ok",
             "total_sectors_tracked": len(sectors),
             "top_inflow_sectors": [
                 {
@@ -532,6 +564,11 @@ def fetch_longhubang_detail(symbol: Optional[str] = None, date_str: Optional[str
     try:
         if code_only:
             filter_expr = f'(SECURITY_CODE="{code_only}")'
+            if date_str:
+                normalized_date = date_str.replace("-", "")
+                if len(normalized_date) != 8 or not normalized_date.isdigit():
+                    return {"error": "date_str 必须为 YYYYMMDD 或 YYYY-MM-DD", "data_status": "unavailable"}
+                filter_expr += f'(TRADE_DATE=\'{normalized_date[:4]}-{normalized_date[4:6]}-{normalized_date[6:]}\')'
             buy_url = (
                 "https://datacenter-web.eastmoney.com/api/data/v1/get?"
                 + urllib.parse.urlencode({
@@ -588,7 +625,8 @@ def fetch_longhubang_detail(symbol: Optional[str] = None, date_str: Optional[str
 
             if not buy_rows and not sell_rows and not sum_rows:
                 return {
-                    "source": "P1_Eastmoney_LHB_Details",
+                    "source": "P3_Eastmoney_LHB_Details",
+                    "data_status": "ok",
                     "symbol": symbol,
                     "status": "未上榜 / 近期无龙虎榜记录",
                     "explanation": "标的近期未触发龙虎榜披露标准 (日涨跌偏离度达7%或日换手达20%等)",
@@ -619,7 +657,8 @@ def fetch_longhubang_detail(symbol: Optional[str] = None, date_str: Optional[str
             org_net_wan = round((org_buy - org_sell) / 10000.0, 2)
 
             res = {
-                "source": "P1_Eastmoney_LHB_Details",
+                "source": "P3_Eastmoney_LHB_Details",
+                "data_status": "ok",
                 "symbol": symbol,
                 "name": sum_item.get("SECURITY_NAME_ABBR", symbol),
                 "trade_date": trade_date,
@@ -628,7 +667,8 @@ def fetch_longhubang_detail(symbol: Optional[str] = None, date_str: Optional[str
                 "total_lhb_sell_million": round(safe_float(sum_item.get("TOTAL_SELL"), 0.0) / 1000000.0, 2),
                 "total_lhb_net_million": round(safe_float(sum_item.get("TOTAL_NET"), 0.0) / 1000000.0, 2),
                 "org_seat_net_wan": f"{org_net_wan:+.2f} 万元",
-                "seat_quality_judgment": "顶级合力(机构/外资+游资)" if org_net_wan > 0 else "游资博弈/散户接盘",
+                "seat_quality_judgment": "机构席位净买入" if org_net_wan > 0 else ("机构席位净卖出" if org_net_wan < 0 else "未见机构席位净方向"),
+                "seat_quality_note": "仅基于披露席位的机构专用净额，不推断外资、游资或散户资金性质。",
                 "top5_buyers": buyer_seats,
                 "top5_sellers": seller_seats,
             }
@@ -669,7 +709,8 @@ def fetch_longhubang_detail(symbol: Optional[str] = None, date_str: Optional[str
                 })
 
             res = {
-                "source": "P1_Eastmoney_LHB_Daily_Summary",
+                "source": "P3_Eastmoney_LHB_Daily_Summary",
+                "data_status": "ok",
                 "date": date_str or (data_rows[0].get("TRADE_DATE", "")[:10] if data_rows else datetime.now().strftime("%Y-%m-%d")),
                 "total_stocks_on_list": len(stocks),
                 "top_net_buy_stocks": stocks[:10],
@@ -771,19 +812,19 @@ def fetch_company_quality(symbol: str) -> Dict[str, Any]:
         now_date = datetime.now().strftime("%Y-%m-%d")
         for lr in lift_rows:
             free_date_str = str(lr.get("FREE_DATE", ""))[:10]
-            future_lifts.append({
+            if free_date_str >= now_date:
+                future_lifts.append({
                 "lift_date": free_date_str,
                 "lift_shares_wan": round(safe_float(lr.get("CURRENT_FREE_SHARES"), 0.0), 2),
                 "ratio_of_total_shares": f"{(safe_float(lr.get('TOTAL_RATIO'), 0.0) * 100):.2f}%",
                 "shares_type": lr.get("FREE_SHARES_TYPE", "首发原股东/定增"),
-                "is_future": free_date_str >= now_date,
-            })
+                    "is_future": True,
+                })
 
-        is_annual = ("年报" in report_period)
-        audit_opinion_status = "标准无保留意见 (年度审计)" if is_annual else "未经审计 (中报/季报)"
+        audit_opinion_status = "N/A（当前数据源未提供审计意见；需以年度审计报告或交易所公告核验）"
 
         debt_val = safe_float(f0.get("ZCFZL"), 0.0)
-        risk_level = "低"
+        risk_level = "待补充核验"
         risk_reasons = []
         if debt_val > 70:
             risk_level = "高"
@@ -795,10 +836,11 @@ def fetch_company_quality(symbol: str) -> Dict[str, Any]:
             risk_level = "高"
             risk_reasons.append(f"商誉占净资产比例过高 ({goodwill_ratio}%)")
         if not risk_reasons:
-            risk_reasons.append("财务结构稳健，无重大商誉减值与高杠杆风险")
+            risk_reasons.append("仅完成负债率与商誉占比筛查；现金流、质押、减持、监管、诉讼及审计意见未覆盖")
 
         res = {
-            "source": "P1_Eastmoney_Company_Quality_Gateway",
+            "source": "P3_Eastmoney_Company_Quality_Gateway",
+            "data_status": "partial",
             "symbol": symbol,
             "name": f0.get("SECURITY_NAME_ABBR", symbol),
             "report_period": report_period,
@@ -821,6 +863,7 @@ def fetch_company_quality(symbol: str) -> Dict[str, Any]:
             "audit_opinion_status": audit_opinion_status,
             "company_risk_level": risk_level,
             "company_risk_assessment": "；".join(risk_reasons),
+            "uncovered_risks": ["审计意见", "股权质押", "股东减持", "监管问询/处罚", "诉讼仲裁", "退市风险"],
         }
         set_cached(cache_key, res)
         return res
@@ -845,7 +888,7 @@ def fetch_stock_timeline(symbol: str) -> Dict[str, Any]:
         return cached
 
     secid = f"{mkt}.{code}"
-    url = f"http://push2.eastmoney.com/api/qt/stock/trends2/get?secid={secid}&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13&fields2=f51,f52,f53,f54,f55,f56,f57,f58"
+    url = f"https://push2.eastmoney.com/api/qt/stock/trends2/get?secid={secid}&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13&fields2=f51,f52,f53,f54,f55,f56,f57,f58"
     try:
         raw = http_get(url, timeout=4)
         res_json = json.loads(raw)
@@ -926,7 +969,8 @@ def fetch_stock_timeline(symbol: str) -> Dict[str, Any]:
             timeline_status = "震荡拉锯：紧贴分时均线缠绕"
 
         res = {
-            "source": "P1_Eastmoney_Intraday_Timeline",
+            "source": "P3_Eastmoney_Intraday_Timeline",
+            "data_status": "ok",
             "symbol": code,
             "ts_code": ts_code,
             "name": stock_name,
@@ -953,7 +997,7 @@ def fetch_stock_timeline(symbol: str) -> Dict[str, Any]:
 # -----------------------------------------------------------------------------
 SERVER_INFO = {
     "name": "marketgraph-data",
-    "version": "1.2.0",
+    "version": "1.2.1",
 }
 
 AVAILABLE_TOOLS = [
@@ -985,6 +1029,8 @@ AVAILABLE_TOOLS = [
                     "type": "integer",
                     "description": "K 线根数，默认 120",
                     "default": 120,
+                    "minimum": 20,
+                    "maximum": 500,
                 },
             },
             "required": ["symbol"],
@@ -1013,6 +1059,7 @@ AVAILABLE_TOOLS = [
                 "date_str": {
                     "type": "string",
                     "description": "日期字符串，格式 YYYYMMDD，省略则为当天",
+                    "pattern": "^[0-9]{8}$",
                 }
             },
         },
@@ -1026,6 +1073,7 @@ AVAILABLE_TOOLS = [
                 "date_str": {
                     "type": "string",
                     "description": "日期字符串，格式 YYYYMMDD，省略则为当天",
+                    "pattern": "^[0-9]{8}$",
                 }
             },
         },
@@ -1040,6 +1088,8 @@ AVAILABLE_TOOLS = [
                     "type": "integer",
                     "description": "返回的行业板块数量，默认 20",
                     "default": 20,
+                    "minimum": 1,
+                    "maximum": 100,
                 }
             },
         },
@@ -1056,7 +1106,8 @@ AVAILABLE_TOOLS = [
                 },
                 "date_str": {
                     "type": "string",
-                    "description": "交易日期 YYYY-MM-DD，省略则为最新交易日",
+                    "description": "交易日期 YYYYMMDD 或 YYYY-MM-DD，省略则为最新交易日",
+                    "pattern": "^[0-9]{8}$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
                 },
             },
         },
@@ -1079,6 +1130,13 @@ AVAILABLE_TOOLS = [
 
 
 def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(arguments, dict):
+        return {"error": "arguments 必须是对象", "data_status": "unavailable"}
+    if name in {"get_stock_quote", "get_stock_kline", "get_stock_timeline", "get_company_quality"}:
+        if not isinstance(arguments.get("symbol"), str) or not arguments["symbol"].strip():
+            return {"error": "symbol 必须是非空字符串", "data_status": "unavailable"}
+    if name == "get_sector_fund_flow" and (not isinstance(arguments.get("count", 20), int) or not 1 <= arguments.get("count", 20) <= 100):
+        return {"error": "count 必须是 1 至 100 的整数", "data_status": "unavailable"}
     if name == "get_stock_quote":
         return fetch_stock_quote(arguments.get("symbol", ""))
     elif name == "get_stock_kline":
@@ -1115,6 +1173,13 @@ def run_stdio_server():
         try:
             req = json.loads(line)
         except json.JSONDecodeError:
+            sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}}) + "\n")
+            sys.stdout.flush()
+            continue
+
+        if not isinstance(req, dict) or req.get("jsonrpc") != "2.0":
+            sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Invalid Request"}}) + "\n")
+            sys.stdout.flush()
             continue
 
         msg_id = req.get("id")
@@ -1228,4 +1293,3 @@ if __name__ == "__main__":
         print(json.dumps(out, ensure_ascii=False, indent=2))
     else:
         run_stdio_server()
-

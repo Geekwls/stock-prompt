@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/agent-plugin-1.0.json",
   "name": "a-stock-research",
-  "version": "6.0.0",
+  "version": "6.1.1",
   "description": "A-Share Quantitative & Wyckoff Research Protocol for Autonomous Agents (Agent Plugins 1.0)",
   "homepage": "https://github.com/Geekwls/stock-prompt",
   "skills": [

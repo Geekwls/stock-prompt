@@ -108,6 +108,14 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         self.assertIn("atr14", kline)
         self.assertIn("bias_ma20", kline)
         self.assertGreater(kline["atr14"], 0)
+        self.assertEqual(kline["adjustment"], "qfq")
+
+    @patch.object(SERVER, "http_get")
+    def test_kline_rejects_unadjusted_fallback(self, mock_get):
+        SERVER.CACHE_STORE.clear()
+        mock_get.return_value = json.dumps({"data": {"sz300308": {"day": [["2026-09-01", "1", "1", "1", "1", "1"]]}}})
+        res = SERVER.fetch_stock_kline("300308")
+        self.assertEqual(res["data_status"], "unavailable")
 
     @patch.object(SERVER, "http_get")
     def test_fetch_stock_timeline_parsing(self, mock_get):
@@ -134,7 +142,7 @@ class MarketGraphMCPServerTest(unittest.TestCase):
 
     @patch.object(SERVER, "http_get")
     def test_fetch_market_sentiment_parsing(self, mock_get):
-        mock_get.return_value = 'v_s_sh000001="1~上证指数~000001~3850.20~+12.30~+0.32~120000~45000000";v_s_sz399001="1~深证成指~399001~11500.50~+25.10~+0.22~150000~55000000";'
+        mock_get.return_value = 'v_s_sh000001="1~上证指数~000001~3850.20~+12.30~+0.32~120000~45000000~0~45000000";v_s_sz399001="1~深证成指~399001~11500.50~+25.10~+0.22~150000~55000000~0~55000000";'
         
         mock_zt = {"data": {"pool": [{"c": "000001", "lbc": 3}, {"c": "000002", "lbc": 1}]}}
         mock_zb = {"data": {"pool": [{"c": "000003"}]}}
@@ -152,10 +160,19 @@ class MarketGraphMCPServerTest(unittest.TestCase):
 
         with patch("urllib.request.urlopen", side_effect=[MockResp(mock_zt), MockResp(mock_zb), MockResp(mock_dt)]):
             res = SERVER.fetch_market_sentiment("20260903")
+            self.assertEqual(res.get("data_status"), "ok", res)
             self.assertEqual(res["zt_count"], 2)
             self.assertEqual(res["zb_count"], 1)
             self.assertEqual(res["exact_break_rate"], "33.33%")
-            self.assertEqual(res["max_ladder_height"], "3 连板")
+        self.assertEqual(res["max_ladder_height"], "3 连板")
+
+    @patch.object(SERVER, "http_get", side_effect=OSError("upstream unavailable"))
+    def test_market_sentiment_marks_partial_data(self, mock_get):
+        SERVER.CACHE_STORE.clear()
+        with patch("urllib.request.urlopen", side_effect=OSError("upstream unavailable")):
+            res = SERVER.fetch_market_sentiment("20260903")
+        self.assertEqual(res["data_status"], "partial")
+        self.assertNotIn("market_broad_status", res)
 
     @patch.object(SERVER, "http_get")
     def test_fetch_sector_fund_flow(self, mock_get):
@@ -189,7 +206,7 @@ class MarketGraphMCPServerTest(unittest.TestCase):
             res = SERVER.fetch_longhubang_detail(symbol="301489")
             self.assertEqual(res["name"], "思泉新材")
             self.assertEqual(res["top5_buyers"][0]["seat_type"], "机构专用")
-            self.assertEqual(res["seat_quality_judgment"], "顶级合力(机构/外资+游资)")
+            self.assertEqual(res["seat_quality_judgment"], "机构席位净买入")
 
     def test_fetch_company_quality_parsing(self):
         class MockResp:
@@ -215,8 +232,8 @@ class MarketGraphMCPServerTest(unittest.TestCase):
             res = SERVER.fetch_company_quality(symbol="301489")
             self.assertEqual(res["report_period"], "2026中报")
             self.assertEqual(res["financial_summary"]["revenue_billion"], "5.21 亿元")
-            self.assertEqual(res["company_risk_level"], "低")
-            self.assertEqual(res["audit_opinion_status"], "未经审计 (中报/季报)")
+            self.assertEqual(res["company_risk_level"], "待补充核验")
+            self.assertTrue(res["audit_opinion_status"].startswith("N/A"))
 
     def test_unknown_tool_returns_error(self):
         res = SERVER.handle_tool_call("unknown_tool", {})

@@ -29,6 +29,7 @@ BUNDLED_SCRIPTS = {
     "eval_tracker.py": (ROOT / "scripts" / "eval_tracker.py", ("market-prediction", "daily-review")),
 }
 MCP_SERVER = ROOT / "mcp" / "marketgraph-mcp" / "server.py"
+MCP_BUNDLED_PATH = "marketgraph-mcp/server.py"
 MCP_CONFIG_CANDIDATES = (
     Path.home() / ".gemini" / "antigravity" / "mcp_config.json",
     Path.home() / ".gemini" / "mcp_config.json",
@@ -75,6 +76,9 @@ def source_files():
             raise FileNotFoundError(f"捆绑脚本母本不存在: {source}")
         for skill in skills:
             files[f"{skill}/scripts/{name}"] = source
+    if not MCP_SERVER.is_file():
+        raise FileNotFoundError(f"MCP 服务端母本不存在: {MCP_SERVER}")
+    files[MCP_BUNDLED_PATH] = MCP_SERVER
     return files
 
 
@@ -220,7 +224,7 @@ def mcp_registered():
     return False
 
 
-def print_post_install_guide():
+def print_post_install_guide(target):
     print()
     print("=" * 62)
     print("🚀 stock-prompt 四大技能已就绪 —— 30 秒快速上手")
@@ -236,10 +240,12 @@ def print_post_install_guide():
     print()
     if MCP_SERVER.is_file() and not mcp_registered():
         print("🔌 [建议] 尚未检测到 MarketGraph MCP 数据网关注册。")
-        print("   配置后 stock-analysis 可自动通过行情硬门槛（120日K线/龙虎榜/财务排雷）：")
+        print("   配置后可优先取得可追溯的行情与公开数据（关键结论仍须按证据契约核验）：")
         print("   在宿主 MCP 配置（如 ~/.gemini/antigravity/mcp_config.json）加入：")
-        print(f'     "marketgraph-data": {{"command": "python", "args": ["{MCP_SERVER}"]}}')
-        print("   快速自测: python mcp/marketgraph-mcp/server.py --test get_stock_kline 贵州茅台")
+        target_paths = target_roots(target)
+        installed_server = target_paths[0][1] / MCP_BUNDLED_PATH if target_paths else MCP_SERVER
+        print(f'     "marketgraph-data": {{"command": "python3", "args": ["{installed_server}"]}}')
+        print(f"   快速自测: python3 {installed_server} --test get_stock_kline 贵州茅台")
         print("   完整说明: mcp/marketgraph-mcp/README.md")
     elif MCP_SERVER.is_file():
         print("🔌 已检测到 MarketGraph MCP 注册，个股诊断数据链路就绪。")
@@ -279,7 +285,7 @@ def main():
     else:
         print("[SUCCESS] Skill 安装/同步完成")
         if args.target != "workspace":
-            print_post_install_guide()
+            print_post_install_guide(args.target)
     return 0
 
 

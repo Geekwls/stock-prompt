@@ -13,7 +13,7 @@ P5 模型推断，只能参与解释，不能生成事实或精确数值
 
 网络搜索摘要不能直接作为 MA、ATR、RS、POC、换手率、赔率或财务比率的数值来源。引用新闻时记录事件发生日与报道日。
 
-**MCP 优先路由**：宿主已挂载 `marketgraph-data` MCP 时，P1 首选调用 `get_stock_kline`（120 日前复权 K 线，含 MA20/MA50、ATR14、Bias，成功取得 120 根 K 线即自动通过行情硬门槛）、`get_stock_quote`（实时估值盘口）、`get_stock_timeline`（当日分时与竞价承接）、`get_company_quality`（L8 财务排雷直达）与 `get_longhubang_detail`（席位穿透）；未挂载或调用失败时回退网络检索，并严格执行下述缺省审计。行情硬门槛不因数据来源是搜索而放宽。
+**MCP 优先路由**：宿主已挂载 `marketgraph-data` MCP 时，可优先调用 `get_stock_kline`、`get_stock_quote`、`get_stock_timeline`、`get_company_quality` 与 `get_longhubang_detail`，但公开网关输出按 P3 记录并保留 `source`、`data_status` 与时点。仅 `get_stock_kline` 返回 `adjustment: qfq`、`data_status: ok` 且至少 120 根 K 线时，可通过行情结构门槛；公司审计、监管与事件风险仍须交易所公告或定期报告核验。未挂载或调用失败时回退网络检索，并严格执行下述缺省审计。
 
 ## 数据新鲜度与证据编号
 

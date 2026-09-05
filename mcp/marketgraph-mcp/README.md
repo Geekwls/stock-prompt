@@ -6,15 +6,17 @@
 - **零 Token、标准 stdio**：直连腾讯证券与东方财富公开网关，无需 API Key；首次使用仍需在宿主 MCP 配置中注册。
 - **纯原生 Python 实现**：基于 Python 3.8+ 标准库（`urllib`, `json`），零第三方外部依赖（无需安装 `akshare` 或 `pandas`），极速毫秒级启动。
 - **纯中文股票名秒级智能联想**：全面支持股票代码（`301489`）、带前后缀代码（`sz301489`, `600519.SH`）以及**纯中文股票名称**（如 `贵州茅台`, `中际旭创`）自动无感解析。
-- **专为 A 股投研打造的 8 个公开数据工具**：所有结果均应以响应中的 `source`、`data_status` 和时点为准；公开网关输出为 P3 线索，不能替代公告、审计报告或交易所披露。
+- **专为 A 股投研打造的 10 个公开数据工具**：所有结果均应以响应中的 `source`、`data_status` 和时点为准；公开网关输出为 P3 线索，不能替代公告、审计报告或交易所披露。
   1. `get_stock_quote`: 实时价格、PE(TTM)、PB、总市值、流通市值、换手率与五档盘口。
   2. `get_stock_kline`: 默认 750 日（3 年，支持 20–800 根调节）前复权连续日 K 线，自动计算 MA20/50/120/250/500 全套均线矩阵、ATR14、Bias、3 年宏观时空坐标（高低区间与分位）、内存无损周线共振（周线 MA10/MA30、趋势定调与 52 周高低区间）及三层威科夫时空模型（宏观牛熊阶段 + 周线大势 + 微观 60 日交易区间）；默认开启 Token 精简模式（附最近 30 日 K 线，节省约 85% Token）。仅返回 `adjustment: qfq`、`data_status: ok` 且不少于 120 根时可通过行情结构门槛。
   3. `get_stock_timeline`: 当日 240 分钟分时全景、分时均价线 (VWAP)、盘中放量脉冲时刻与 9:25 集合竞价开盘承接力。
-  4. `get_market_sentiment`: 两市总成交额、涨跌停池数量、炸板池数量、全市场精确真实炸板率、最高连板高度。
-  5. `get_limit_up_ladder`: 今日或历史指定交易日连板天梯分布、各高度板代表龙头与所属行业。
-  6. `get_sector_fund_flow`: 申万与概念行业板块全天主力资金净流入 Top 榜、净流出 Top 榜、涨跌幅榜与领涨龙头代码。
-  7. `get_longhubang_detail`: 全市场日度龙虎榜总览或个股前 5 大买卖席位穿透（自动识别机构专用、北向深/沪股通与游资营业部）。
-  8. `get_company_quality`: 核心财务指标、商誉与未来限售解禁筛查；审计、质押、监管和诉讼等未覆盖项明确返回 `N/A`/待核验。
+  4. `get_index_kline`: 核心指数（上证指数/深证成指/创业板指/中证全指/沪深300）最近 N 个交易日收盘与逐日涨跌幅，确定性直连腾讯指数日K网关（替代不稳定的网页搜索，直供 5 日轮动全窗口指数强弱）。
+  5. `get_market_breadth`: 全市场广度 N 日序列——最新交易日为精确上涨/下跌/平盘家数与红盘率（东财涨跌分布快照），历史交易日以涨停/炸板/跌停池与沪指涨跌幅替代并以 `breadth_precision` 标注精度（不估算）。
+  6. `get_market_sentiment`: 两市总成交额、涨跌停池数量、炸板池数量、全市场精确真实炸板率、最高连板高度；历史 `date_str` 的指数涨跌幅与成交额由指数日K回补（非交易日显式 `unavailable`，不以零值伪装）。
+  7. `get_limit_up_ladder`: 今日或历史指定交易日连板天梯分布、各高度板代表龙头与所属行业。
+  8. `get_sector_fund_flow`: 申万与概念行业板块全天主力资金净流入 Top 榜、净流出 Top 榜、涨跌幅榜与领涨龙头代码；`days=2-10` 时对流入/流出榜板块回补 N 日主力净流入历史、累计净额与趋势定性。
+  9. `get_longhubang_detail`: 全市场日度龙虎榜总览或个股前 5 大买卖席位穿透（自动识别机构专用、北向深/沪股通与游资营业部）；机构专用净额按席位合并买卖两榜并附逐席位明细；`date_str` 支持 YYYYMMDD 或 YYYY-MM-DD（自动归一化）。
+  10. `get_company_quality`: 核心财务指标、商誉与未来限售解禁筛查；审计、质押、监管和诉讼等未覆盖项明确返回 `N/A`/待核验。
 - **失败不伪造**：关键上游不可用时返回 `partial` 或 `unavailable`，不会以零值生成市场情绪结论。
 - **安全边界**：仅访问预设的 HTTPS 数据主机，并限制单次响应大小；服务端不执行命令、不读写用户文件。
 
@@ -30,14 +32,20 @@ python3 mcp/marketgraph-mcp/server.py --test get_stock_kline 300308
 # 测试当日分时均线与放量脉冲
 python3 mcp/marketgraph-mcp/server.py --test get_stock_timeline 301489
 
+# 测试核心指数 5 日逐日涨跌幅 (沪指/深成指/创业板指/中证全指)
+python3 mcp/marketgraph-mcp/server.py --test get_index_kline
+
+# 测试全市场广度 5 日序列 (最新交易日精确红盘率 + 历史情绪池)
+python3 mcp/marketgraph-mcp/server.py --test get_market_breadth
+
 # 测试全市场涨跌与炸板率
 python3 mcp/marketgraph-mcp/server.py --test get_market_sentiment
 
 # 测试连板天梯
 python3 mcp/marketgraph-mcp/server.py --test get_limit_up_ladder
 
-# 测试行业板块资金流向
-python3 mcp/marketgraph-mcp/server.py --test get_sector_fund_flow
+# 测试行业板块资金流向 (附 5 日主力净流入历史)
+python3 mcp/marketgraph-mcp/server.py --test get_sector_fund_flow 5
 
 # 测试龙虎榜席位明细
 python3 mcp/marketgraph-mcp/server.py --test get_longhubang_detail 思泉新材

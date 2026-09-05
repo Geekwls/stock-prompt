@@ -13,7 +13,7 @@ stock-prompt/
 ├── plugin.json                       # 🌟 核心入口：Agent Plugins 1.0 标准插件清单 (兼容 Cursor/Copilot/Gemini)
 │
 ├── mcp/                              # 🔌 A 股公开数据 MCP 服务端（本地 stdio、免 Token）
-│   └── marketgraph-mcp/              # 腾讯/东财公开网关（行情、750日K线与周线共振、情绪与公开财务筛查）
+│   └── marketgraph-mcp/              # 腾讯/东财公开网关（行情、750日K线与周线共振、指数日K、市场广度、资金流历史与公开财务筛查）
 │
 ├── .agents/skills/                    # 🤖 Antigravity / Agent 专用 Skill 目录
 │   ├── market-prediction/             # 🌅 技能 1：A股盘前研判

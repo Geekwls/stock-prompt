@@ -4,7 +4,7 @@ MarketGraph Financial MCP Server (Zero-Config, Protocol 1.0 Ready)
 ==================================================================
 跨智能体通用 A 股金融数据 MCP 服务端 (Agent Plugins 1.0 标准)
 - 零注册、免 Token、零第三方重依赖 (基于 Python 3.8+ 标准库)
-- 主干直连腾讯证券 CDN (毫秒级实时盘口、估值、120日前复权K线与ATR)
+- 主干直连腾讯证券 CDN (毫秒级实时盘口、估值、750日前复权K线、指数日K与ATR)
 - 短线直连东方财富打板网关 (涨停池、连板天梯、炸板池与真实炸板率)
 - 支持标准 JSON-RPC 2.0 stdio 协议 (兼容 Cursor / VS Code / Gemini / Claude)
 """
@@ -33,7 +33,8 @@ CACHE_TTL_SECONDS = 180  # 盘中常规缓存 3 分钟
 MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 ALLOWED_HTTP_HOSTS = {
     "smartbox.gtimg.cn", "qt.gtimg.cn", "web.ifzq.gtimg.cn",
-    "push2ex.eastmoney.com", "push2.eastmoney.com", "datacenter-web.eastmoney.com",
+    "push2ex.eastmoney.com", "push2.eastmoney.com", "push2his.eastmoney.com",
+    "datacenter-web.eastmoney.com",
 }
 
 
@@ -56,14 +57,24 @@ def http_get(url: str, timeout: int = 4, encoding: str = "utf-8") -> str:
     if parsed.scheme != "https" or parsed.hostname not in ALLOWED_HTTP_HOSTS:
         raise ValueError("仅允许访问预设的 HTTPS 金融数据源")
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        content = resp.read(MAX_HTTP_RESPONSE_BYTES + 1)
-        if len(content) > MAX_HTTP_RESPONSE_BYTES:
-            raise ValueError("上游响应超过大小限制")
+    last_exc: Optional[Exception] = None
+    for attempt in range(2):  # 上游偶发掐断连接时单次退避重试
         try:
-            return content.decode(encoding)
-        except UnicodeDecodeError:
-            return content.decode("gbk", errors="ignore")
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                content = resp.read(MAX_HTTP_RESPONSE_BYTES + 1)
+            if len(content) > MAX_HTTP_RESPONSE_BYTES:
+                raise ValueError("上游响应超过大小限制")
+            try:
+                return content.decode(encoding)
+            except UnicodeDecodeError:
+                return content.decode("gbk", errors="ignore")
+        except urllib.error.HTTPError:
+            raise  # 4xx/5xx 属于确定性失败, 不重试
+        except Exception as exc:
+            last_exc = exc
+            if attempt == 0:
+                time.sleep(0.8)
+    raise last_exc
 
 
 def resolve_symbol_by_name(keyword: str) -> Optional[str]:
@@ -118,6 +129,48 @@ def normalize_symbol(symbol: str) -> str:
     if resolved:
         return resolved
     return clean
+
+
+def normalize_date_str(date_str: Optional[str]) -> Optional[str]:
+    """将 YYYYMMDD / YYYY-MM-DD / YYYY/MM/DD 统一归一化为 YYYY-MM-DD；非法输入返回 None"""
+    if not date_str:
+        return None
+    clean = str(date_str).strip().replace("-", "").replace("/", "")
+    if len(clean) == 8 and clean.isdigit():
+        return f"{clean[:4]}-{clean[4:6]}-{clean[6:]}"
+    return None
+
+
+# 核心指数体系: 标准 key -> (腾讯代码, 中文名)
+INDEX_ALIASES = {
+    "SHCI": ("sh000001", "上证指数"),
+    "SZCI": ("sz399001", "深证成指"),
+    "CYB": ("sz399006", "创业板指"),
+    "CSIALL": ("sh000985", "中证全指"),
+    "HS300": ("sh000300", "沪深300"),
+}
+INDEX_NAME_TO_KEY = {
+    "上证指数": "SHCI", "上证": "SHCI", "沪指": "SHCI", "沪综指": "SHCI",
+    "深证成指": "SZCI", "深成指": "SZCI",
+    "创业板指": "CYB", "创业板": "CYB",
+    "中证全指": "CSIALL", "全指": "CSIALL",
+    "沪深300": "HS300", "沪深三百": "HS300",
+}
+
+
+def resolve_index_keys(indices: Optional[List[str]]) -> List[str]:
+    """把用户输入的指数列表 (标准key/中文别名) 解析为去重后的标准 key 列表；空输入返回默认四大指数"""
+    if not indices:
+        return ["SHCI", "SZCI", "CYB", "CSIALL"]
+    keys: List[str] = []
+    for raw in indices:
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        token = raw.strip()
+        key = token.upper() if token.upper() in INDEX_ALIASES else INDEX_NAME_TO_KEY.get(token)
+        if key and key not in keys:
+            keys.append(key)
+    return keys
 
 
 def safe_float(val: Any, default: Optional[float] = 0.0) -> Optional[float]:
@@ -195,6 +248,94 @@ def fetch_stock_quote(symbol: str) -> Dict[str, Any]:
         return res
     except Exception as e:
         return {"error": f"解析个股行情出错: {str(e)}"}
+
+
+def fetch_index_daily_bars(ts_code: str, count: int) -> List[Dict[str, Any]]:
+    """
+    拉取指数日K原始序列 (多取1根用于计算首日涨跌幅)
+    指数无复权概念，腾讯网关对指数代码返回 day 键 (个股才是 qfqday)
+    """
+    url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={ts_code},day,,,{count + 1},qfq"
+    raw = http_get(url)
+    data = json.loads(raw)
+    root = data.get("data", {}).get(ts_code, {})
+    bars_raw = root.get("day") or []
+    bars = []
+    for row in bars_raw[-(count + 1):]:
+        if len(row) >= 6:
+            bars.append({
+                "date": str(row[0]),
+                "open": float(row[1]),
+                "close": float(row[2]),
+                "high": float(row[3]),
+                "low": float(row[4]),
+                "volume": float(row[5]),
+            })
+    return bars
+
+
+def fetch_index_kline(indices: Optional[List[str]] = None, count: int = 5) -> Dict[str, Any]:
+    """
+    获取核心指数 (上证指数/深证成指/创业板指/中证全指/沪深300) 最近 N 个交易日的收盘与逐日涨跌幅
+    直供 sector-rotation 全窗口指数强弱判别与 daily-review 大盘定调，
+    弥补个股K线网关无法解析指数代码 (000001 会被解析为平安银行) 的确定性缺口
+    """
+    if not isinstance(count, int) or not 2 <= count <= 60:
+        return {"error": "count 必须是 2 至 60 的整数", "data_status": "unavailable"}
+    keys = resolve_index_keys(indices)
+    if not keys:
+        return {"error": "未识别到有效指数 (支持 SHCI/SZCI/CYB/CSIALL/HS300 或中文别名)", "data_status": "unavailable"}
+
+    result: Dict[str, Any] = {}
+    failures: List[str] = []
+    for key in keys:
+        ts_code, name = INDEX_ALIASES[key]
+        cache_key = f"index_kline_{ts_code}_{count}"
+        cached = get_cached(cache_key)
+        if cached:
+            result[key] = cached
+            continue
+        try:
+            bars = fetch_index_daily_bars(ts_code, count)
+            if len(bars) < 2:
+                raise ValueError("K线根数不足")
+            days = []
+            for i in range(1, len(bars)):
+                prev_close = bars[i - 1]["close"]
+                cur = bars[i]
+                if prev_close <= 0:
+                    continue
+                days.append({
+                    "date": cur["date"],
+                    "close": cur["close"],
+                    "change_pct": f"{((cur['close'] - prev_close) / prev_close * 100):+.2f}%",
+                })
+            if not days:
+                raise ValueError("涨跌幅序列为空")
+            payload = {"name": name, "ts_code": ts_code, "days": days[-count:]}
+            set_cached(cache_key, payload, ttl=600)
+            result[key] = payload
+        except Exception:
+            failures.append(name)
+
+    if not result:
+        return {
+            "source": "P3_Tencent_Index_Kline",
+            "data_status": "unavailable",
+            "error": f"指数日K全部获取失败: {', '.join(failures) or '未知'}",
+        }
+    res = {
+        "source": "P3_Tencent_Index_Kline",
+        "data_status": "ok" if not failures else "partial",
+        "indices": result,
+        "summary": "；".join(
+            f"{v['name']} 最新 {v['days'][-1]['date']} {v['days'][-1]['change_pct']}"
+            for v in result.values()
+        ),
+    }
+    if failures:
+        res["unavailable_indices"] = failures
+    return res
 
 
 def aggregate_daily_to_weekly(bars: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -564,15 +705,43 @@ EM_UT = "7eea3edcaed734bea9cbfc24409ed989"
 EM_DPT = "wz.ztzt"
 
 
+def fetch_em_index_daily(secid: str, n: int) -> List[Dict[str, Any]]:
+    """
+    拉取东财指数日K序列 (含成交额，用于历史交易日的指数涨跌幅与两市成交额回补)
+    fields2 顺序: f51日期, f52开, f53收, f54高, f55低, f56量, f57成交额(元)
+    """
+    url = (
+        "https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=" + secid
+        + f"&klt=101&fqt=0&lmt={n}&end=20500101"
+        + "&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61"
+    )
+    raw = http_get(url, timeout=5)
+    klines = (json.loads(raw).get("data") or {}).get("klines") or []
+    out = []
+    for line in klines[-n:]:
+        parts = line.split(",")
+        if len(parts) >= 7:
+            out.append({
+                "date": parts[0],
+                "close": safe_float(parts[2], 0.0),
+                "amount_yuan": safe_float(parts[6], 0.0),
+            })
+    return out
+
+
 def fetch_market_sentiment(date_str: Optional[str] = None) -> Dict[str, Any]:
     """
     获取全市场情绪与量能总定调 (涨停数、炸板数、精确全市场炸板率、两市总成交额)
     直供 daily-review L1 情绪引擎与 market-prediction E4 量价簇
+    历史日期的指数涨跌幅与成交额取自指数日K，不再混入实时快照
     """
-    if not date_str:
-        date_str = datetime.now().strftime("%Y%m%d")
+    norm_date = normalize_date_str(date_str) if date_str else None
+    if date_str and not norm_date:
+        return {"error": "date_str 必须为 YYYYMMDD 或 YYYY-MM-DD", "data_status": "unavailable"}
+    compact_date = norm_date.replace("-", "") if norm_date else datetime.now().strftime("%Y%m%d")
+    is_today = compact_date == datetime.now().strftime("%Y%m%d")
 
-    cache_key = f"sentiment_{date_str}"
+    cache_key = f"sentiment_{compact_date}"
     cached = get_cached(cache_key)
     if cached:
         return cached
@@ -587,7 +756,7 @@ def fetch_market_sentiment(date_str: Optional[str] = None) -> Dict[str, Any]:
 
     try:
         # 涨停池
-        zt_url = f"https://push2ex.eastmoney.com/getTopicZTPool?ut={EM_UT}&dpt={EM_DPT}&Pageindex=0&pagesize=500&sort=fbt:asc&date={date_str}"
+        zt_url = f"https://push2ex.eastmoney.com/getTopicZTPool?ut={EM_UT}&dpt={EM_DPT}&Pageindex=0&pagesize=500&sort=fbt:asc&date={compact_date}"
         req_zt = urllib.request.Request(zt_url, headers=headers)
         with urllib.request.urlopen(req_zt, timeout=4) as resp:
             zt_data = json.loads(resp.read().decode("utf-8")).get("data", {}).get("pool", [])
@@ -599,7 +768,7 @@ def fetch_market_sentiment(date_str: Optional[str] = None) -> Dict[str, Any]:
 
     try:
         # 炸板池
-        zb_url = f"https://push2ex.eastmoney.com/getTopicZBPool?ut={EM_UT}&dpt={EM_DPT}&Pageindex=0&pagesize=500&sort=fbt:asc&date={date_str}"
+        zb_url = f"https://push2ex.eastmoney.com/getTopicZBPool?ut={EM_UT}&dpt={EM_DPT}&Pageindex=0&pagesize=500&sort=fbt:asc&date={compact_date}"
         req_zb = urllib.request.Request(zb_url, headers=headers)
         with urllib.request.urlopen(req_zb, timeout=4) as resp:
             zb_data = json.loads(resp.read().decode("utf-8")).get("data", {}).get("pool", [])
@@ -609,7 +778,7 @@ def fetch_market_sentiment(date_str: Optional[str] = None) -> Dict[str, Any]:
 
     try:
         # 跌停池
-        dt_url = f"https://push2ex.eastmoney.com/getTopicDTPool?ut={EM_UT}&dpt={EM_DPT}&Pageindex=0&pagesize=500&sort=fund:asc&date={date_str}"
+        dt_url = f"https://push2ex.eastmoney.com/getTopicDTPool?ut={EM_UT}&dpt={EM_DPT}&Pageindex=0&pagesize=500&sort=fund:asc&date={compact_date}"
         req_dt = urllib.request.Request(dt_url, headers=headers)
         with urllib.request.urlopen(req_dt, timeout=4) as resp:
             dt_data = json.loads(resp.read().decode("utf-8")).get("data", {}).get("pool", [])
@@ -617,30 +786,56 @@ def fetch_market_sentiment(date_str: Optional[str] = None) -> Dict[str, Any]:
     except Exception as exc:
         unavailable_sources.append(f"跌停池: {type(exc).__name__}")
 
-    # 2. 抓取腾讯大盘指数成交额 (上证 + 深证)
+    # 2. 指数涨跌幅与两市成交额: 当日用腾讯实时快照, 历史日期用东财指数日K回补 (不混用实时数据)
     sh_amount = 0.0
     sz_amount = 0.0
     sh_change = "0.00%"
-    try:
-        idx_url = "https://qt.gtimg.cn/q=s_sh000001,s_sz399001,s_sz399006"
-        idx_raw = http_get(idx_url)
-        lines = [line for line in idx_raw.split(";") if line.strip()]
-        for line in lines:
-            if "s_sh000001" in line:
-                p = line.split("~")
-                sh_change = f"{float(p[5].strip('\\\"')):+.2f}%"
-                sh_amount = float(p[9].strip('\\\"')) / 10000.0  # 亿元
-            elif "s_sz399001" in line:
-                p = line.split("~")
-                sz_amount = float(p[9].strip('\\\"')) / 10000.0  # 亿元
-    except Exception as exc:
-        unavailable_sources.append(f"指数成交额: {type(exc).__name__}")
+    if is_today:
+        try:
+            idx_url = "https://qt.gtimg.cn/q=s_sh000001,s_sz399001,s_sz399006"
+            idx_raw = http_get(idx_url)
+            lines = [line for line in idx_raw.split(";") if line.strip()]
+            for line in lines:
+                if "s_sh000001" in line:
+                    p = line.split("~")
+                    sh_change = f"{float(p[5].strip('\\\"')):+.2f}%"
+                    sh_amount = float(p[9].strip('\\\"')) / 10000.0  # 亿元
+                elif "s_sz399001" in line:
+                    p = line.split("~")
+                    sz_amount = float(p[9].strip('\\\"')) / 10000.0  # 亿元
+        except Exception as exc:
+            unavailable_sources.append(f"指数成交额: {type(exc).__name__}")
+    else:
+        try:
+            lookback = 30  # 容忍长假后的历史回看窗口
+            sh_rows = fetch_em_index_daily("1.000001", lookback)
+            sh_idx = next((i for i, r in enumerate(sh_rows) if r["date"] == norm_date), -1)
+            if sh_idx < 0:
+                return {
+                    "source": "P3_Public_Financial_Gateways",
+                    "data_status": "unavailable",
+                    "date": compact_date,
+                    "error": f"{norm_date} 非交易日或指数日K未覆盖该日期",
+                }
+            if sh_idx > 0 and sh_rows[sh_idx - 1]["close"] > 0:
+                prev_close = sh_rows[sh_idx - 1]["close"]
+                sh_change = f"{((sh_rows[sh_idx]['close'] - prev_close) / prev_close * 100):+.2f}%"
+            sh_amount = sh_rows[sh_idx]["amount_yuan"] / 100000000.0  # 亿元
+            # 深市总成交额用深证综指 (覆盖全部深市股票) 的成交额口径
+            sz_rows = fetch_em_index_daily("0.399106", lookback)
+            sz_row = next((r for r in sz_rows if r["date"] == norm_date), None)
+            if sz_row:
+                sz_amount = sz_row["amount_yuan"] / 100000000.0
+            else:
+                unavailable_sources.append("深市历史成交额: 深证综指未覆盖该日期")
+        except Exception as exc:
+            unavailable_sources.append(f"历史指数行情: {type(exc).__name__}")
 
     if unavailable_sources:
         return {
             "source": "P3_Public_Financial_Gateways",
             "data_status": "partial",
-            "date": date_str,
+            "date": compact_date,
             "unavailable_sources": unavailable_sources,
             "message": "部分上游数据不可用，不能据此计算市场情绪结论。",
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -653,7 +848,7 @@ def fetch_market_sentiment(date_str: Optional[str] = None) -> Dict[str, Any]:
     res = {
         "source": "P3_Public_Financial_Gateways",
         "data_status": "ok",
-        "date": date_str,
+        "date": compact_date,
         "sh_index_change": sh_change,
         "total_turnover_billion": round(total_turnover, 2),
         "zt_count": zt_count,
@@ -719,12 +914,166 @@ def fetch_limit_up_ladder(date_str: Optional[str] = None) -> Dict[str, Any]:
         return {"error": f"获取连板天梯失败: {str(e)}"}
 
 
-def fetch_sector_fund_flow(count: int = 20) -> Dict[str, Any]:
+def fetch_market_breadth(days: int = 5) -> Dict[str, Any]:
     """
-    获取 A 股全行业板块主力资金流向、涨跌幅排行与领涨龙头
+    获取全市场广度 N 个交易日序列:
+    - 最新交易日: 东财涨跌分布快照给出精确的上涨/下跌/平盘家数与红盘率 (快照仅支持最新交易日)
+    - 历史交易日: 官方公开网关不提供全市场涨跌家数, 以涨停/炸板/跌停池与沪指逐日涨跌幅替代,
+      并通过 breadth_precision 字段显式标注精度, 绝不估算
+    直供 sector-rotation 全窗口市场广度温度计与情绪退潮识别
+    """
+    if not isinstance(days, int) or not 2 <= days <= 10:
+        return {"error": "days 必须是 2 至 10 的整数", "data_status": "unavailable"}
+
+    cached = get_cached(f"breadth_{days}")
+    if cached:
+        return cached
+
+    # 1. 交易日序列以沪指日K为准 (不自行维护交易日历)
+    try:
+        sh_bars = fetch_index_daily_bars(INDEX_ALIASES["SHCI"][0], days)
+    except Exception as exc:
+        return {"error": f"交易日序列(沪指日K)不可用: {type(exc).__name__}", "data_status": "unavailable"}
+    if len(sh_bars) < 2:
+        return {"error": "沪指日K序列不足，无法构建交易日窗口", "data_status": "unavailable"}
+
+    unavailable_sources: List[str] = []
+
+    # 2. 最新交易日的精确涨跌家数快照
+    exact = None
+    exact_date = None
+    try:
+        raw = http_get(f"https://push2ex.eastmoney.com/getTopicZDFenBu?ut={EM_UT}&dpt={EM_DPT}")
+        data = json.loads(raw).get("data", {}) or {}
+        qdate = str(data.get("qdate", ""))
+        fenbu: Dict[str, int] = {}
+        for item in data.get("fenbu", []) or []:
+            if isinstance(item, dict):
+                fenbu.update(item)
+        up = sum(v for k, v in fenbu.items() if str(k).lstrip("-").isdigit() and int(k) > 0)
+        down = sum(v for k, v in fenbu.items() if str(k).lstrip("-").isdigit() and int(k) < 0)
+        flat = sum(v for k, v in fenbu.items() if str(k) == "0")
+        total = up + down + flat
+        if total > 0:
+            exact = {"up_count": up, "down_count": down, "flat_count": flat,
+                     "total_stocks": total, "red_rate": round(up / total * 100.0, 2)}
+            exact_date = f"{qdate[:4]}-{qdate[4:6]}-{qdate[6:8]}" if len(qdate) == 8 else None
+    except Exception as exc:
+        unavailable_sources.append(f"涨跌分布快照: {type(exc).__name__}")
+
+    # 3. 逐交易日组装: 指数涨跌幅 + 情绪池 (东财池支持历史 date 回补)
+    def pool_json(pool_path: str, d_compact: str, sort_field: str) -> List[Dict[str, Any]]:
+        url = (f"https://push2ex.eastmoney.com/{pool_path}?ut={EM_UT}&dpt={EM_DPT}"
+               f"&Pageindex=0&pagesize=500&sort={sort_field}&date={d_compact}")
+        return json.loads(http_get(url, timeout=4)).get("data", {}).get("pool", []) or []
+
+    day_rows: List[Dict[str, Any]] = []
+    for i in range(max(1, len(sh_bars) - days), len(sh_bars)):
+        cur, prev = sh_bars[i], sh_bars[i - 1]
+        d_dash = cur["date"]
+        d_compact = d_dash.replace("-", "")
+        row: Dict[str, Any] = {
+            "date": d_dash,
+            "sh_index_change": f"{((cur['close'] - prev['close']) / prev['close'] * 100):+.2f}%" if prev["close"] > 0 else "N/A",
+            "breadth_precision": "limit_pools_only",
+        }
+        if exact and d_dash == exact_date:
+            row.update({
+                "up_count": exact["up_count"],
+                "down_count": exact["down_count"],
+                "flat_count": exact["flat_count"],
+                "total_stocks": exact["total_stocks"],
+                "red_rate": f"{exact['red_rate']:.2f}%",
+                "breadth_precision": "exact",
+            })
+        try:
+            zt_rows = pool_json("getTopicZTPool", d_compact, "fbt:asc")
+            row["zt_count"] = len(zt_rows)
+            row["max_ladder_height"] = max([int(x.get("lbc", 1) or 1) for x in zt_rows]) if zt_rows else 0
+        except Exception:
+            unavailable_sources.append(f"涨停池@{d_dash}")
+        try:
+            row["zb_count"] = len(pool_json("getTopicZBPool", d_compact, "fbt:asc"))
+        except Exception:
+            unavailable_sources.append(f"炸板池@{d_dash}")
+        try:
+            row["dt_count"] = len(pool_json("getTopicDTPool", d_compact, "fund:asc"))
+        except Exception:
+            unavailable_sources.append(f"跌停池@{d_dash}")
+        day_rows.append(row)
+
+    res = {
+        "source": "P3_Public_Financial_Gateways",
+        "data_status": "partial" if (unavailable_sources or exact is None) else "ok",
+        "days_window": day_rows,
+        "note": ("最新交易日为精确全市场涨跌家数口径 (breadth_precision=exact)；"
+                 "历史交易日官方公开网关不提供全市场涨跌家数，以涨停/炸板/跌停池与沪指涨跌幅替代 "
+                 "(breadth_precision=limit_pools_only)，不进行估算"),
+    }
+    if exact:
+        res["latest_exact_snapshot"] = {"date": exact_date, **exact}
+    if unavailable_sources:
+        res["unavailable_sources"] = unavailable_sources
+    set_cached(f"breadth_{days}", res)
+    return res
+
+
+def fetch_sector_fund_history(sector_code: str, days: int) -> List[Dict[str, Any]]:
+    """
+    获取单个行业板块的主力资金流日K历史 (东财 fflow daykline 网关, 带板块级缓存)
+    每行字段序: 日期, 主力净额(元), 小单, 中单, 大单, 超大单, 各占比..., 收盘, 涨跌幅...
+    """
+    cache_key = f"fflow_{sector_code}_{days}"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+    url = (
+        "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get"
+        f"?lmt={days}&klt=101&secid=90.{sector_code}&secid2=90.{sector_code}"
+        "&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65"
+    )
+    raw = http_get(url, timeout=4)
+    klines = (json.loads(raw).get("data") or {}).get("klines") or []
+    hist = []
+    for line in klines[-days:]:
+        parts = line.split(",")
+        if len(parts) >= 13:
+            hist.append({
+                "date": parts[0],
+                "main_net_inflow_billion": round(safe_float(parts[1], 0.0) / 100000000.0, 2),
+                "change_pct": f"{safe_float(parts[12], 0.0):+.2f}%",
+            })
+    if not hist:
+        raise ValueError("资金流历史为空")
+    set_cached(cache_key, hist, ttl=300)
+    return hist
+
+
+def fund_flow_trend_label(hist: List[Dict[str, Any]]) -> str:
+    """根据逐日主力净额符号序列给出资金趋势定性"""
+    signs = [1 if h["main_net_inflow_billion"] > 0 else -1 for h in hist]
+    if not signs:
+        return "N/A"
+    if all(s > 0 for s in signs):
+        return "连续净流入"
+    if all(s < 0 for s in signs):
+        return "连续净流出"
+    return "净流出转净流入" if signs[-1] > 0 else "净流入转净流出"
+
+
+def fetch_sector_fund_flow(count: int = 20, days: int = 1) -> Dict[str, Any]:
+    """
+    获取 A 股全行业板块主力资金流向、涨跌幅排行与领涨龙头；days>1 时附各板块 N 日主力净流入历史
     直供 daily-review L2 强势板块定位与 sector-rotation 5日资金迁移分析
     """
-    cache_key = f"sector_fund_flow_{count}"
+    if not isinstance(count, int) or not 1 <= count <= 100:
+        return {"error": "count 必须是 1 至 100 的整数", "data_status": "unavailable"}
+    if not isinstance(days, int) or not 1 <= days <= 10:
+        return {"error": "days 必须是 1 至 10 的整数", "data_status": "unavailable"}
+    if days > 1 and count > 12:
+        return {"error": "days > 1 时 count 上限为 12 (控制上游请求数)", "data_status": "unavailable"}
+
+    cache_key = f"sector_fund_flow_{count}_{days}"
     cached = get_cached(cache_key)
     if cached:
         return cached
@@ -811,6 +1160,30 @@ def fetch_sector_fund_flow(count: int = 20) -> Dict[str, Any]:
             ],
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
+
+        # days > 1: 对流入/流出榜板块逐个回补主力资金 N 日历史 (单板块失败不影响整体, 标记 partial)
+        if days > 1:
+            target_codes = list(dict.fromkeys([s["code"] for s in top_inflows + top_outflows]))
+            history_map: Dict[str, List[Dict[str, Any]]] = {}
+            failed_history: List[str] = []
+            for code in target_codes:
+                try:
+                    history_map[str(code)] = fetch_sector_fund_history(str(code), days)
+                except Exception:
+                    failed_history.append(str(next((s["name"] for s in sectors if s["code"] == code), code)))
+                time.sleep(0.12)  # 批量回补时节流, 避免触发上游限流
+            for entry in res["top_inflow_sectors"] + res["top_outflow_sectors"]:
+                hist = history_map.get(str(entry.get("code")))
+                if hist:
+                    entry["history"] = hist
+                    entry["cum_net_inflow_billion"] = round(
+                        sum(h["main_net_inflow_billion"] for h in hist), 2)
+                    entry["fund_flow_trend"] = fund_flow_trend_label(hist)
+            res["history_days"] = days
+            if failed_history:
+                res["data_status"] = "partial"
+                res["history_unavailable_sectors"] = failed_history
+
         set_cached(cache_key, res)
         return res
     except Exception as e:
@@ -828,7 +1201,11 @@ def fetch_longhubang_detail(symbol: Optional[str] = None, date_str: Optional[str
     else:
         code_only = ""
 
-    cache_key = f"lhb_{code_only}_{date_str or 'latest'}"
+    norm_date = normalize_date_str(date_str) if date_str else None
+    if date_str and not norm_date:
+        return {"error": "date_str 必须为 YYYYMMDD 或 YYYY-MM-DD", "data_status": "unavailable"}
+
+    cache_key = f"lhb_{code_only}_{norm_date or 'latest'}"
     cached = get_cached(cache_key)
     if cached:
         return cached
@@ -837,11 +1214,8 @@ def fetch_longhubang_detail(symbol: Optional[str] = None, date_str: Optional[str
     try:
         if code_only:
             filter_expr = f'(SECURITY_CODE="{code_only}")'
-            if date_str:
-                normalized_date = date_str.replace("-", "")
-                if len(normalized_date) != 8 or not normalized_date.isdigit():
-                    return {"error": "date_str 必须为 YYYYMMDD 或 YYYY-MM-DD", "data_status": "unavailable"}
-                filter_expr += f'(TRADE_DATE=\'{normalized_date[:4]}-{normalized_date[4:6]}-{normalized_date[6:]}\')'
+            if norm_date:
+                filter_expr += f"(TRADE_DATE='{norm_date}')"
             buy_url = (
                 "https://datacenter-web.eastmoney.com/api/data/v1/get?"
                 + urllib.parse.urlencode({
@@ -925,9 +1299,17 @@ def fetch_longhubang_detail(symbol: Optional[str] = None, date_str: Optional[str
             buyer_seats = [parse_seat(r) for r in buy_rows]
             seller_seats = [parse_seat(r) for r in sell_rows]
 
-            org_buy = sum(safe_float(r.get("BUY"), 0.0) for r in buy_rows if "机构" in r.get("OPERATEDEPT_NAME", ""))
-            org_sell = sum(safe_float(r.get("SELL"), 0.0) for r in sell_rows if "机构" in r.get("OPERATEDEPT_NAME", ""))
-            org_net_wan = round((org_buy - org_sell) / 10000.0, 2)
+            # 机构专用席位净额: 买卖两榜合并到席位粒度再取 NET 合计 (单边 BUY/SELL 相减会丢失席位自身对冲)
+            org_seats: Dict[str, Dict[str, float]] = {}
+            for r in buy_rows + sell_rows:
+                dept = r.get("OPERATEDEPT_NAME", "") or ""
+                if "机构" not in dept:
+                    continue
+                cur = org_seats.setdefault(dept, {"buy": 0.0, "sell": 0.0, "net": 0.0})
+                cur["buy"] += safe_float(r.get("BUY"), 0.0) or 0.0
+                cur["sell"] += safe_float(r.get("SELL"), 0.0) or 0.0
+                cur["net"] += safe_float(r.get("NET"), 0.0) or 0.0
+            org_net_wan = round(sum(v["net"] for v in org_seats.values()) / 10000.0, 2)
 
             res = {
                 "source": "P3_Eastmoney_LHB_Details",
@@ -940,6 +1322,16 @@ def fetch_longhubang_detail(symbol: Optional[str] = None, date_str: Optional[str
                 "total_lhb_sell_million": round(safe_float(sum_item.get("TOTAL_SELL"), 0.0) / 1000000.0, 2),
                 "total_lhb_net_million": round(safe_float(sum_item.get("TOTAL_NET"), 0.0) / 1000000.0, 2),
                 "org_seat_net_wan": f"{org_net_wan:+.2f} 万元",
+                "org_seat_count": len(org_seats),
+                "org_seat_net_details": [
+                    {
+                        "seat_name": dept,
+                        "buy_wan": f"{v['buy'] / 10000.0:+.2f} 万",
+                        "sell_wan": f"{v['sell'] / 10000.0:+.2f} 万",
+                        "net_wan": f"{v['net'] / 10000.0:+.2f} 万",
+                    }
+                    for dept, v in sorted(org_seats.items(), key=lambda kv: kv[1]["net"], reverse=True)
+                ],
                 "seat_quality_judgment": "机构席位净买入" if org_net_wan > 0 else ("机构席位净卖出" if org_net_wan < 0 else "未见机构席位净方向"),
                 "seat_quality_note": "仅基于披露席位的机构专用净额，不推断外资、游资或散户资金性质。",
                 "top5_buyers": buyer_seats,
@@ -949,7 +1341,7 @@ def fetch_longhubang_detail(symbol: Optional[str] = None, date_str: Optional[str
             return res
 
         else:
-            filter_expr = f'(TRADE_DATE=\'{date_str}\')' if date_str else ""
+            filter_expr = f"(TRADE_DATE='{norm_date}')" if norm_date else ""
             params = {
                 "reportName": "RPT_BILLBOARD_DAILYDETAILS",
                 "columns": "ALL",
@@ -984,7 +1376,7 @@ def fetch_longhubang_detail(symbol: Optional[str] = None, date_str: Optional[str
             res = {
                 "source": "P3_Eastmoney_LHB_Daily_Summary",
                 "data_status": "ok",
-                "date": date_str or (data_rows[0].get("TRADE_DATE", "")[:10] if data_rows else datetime.now().strftime("%Y-%m-%d")),
+                "date": norm_date or (data_rows[0].get("TRADE_DATE", "")[:10] if data_rows else datetime.now().strftime("%Y-%m-%d")),
                 "total_stocks_on_list": len(stocks),
                 "top_net_buy_stocks": stocks[:10],
             }
@@ -1270,7 +1662,7 @@ def fetch_stock_timeline(symbol: str) -> Dict[str, Any]:
 # -----------------------------------------------------------------------------
 SERVER_INFO = {
     "name": "marketgraph-data",
-    "version": "1.2.1",
+    "version": "1.3.0",
 }
 
 AVAILABLE_TOOLS = [
@@ -1329,6 +1721,43 @@ AVAILABLE_TOOLS = [
         },
     },
     {
+        "name": "get_index_kline",
+        "description": "获取核心指数（上证指数/深证成指/创业板指/中证全指/沪深300）最近 N 个交易日的收盘与逐日涨跌幅序列，确定性直连腾讯指数日K网关（直供5日轮动全窗口指数强弱，无需依赖不稳定的网页搜索）",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "indices": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "指数列表，支持 SHCI/SZCI/CYB/CSIALL/HS300 或中文别名（上证指数/深成指/创业板指/中证全指/沪深300），省略默认返回前四个",
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "交易日数量，默认 5",
+                    "default": 5,
+                    "minimum": 2,
+                    "maximum": 60,
+                },
+            },
+        },
+    },
+    {
+        "name": "get_market_breadth",
+        "description": "获取全市场广度 N 个交易日序列：最新交易日为精确上涨/下跌/平盘家数与红盘率（东财涨跌分布快照），历史交易日以涨停/炸板/跌停池与沪指涨跌幅替代并通过 breadth_precision 显式标注精度（不估算）",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "days": {
+                    "type": "integer",
+                    "description": "交易日窗口，默认 5",
+                    "default": 5,
+                    "minimum": 2,
+                    "maximum": 10,
+                },
+            },
+        },
+    },
+    {
         "name": "get_market_sentiment",
         "description": "获取全市场情绪总分指标（两市成交总额、涨停家数、炸板家数、真实炸板率、最高连板高度）",
         "inputSchema": {
@@ -1358,17 +1787,24 @@ AVAILABLE_TOOLS = [
     },
     {
         "name": "get_sector_fund_flow",
-        "description": "获取 A 股全行业板块主力资金净流入榜、流出榜、涨幅榜、跌幅榜及领涨龙头股票（直供复盘与轮动）",
+        "description": "获取 A 股全行业板块主力资金净流入榜、流出榜、涨幅榜、跌幅榜及领涨龙头股票；days>1 时对流入/流出榜板块回补 N 日主力净流入历史与趋势定性（直供复盘与5日轮动资金迁移）",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "count": {
                     "type": "integer",
-                    "description": "返回的行业板块数量，默认 20",
+                    "description": "返回的行业板块数量，默认 20；days>1 时上限 12",
                     "default": 20,
                     "minimum": 1,
                     "maximum": 100,
-                }
+                },
+                "days": {
+                    "type": "integer",
+                    "description": "主力资金流历史天数，默认 1（仅当日）；支持 2-10 日回补",
+                    "default": 1,
+                    "minimum": 1,
+                    "maximum": 10,
+                },
             },
         },
     },
@@ -1415,6 +1851,14 @@ def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
             return {"error": "symbol 必须是非空字符串", "data_status": "unavailable"}
     if name == "get_sector_fund_flow" and (not isinstance(arguments.get("count", 20), int) or not 1 <= arguments.get("count", 20) <= 100):
         return {"error": "count 必须是 1 至 100 的整数", "data_status": "unavailable"}
+    if name == "get_index_kline" and arguments.get("count", 5) is not None and (not isinstance(arguments.get("count", 5), int) or not 2 <= arguments.get("count", 5) <= 60):
+        return {"error": "count 必须是 2 至 60 的整数", "data_status": "unavailable"}
+    if name == "get_market_breadth" and arguments.get("days", 5) is not None and (not isinstance(arguments.get("days", 5), int) or not 2 <= arguments.get("days", 5) <= 10):
+        return {"error": "days 必须是 2 至 10 的整数", "data_status": "unavailable"}
+    if name == "get_index_kline" and arguments.get("indices") is not None and (
+        not isinstance(arguments.get("indices"), list) or not all(isinstance(x, str) for x in arguments["indices"])
+    ):
+        return {"error": "indices 必须是字符串数组", "data_status": "unavailable"}
     if name == "get_stock_quote":
         return fetch_stock_quote(arguments.get("symbol", ""))
     elif name == "get_stock_kline":
@@ -1429,8 +1873,12 @@ def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         return fetch_market_sentiment(arguments.get("date_str"))
     elif name == "get_limit_up_ladder":
         return fetch_limit_up_ladder(arguments.get("date_str"))
+    elif name == "get_index_kline":
+        return fetch_index_kline(arguments.get("indices"), arguments.get("count", 5))
+    elif name == "get_market_breadth":
+        return fetch_market_breadth(arguments.get("days", 5))
     elif name == "get_sector_fund_flow":
-        return fetch_sector_fund_flow(arguments.get("count", 20))
+        return fetch_sector_fund_flow(arguments.get("count", 20), arguments.get("days", 1))
     elif name == "get_longhubang_detail":
         return fetch_longhubang_detail(arguments.get("symbol"), arguments.get("date_str"))
     elif name == "get_company_quality":
@@ -1565,8 +2013,13 @@ if __name__ == "__main__":
             out = fetch_market_sentiment()
         elif tool_name == "get_limit_up_ladder":
             out = fetch_limit_up_ladder()
+        elif tool_name == "get_index_kline":
+            out = fetch_index_kline()
+        elif tool_name == "get_market_breadth":
+            out = fetch_market_breadth()
         elif tool_name == "get_sector_fund_flow":
-            out = fetch_sector_fund_flow()
+            days = int(sys.argv[3]) if len(sys.argv) > 3 and sys.argv[3].isdigit() else 1
+            out = fetch_sector_fund_flow(10 if days > 1 else 20, days)
         elif tool_name == "get_longhubang_detail":
             out = fetch_longhubang_detail(target_symbol)
         elif tool_name == "get_company_quality":

@@ -13,7 +13,7 @@ stock-prompt/
 ├── plugin.json                       # 🌟 核心入口：Agent Plugins 1.0 标准插件清单 (兼容 Cursor/Copilot/Gemini)
 │
 ├── mcp/                              # 🔌 A 股公开数据 MCP 服务端（本地 stdio、免 Token）
-│   └── marketgraph-mcp/              # 腾讯/东财公开网关（行情、K 线、情绪与公开财务筛查）
+│   └── marketgraph-mcp/              # 腾讯/东财公开网关（行情、750日K线与周线共振、情绪与公开财务筛查）
 │
 ├── .agents/skills/                    # 🤖 Antigravity / Agent 专用 Skill 目录
 │   ├── market-prediction/             # 🌅 技能 1：A股盘前研判
@@ -162,7 +162,7 @@ scripts\update.bat
 
 更新脚本会先检查本地修改；存在未提交内容时停止，避免覆盖用户定制。随后先比对远程再以 fast-forward 方式拉取 GitHub main，并运行 `install_skills.py` 将四大技能同步到 Gemini、Antigravity 与 Codex。安装器通过 manifest 清理旧版本残留，只处理本项目记录的文件；`--check` 会校验完整 Skill 文件，而不只是报告卡脚本。
 
-安装成功后会自动打印 **30 秒快速上手速查表**，并检测 MarketGraph MCP 数据网关的注册状态——未注册时会给出配置片段与自测命令（手动配置见 [mcp/marketgraph-mcp/README.md](mcp/marketgraph-mcp/README.md)）。配置 MCP 后，`get_stock_kline` 仅在明确返回前复权、完整且至少 120 根数据时通过行情结构门槛；其余公开网关数据按 P3 线索使用，关键公司事实仍须公告/报告核验。当前版本见 `version.json`，每次更新的内容见 `CHANGELOG.md`。
+安装成功后会自动打印 **30 秒快速上手速查表**，并检测 MarketGraph MCP 数据网关的注册状态——未注册时会给出配置片段与自测命令（手动配置见 [mcp/marketgraph-mcp/README.md](mcp/marketgraph-mcp/README.md)）。配置 MCP 后，`get_stock_kline` 默认返回 750 日（3 年）前复权日 K 线（支持 20–800 根调节），内置 MA20/50/120/250/500 全套均线矩阵、3 年宏观时空坐标、内存无损周线共振（周线 MA10/MA30 与 52 周高低区间）及三层威科夫时空模型；默认 Token 精简模式（附最近 30 日 K 线），仅在明确返回前复权、完整且至少 120 根数据时通过行情结构门槛。其余公开网关数据按 P3 线索使用，关键公司事实仍须公告/报告核验。当前版本见 `version.json`，每次更新的内容见 `CHANGELOG.md`。
 
 ---
 

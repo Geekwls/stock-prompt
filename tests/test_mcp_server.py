@@ -43,7 +43,7 @@ class MarketGraphMCPServerTest(unittest.TestCase):
 
     def test_tools_schema_validity(self):
         tools = SERVER.AVAILABLE_TOOLS
-        self.assertGreaterEqual(len(tools), 10)
+        self.assertGreaterEqual(len(tools), 11)
         tool_names = {t["name"] for t in tools}
         self.assertIn("get_stock_quote", tool_names)
         self.assertIn("get_stock_kline", tool_names)
@@ -53,6 +53,7 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         self.assertIn("get_index_kline", tool_names)
         self.assertIn("get_market_breadth", tool_names)
         self.assertIn("get_sector_fund_flow", tool_names)
+        self.assertIn("get_sector_kline", tool_names)
         self.assertIn("get_longhubang_detail", tool_names)
         self.assertIn("get_company_quality", tool_names)
         for t in tools:
@@ -150,6 +151,9 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         self.assertIn("macro_wyckoff_phase", kline["wyckoff_multi_timeframe"])
         self.assertIn("trading_range_60d", kline["wyckoff_multi_timeframe"])
         self.assertIn("summary", kline["wyckoff_multi_timeframe"])
+        # 量能结构: 固定成交量 10000 => 量比 1.0, 量能分位 100
+        self.assertEqual(kline["volume_ratio_20d"], 1.0)
+        self.assertEqual(kline["volume_percentile_120d"], 100.0)
 
         # 测试 full 模式 (compact=False)
         SERVER.CACHE_STORE.clear()
@@ -426,6 +430,67 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         self.assertEqual(rows[1]["down_count"], 60)
         self.assertEqual(rows[1]["red_rate"], "68.18%")
         self.assertEqual(res["latest_exact_snapshot"]["date"], "2026-09-04")
+
+    def test_fetch_index_kline_rejects_oversized_count(self):
+        res = SERVER.fetch_index_kline(indices=["SHCI"], count=200)
+        self.assertEqual(res["data_status"], "unavailable")
+        self.assertIn("130", res["error"])
+
+    @patch.object(SERVER, "http_get")
+    def test_fetch_sector_kline_parsing(self, mock_get):
+        """BK 代码直查不触发名称解析; 收盘序列来自 fflow daykline"""
+        SERVER.CACHE_STORE.clear()
+        fflow_lines = [
+            "2026-09-02,-10061659648.0,6260276224.0,3761343488.0,-2568673792.0,-7492985856.0,-2.96,1.84,1.11,-0.76,-2.21,2713.20,-0.30,2713.20,-0.30",
+            "2026-09-03,-10061659648.0,6260276224.0,3761343488.0,-2568673792.0,-7492985856.0,-2.96,1.84,1.11,-0.76,-2.21,2690.50,-0.84,2690.50,-0.84",
+            "2026-09-04,-32075334144.0,20167107584.0,11774541824.0,-10996860416.0,-21078473728.0,-7.48,4.70,2.75,-2.57,-4.92,2635.14,-2.88,2635.14,-2.88",
+        ]
+
+        def fake_get(url, timeout=4, encoding="utf-8"):
+            if "fflow/daykline" in url and "secid=90.BK1036" in url:
+                return json.dumps({"data": {"name": "半导体", "klines": fflow_lines}})
+            raise AssertionError("unexpected url: " + url)
+
+        mock_get.side_effect = fake_get
+        res = SERVER.fetch_sector_kline("BK1036", count=20)
+        self.assertEqual(res["data_status"], "partial", res)  # mock 仅 3 根 < 20 根 => partial 降级
+        self.assertIn("不足请求的 20 根", res["note"])
+        self.assertEqual(res["sector_name"], "半导体")
+        self.assertEqual(res["valid_bars"], 3)
+        self.assertEqual(res["latest_close"], 2635.14)
+        self.assertEqual(res["latest_change_pct"], "-2.88%")
+        self.assertEqual(res["recent_5d_return"], "-2.88%")  # 尾根对首根 (2635.14/2713.20)
+        self.assertEqual(res["cum_main_net_inflow_5d_billion"], -521.99)  # 三日累计 (-100.62×2 + -320.75)
+        self.assertIn("note", res)
+
+    @patch.object(SERVER, "http_get")
+    def test_sector_name_resolution_via_clist(self, mock_get):
+        """中文板块名经 clist 全量表精确匹配为 BK 代码"""
+        SERVER.CACHE_STORE.clear()
+
+        def fake_get(url, timeout=4, encoding="utf-8"):
+            if "clist/get" in url:
+                return json.dumps({"data": {"diff": [
+                    {"f12": "BK1036", "f14": "半导体"},
+                    {"f12": "BK0475", "f14": "银行Ⅱ"},
+                ]}})
+            if "fflow/daykline" in url:
+                return json.dumps({"data": {"name": "半导体", "klines": [
+                    "2026-09-03,-1.0,0,0,0,0,0,0,0,0,0,2690.50,-0.84,2690.50,-0.84",
+                    "2026-09-04,-2.0,0,0,0,0,0,0,0,0,0,2635.14,-2.88,2635.14,-2.88",
+                ]}})
+            raise AssertionError("unexpected url: " + url)
+
+        mock_get.side_effect = fake_get
+        res = SERVER.fetch_sector_kline("半导体", count=20)
+        self.assertEqual(res["sector_code"], "BK1036")
+        self.assertEqual(res["latest_close"], 2635.14)
+
+    def test_sector_kline_rejects_unknown_name(self):
+        with patch.object(SERVER, "http_get", side_effect=OSError("down")):
+            res = SERVER.fetch_sector_kline("不存在的板块XYZ")
+        self.assertEqual(res["data_status"], "unavailable")
+        self.assertIn("无法解析板块", res["error"])
 
     @patch.object(SERVER, "http_get")
     def test_sector_fund_flow_with_history(self, mock_get):

@@ -1,5 +1,14 @@
 # CHANGELOG (更新日志)
 
+## [v6.4.0] - 2026-09-06
+### 🔍 个股诊断 Skill 接线确定性数据与板块指数日K (Stock-Analysis Data Wiring)
+- **新增 `get_sector_kline`（第 11 个工具）**：东财行业板块指数日K收盘序列，输出板块 MA5/10/20/60、5/20/60 日区间涨幅、20/60 日收盘高低点与近 5/20 日主力净流入累计；支持 BK 代码或中文板块名（clist 全量表精确匹配，24h 缓存）。填补 L4"相对行业指数基准"此前只能靠搜索或记 N/A 的确定性缺口。
+- **`get_index_kline` count 上限 60→130**：覆盖个股 L4 所需的 120 日宽基相对强度窗口（此前按 5 日轮动设计偏窄）。
+- **`get_stock_kline` compact 模式新增量能结构字段**：`volume_ratio_20d`（20 日量比）与 `volume_percentile_120d`（120 日量能分位），模型无需全量 K 线即可完成 L5 量价分位与 L6 量能过热判断。
+- **`stock-analysis` Skill 全面接线 MCP v6.3+ 能力**：L1 接入 `get_index_kline`/`get_market_breadth`/`get_market_sentiment` 确定性市场数据路由；L2 接入板块资金流 5 日历史与板块指数日K；L4 明确双基准（宽基 + 行业）的 MCP 取数路径；L5/L6 接入 750 日宏观坐标（MA250/MA500 乖离、3 年分位、周线共振）与量能字段。
+- **服务端结构标签防滥用条款**：数据契约明确 `wyckoff_multi_timeframe`/`weekly_alignment` 等预计算标签按 P3 线索记录，L5 主假设与 Confirmed/Probable 分级必须由模型基于 OHLCV 独立完成，标签与独立结论冲突时并列披露——防止模型照抄服务端标签架空"四项证据"规则。
+- **测试**：新增板块K线解析/中文名解析/未知板块拒绝/count 上限/量能字段等 5 项单测，全套 45 项通过。
+
 ## [v6.3.1] - 2026-09-06
 ### 🛡️ 上游频控自愈与缓存策略加固 (Throttle Resilience)
 - **全局限速器**：`http_get` 对同一数据主机强制 0.5 秒最小请求间隔，突发密集请求不再可能触发东财 IP 级频控（此前仅 fflow 批量回补有局部节流）。

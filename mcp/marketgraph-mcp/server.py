@@ -333,11 +333,12 @@ def fetch_index_daily_bars(ts_code: str, count: int) -> List[Dict[str, Any]]:
 def fetch_index_kline(indices: Optional[List[str]] = None, count: int = 5) -> Dict[str, Any]:
     """
     获取核心指数 (上证指数/深证成指/创业板指/中证全指/沪深300) 最近 N 个交易日的收盘与逐日涨跌幅
-    直供 sector-rotation 全窗口指数强弱判别与 daily-review 大盘定调，
+    直供 sector-rotation 全窗口指数强弱判别、daily-review 大盘定调与 stock-analysis L4 宽基基准
+    (count 支持 130, 覆盖 L4 的 120 日相对强度窗口),
     弥补个股K线网关无法解析指数代码 (000001 会被解析为平安银行) 的确定性缺口
     """
-    if not isinstance(count, int) or not 2 <= count <= 60:
-        return {"error": "count 必须是 2 至 60 的整数", "data_status": "unavailable"}
+    if not isinstance(count, int) or not 2 <= count <= 130:
+        return {"error": "count 必须是 2 至 130 的整数", "data_status": "unavailable"}
     keys = resolve_index_keys(indices)
     if not keys:
         return {"error": "未识别到有效指数 (支持 SHCI/SZCI/CYB/CSIALL/HS300 或中文别名)", "data_status": "unavailable"}
@@ -703,6 +704,17 @@ def fetch_stock_kline(symbol: str, count: int = 750, compact: bool = True) -> Di
         # 内存无损聚合周线多周期共振体系
         weekly_analysis = aggregate_daily_to_weekly(bars)
 
+        # 量能结构: 20日量比与120日量能分位 (盘中时当日成交量为未完成值)
+        volumes = [b["volume"] for b in bars]
+        latest_vol = volumes[-1]
+        vol_20_mean = sum(volumes[-20:]) / min(20, valid_count) if valid_count >= 5 else latest_vol
+        volume_ratio_20d = round(latest_vol / vol_20_mean, 2) if vol_20_mean and vol_20_mean > 0 else None
+        vol_window = volumes[-min(120, valid_count):]
+        if latest_vol and latest_vol > 0 and vol_window:
+            volume_percentile_120d = round(sum(1 for v in vol_window if v <= latest_vol) / len(vol_window) * 100.0, 1)
+        else:
+            volume_percentile_120d = None
+
         # 预计算三层威科夫宏观与微观信号
         wyckoff_signals = compute_wyckoff_signals(
             bars, ma20, ma50, ma120, ma250, ma500, atr14, latest_close, bias_ma20,
@@ -740,6 +752,8 @@ def fetch_stock_kline(symbol: str, count: int = 750, compact: bool = True) -> Di
             "percentile_3y": wyckoff_signals["percentile_3y"],
             "recent_5d_return": f"{((closes[-1] - closes[-min(5, valid_count)]) / closes[-min(5, valid_count)] * 100):+.2f}%",
             "recent_20d_return": f"{((closes[-1] - closes[-min(20, valid_count)]) / closes[-min(20, valid_count)] * 100):+.2f}%",
+            "volume_ratio_20d": volume_ratio_20d,
+            "volume_percentile_120d": volume_percentile_120d,
             "weekly_timeframe": weekly_analysis,
             "wyckoff_multi_timeframe": wyckoff_signals,
             "bars_summary": f"已检验 {valid_count} 根前复权日K线 (覆盖3年宏观时空，含MA120/MA250/MA500均线矩阵及周线共振)，完全通过行情硬门槛" + (" [精简视图：附最近30日K线]" if compact else " [完整视图：附全量K线]"),
@@ -1147,6 +1161,124 @@ def fund_flow_trend_label(hist: List[Dict[str, Any]]) -> str:
     if all(s < 0 for s in signs):
         return "连续净流出"
     return "净流出转净流入" if signs[-1] > 0 else "净流入转净流出"
+
+
+def resolve_sector_code(keyword: str) -> Optional[str]:
+    """解析板块名称或代码为东财行业板块代码 (BKxxxxxx)；名称走 clist 全量行业板块表模糊匹配"""
+    clean = keyword.strip()
+    upper = clean.upper().replace("90.", "")
+    if upper.startswith("BK") and upper[2:].isdigit():
+        return upper
+
+    cache_key = f"sector_lookup_{clean}"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+
+    url = (
+        "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1"
+        "&fltt=2&invt=2&fid=f3&fs=m:90+t:2+f:!50&fields=f12,f14"
+    )
+    try:
+        rows = json.loads(http_get(url, timeout=5)).get("data", {}).get("diff", []) or []
+        exact = next((str(r["f12"]) for r in rows if str(r.get("f14", "")).strip() == clean), None)
+        if exact:
+            set_cached(cache_key, exact, ttl=86400)
+            return exact
+        fuzzy = [r for r in rows if clean in str(r.get("f14", ""))]
+        if len(fuzzy) == 1:
+            set_cached(cache_key, str(fuzzy[0]["f12"]), ttl=86400)
+            return str(fuzzy[0]["f12"])
+    except Exception:
+        pass
+    return None
+
+
+def fetch_sector_kline(sector: str, count: int = 130) -> Dict[str, Any]:
+    """
+    获取东财行业板块指数日K收盘序列、均线体系、区间涨幅与主力净流入累计
+    直供 stock-analysis L4 行业基准 (板块 5/20 日收益) 与 L2 板块强度证据
+    数据源为 fflow daykline 网关 (含收盘点位, 无盘中高低价)
+    """
+    if not isinstance(count, int) or not 20 <= count <= 250:
+        return {"error": "count 必须是 20 至 250 的整数", "data_status": "unavailable"}
+    sector_code = resolve_sector_code(sector)
+    if not sector_code:
+        return {
+            "error": f"无法解析板块: {sector} (可传 BK 代码如 BK1036; 板块代码可用 get_sector_fund_flow 查询)",
+            "data_status": "unavailable",
+        }
+
+    cache_key = f"sector_kline_{sector_code}_{count}"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+
+    url = (
+        "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get"
+        f"?lmt={count}&klt=101&secid=90.{sector_code}&secid2=90.{sector_code}"
+        "&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65"
+    )
+    try:
+        data = json.loads(http_get(url, timeout=5)).get("data") or {}
+        klines = data.get("klines") or []
+        if len(klines) < 2:
+            return {"error": f"未获取到板块日K序列: {sector}", "data_status": "unavailable"}
+
+        rows = []
+        for line in klines[-count:]:
+            parts = line.split(",")
+            if len(parts) >= 13:
+                rows.append({
+                    "date": parts[0],
+                    "close": safe_float(parts[11], 0.0),
+                    "change_pct": f"{safe_float(parts[12], 0.0):+.2f}%",
+                    "main_net_inflow_billion": round(safe_float(parts[1], 0.0) / 100000000.0, 2),
+                })
+        closes = [r["close"] for r in rows]
+        n = len(closes)
+        if n < 2 or closes[-1] <= 0:
+            return {"error": "板块日K序列不完整", "data_status": "unavailable"}
+
+        def sector_ma(window: int) -> Optional[float]:
+            return round(sum(closes[-window:]) / window, 2) if n >= window else None
+
+        def sector_return(window: int) -> str:
+            w = min(window, n - 1)  # 序列不足窗口时退化为可得区间
+            base = closes[-(w + 1)]
+            return f"{((closes[-1] - base) / base * 100):+.2f}%" if base > 0 else "N/A"
+
+        res = {
+            "source": "P3_Eastmoney_Sector_Kline",
+            "data_status": "ok",
+            "sector_code": sector_code,
+            "sector_name": data.get("name", sector),
+            "valid_bars": n,
+            "latest_date": rows[-1]["date"],
+            "latest_close": closes[-1],
+            "latest_change_pct": rows[-1]["change_pct"],
+            "ma5": sector_ma(5),
+            "ma10": sector_ma(10),
+            "ma20": sector_ma(20),
+            "ma60": sector_ma(60),
+            "recent_5d_return": sector_return(5),
+            "recent_20d_return": sector_return(20),
+            "recent_60d_return": sector_return(60),
+            "high_close_20d": max(closes[-min(20, n):]),
+            "low_close_20d": min(closes[-min(20, n):]),
+            "high_close_60d": max(closes[-min(60, n):]),
+            "low_close_60d": min(closes[-min(60, n):]),
+            "cum_main_net_inflow_5d_billion": round(sum(r["main_net_inflow_billion"] for r in rows[-5:]), 2),
+            "cum_main_net_inflow_20d_billion": round(sum(r["main_net_inflow_billion"] for r in rows[-min(20, n):]), 2),
+            "note": "收盘序列来自东财板块资金流日K网关 (无盘中高低价, 高低点为收盘价口径)；近5/20日主力净流入累计为板块资金延续证据",
+        }
+        if n < count:
+            res["data_status"] = "partial"
+            res["note"] += f"；实际仅取得 {n} 根 (不足请求的 {count} 根)"
+        set_cached(cache_key, res, ttl=ttl_for_history(rows[-1]["date"]))
+        return res
+    except Exception as exc:
+        return {"error": f"获取板块日K出错: {type(exc).__name__}", "data_status": "unavailable"}
 
 
 def fetch_sector_fund_flow(count: int = 20, days: int = 1) -> Dict[str, Any]:
@@ -1734,7 +1866,7 @@ def fetch_stock_timeline(symbol: str) -> Dict[str, Any]:
 # -----------------------------------------------------------------------------
 SERVER_INFO = {
     "name": "marketgraph-data",
-    "version": "1.3.1",
+    "version": "1.4.0",
 }
 
 AVAILABLE_TOOLS = [
@@ -1805,10 +1937,10 @@ AVAILABLE_TOOLS = [
                 },
                 "count": {
                     "type": "integer",
-                    "description": "交易日数量，默认 5",
+                    "description": "交易日数量，默认 5；最大 130 (覆盖 L4 的 120 日相对强度窗口)",
                     "default": 5,
                     "minimum": 2,
-                    "maximum": 60,
+                    "maximum": 130,
                 },
             },
         },
@@ -1881,6 +2013,27 @@ AVAILABLE_TOOLS = [
         },
     },
     {
+        "name": "get_sector_kline",
+        "description": "获取东财行业板块指数日K收盘序列（板块 MA5/10/20/60、5/20/60日区间涨幅、20/60日收盘高低点、近5/20日主力净流入累计；支持板块代码 BK1036 或中文板块名，直供个股 L4 行业基准相对强度与 L2 板块强度证据）",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "sector": {
+                    "type": "string",
+                    "description": "板块代码 (如 BK1036) 或中文板块名 (如 半导体)；板块代码可先经 get_sector_fund_flow 查询",
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "交易日数量，默认 130 (覆盖 L4 的 120 日相对强度窗口)",
+                    "default": 130,
+                    "minimum": 20,
+                    "maximum": 250,
+                },
+            },
+            "required": ["sector"],
+        },
+    },
+    {
         "name": "get_longhubang_detail",
         "description": "获取 A 股交易所公开龙虎榜席位明细（全市场当日上榜概览或指定个股前5大买卖席位穿透，支持代码或中文名）",
         "inputSchema": {
@@ -1921,10 +2074,15 @@ def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     if name in {"get_stock_quote", "get_stock_kline", "get_stock_timeline", "get_company_quality"}:
         if not isinstance(arguments.get("symbol"), str) or not arguments["symbol"].strip():
             return {"error": "symbol 必须是非空字符串", "data_status": "unavailable"}
+    if name == "get_sector_kline":
+        if not isinstance(arguments.get("sector"), str) or not arguments["sector"].strip():
+            return {"error": "sector 必须是非空字符串", "data_status": "unavailable"}
+        if arguments.get("count", 130) is not None and (not isinstance(arguments.get("count", 130), int) or not 20 <= arguments.get("count", 130) <= 250):
+            return {"error": "count 必须是 20 至 250 的整数", "data_status": "unavailable"}
     if name == "get_sector_fund_flow" and (not isinstance(arguments.get("count", 20), int) or not 1 <= arguments.get("count", 20) <= 100):
         return {"error": "count 必须是 1 至 100 的整数", "data_status": "unavailable"}
-    if name == "get_index_kline" and arguments.get("count", 5) is not None and (not isinstance(arguments.get("count", 5), int) or not 2 <= arguments.get("count", 5) <= 60):
-        return {"error": "count 必须是 2 至 60 的整数", "data_status": "unavailable"}
+    if name == "get_index_kline" and arguments.get("count", 5) is not None and (not isinstance(arguments.get("count", 5), int) or not 2 <= arguments.get("count", 5) <= 130):
+        return {"error": "count 必须是 2 至 130 的整数", "data_status": "unavailable"}
     if name == "get_market_breadth" and arguments.get("days", 5) is not None and (not isinstance(arguments.get("days", 5), int) or not 2 <= arguments.get("days", 5) <= 10):
         return {"error": "days 必须是 2 至 10 的整数", "data_status": "unavailable"}
     if name == "get_index_kline" and arguments.get("indices") is not None and (
@@ -1951,6 +2109,8 @@ def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         return fetch_market_breadth(arguments.get("days", 5))
     elif name == "get_sector_fund_flow":
         return fetch_sector_fund_flow(arguments.get("count", 20), arguments.get("days", 1))
+    elif name == "get_sector_kline":
+        return fetch_sector_kline(arguments.get("sector", ""), arguments.get("count", 130))
     elif name == "get_longhubang_detail":
         return fetch_longhubang_detail(arguments.get("symbol"), arguments.get("date_str"))
     elif name == "get_company_quality":
@@ -2092,6 +2252,8 @@ if __name__ == "__main__":
         elif tool_name == "get_sector_fund_flow":
             days = int(sys.argv[3]) if len(sys.argv) > 3 and sys.argv[3].isdigit() else 1
             out = fetch_sector_fund_flow(10 if days > 1 else 20, days)
+        elif tool_name == "get_sector_kline":
+            out = fetch_sector_kline(target_symbol if target_symbol else "半导体")
         elif tool_name == "get_longhubang_detail":
             out = fetch_longhubang_detail(target_symbol)
         elif tool_name == "get_company_quality":

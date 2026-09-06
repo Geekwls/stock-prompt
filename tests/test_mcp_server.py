@@ -2,6 +2,7 @@ import importlib.util
 import json
 import unittest
 import urllib.parse
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,6 +13,19 @@ SPEC.loader.exec_module(SERVER)
 
 
 class MarketGraphMCPServerTest(unittest.TestCase):
+    def setUp(self):
+        SERVER.CACHE_STORE.clear()
+        SERVER._HOST_FAILURE_STATE.clear()
+        SERVER._HOST_LAST_REQUEST.clear()
+        self._sleep_patch = patch.object(SERVER.time, "sleep")
+        self.sleep_mock = self._sleep_patch.start()
+
+    def tearDown(self):
+        self._sleep_patch.stop()
+        SERVER.CACHE_STORE.clear()
+        SERVER._HOST_FAILURE_STATE.clear()
+        SERVER._HOST_LAST_REQUEST.clear()
+
     def test_normalize_symbol(self):
         self.assertEqual(SERVER.normalize_symbol("600519"), "sh600519")
         self.assertEqual(SERVER.normalize_symbol("300308"), "sz300308")
@@ -176,48 +190,35 @@ class MarketGraphMCPServerTest(unittest.TestCase):
 
     @patch.object(SERVER, "http_get")
     def test_fetch_market_sentiment_parsing(self, mock_get):
-        SERVER.CACHE_STORE.clear()
-        mock_get.return_value = 'v_s_sh000001="1~上证指数~000001~3850.20~+12.30~+0.32~120000~45000000~0~45000000";v_s_sz399001="1~深证成指~399001~11500.50~+25.10~+0.22~150000~55000000~0~55000000";'
+        def fake_get(url, timeout=4, encoding="utf-8"):
+            if "qt.gtimg.cn" in url:
+                return 'v_s_sh000001="1~上证指数~000001~3850.20~+12.30~+0.32~120000~45000000~0~45000000";v_s_sz399001="1~深证成指~399001~11500.50~+25.10~+0.22~150000~55000000~0~55000000";'
+            if "getTopicZTPool" in url:
+                return json.dumps({"data": {"pool": [{"c": "000001", "lbc": 3}, {"c": "000002", "lbc": 1}]}})
+            if "getTopicZBPool" in url:
+                return json.dumps({"data": {"pool": [{"c": "000003"}]}})
+            if "getTopicDTPool" in url:
+                return json.dumps({"data": {"pool": []}})
+            raise AssertionError("unexpected url: " + url)
 
-        mock_zt = {"data": {"pool": [{"c": "000001", "lbc": 3}, {"c": "000002", "lbc": 1}]}}
-        mock_zb = {"data": {"pool": [{"c": "000003"}]}}
-        mock_dt = {"data": {"pool": []}}
-
-        class MockResp:
-            def __init__(self, payload):
-                self.payload = json.dumps(payload).encode("utf-8")
-            def read(self):
-                return self.payload
-            def __enter__(self):
-                return self
-            def __exit__(self, *args):
-                pass
-
-        with patch("urllib.request.urlopen", side_effect=[MockResp(mock_zt), MockResp(mock_zb), MockResp(mock_dt)]):
-            res = SERVER.fetch_market_sentiment()  # 当日路径走实时指数快照
-            self.assertEqual(res.get("data_status"), "ok", res)
-            self.assertEqual(res["zt_count"], 2)
-            self.assertEqual(res["zb_count"], 1)
-            self.assertEqual(res["exact_break_rate"], "33.33%")
+        mock_get.side_effect = fake_get
+        res = SERVER.fetch_market_sentiment()  # 当日路径走实时指数快照
+        self.assertEqual(res.get("data_status"), "ok", res)
+        self.assertEqual(res["zt_count"], 2)
+        self.assertEqual(res["zb_count"], 1)
+        self.assertEqual(res["exact_break_rate"], "33.33%")
         self.assertEqual(res["max_ladder_height"], "3 连板")
 
     @patch.object(SERVER, "http_get")
     def test_market_sentiment_historical_uses_index_kline(self, mock_get):
-        """历史日期的指数涨跌幅与成交额必须来自指数日K回补, 而非实时快照"""
-        SERVER.CACHE_STORE.clear()
-
-        class MockResp:
-            def __init__(self, payload):
-                self.payload = json.dumps(payload).encode("utf-8")
-            def read(self):
-                return self.payload
-            def __enter__(self):
-                return self
-            def __exit__(self, *args):
-                pass
-
-        def fake_http_get(url, timeout=4, encoding="utf-8"):
-            # 沪指: 09-02 收 3950, 09-03 收 3986 (+0.91%), 成交额 650 亿; 深证综指成交额 700 亿
+        """历史日期: 涨跌幅主源为腾讯指数日K, 两市成交额来自东财指数日K"""
+        def fake_get(url, timeout=4, encoding="utf-8"):
+            if "fqkline" in url:
+                days = [
+                    ["2026-09-02", "3920.00", "3950.00", "3960.00", "3910.00", "123000000"],
+                    ["2026-09-03", "3955.00", "3986.00", "3990.00", "3950.00", "124000000"],
+                ]
+                return json.dumps({"data": {"sh000001": {"day": days}}})
             if "secid=1.000001" in url:
                 klines = [
                     "2026-09-02,3920.00,3950.00,3960.00,3910.00,123000000,65000000000",
@@ -227,36 +228,90 @@ class MarketGraphMCPServerTest(unittest.TestCase):
             if "secid=0.399106" in url:
                 klines = ["2026-09-03,2300.00,2310.00,2320.00,2290.00,99000000,70000000000"]
                 return json.dumps({"data": {"klines": klines}})
+            if "getTopicZTPool" in url:
+                return json.dumps({"data": {"pool": [{"c": "000001", "lbc": 2}]}})
+            if "getTopicZBPool" in url:
+                return json.dumps({"data": {"pool": []}})
+            if "getTopicDTPool" in url:
+                return json.dumps({"data": {"pool": []}})
             raise AssertionError("unexpected url: " + url)
 
-        mock_get.side_effect = fake_http_get
-        pools = [MockResp({"data": {"pool": [{"c": "000001", "lbc": 2}]}}),
-                 MockResp({"data": {"pool": []}}),
-                 MockResp({"data": {"pool": []}})]
-        with patch("urllib.request.urlopen", side_effect=pools):
-            res = SERVER.fetch_market_sentiment("2026-09-03")
+        mock_get.side_effect = fake_get
+        res = SERVER.fetch_market_sentiment("2026-09-03")
         self.assertEqual(res.get("data_status"), "ok", res)
         self.assertEqual(res["sh_index_change"], "+0.91%")
         self.assertEqual(res["total_turnover_billion"], 1360.0)
 
     @patch.object(SERVER, "http_get")
+    def test_market_sentiment_historical_falls_back_to_em_kline(self, mock_get):
+        """腾讯指数日K不可用时, 历史涨跌幅自动回退东财日K"""
+        def fake_get(url, timeout=4, encoding="utf-8"):
+            if "fqkline" in url:
+                raise OSError("tencent down")
+            if "secid=1.000001" in url:
+                klines = [
+                    "2026-09-02,3920.00,3950.00,3960.00,3910.00,123000000,65000000000",
+                    "2026-09-03,3955.00,3986.00,3990.00,3950.00,124000000,66000000000",
+                ]
+                return json.dumps({"data": {"klines": klines}})
+            if "secid=0.399106" in url:
+                return json.dumps({"data": {"klines": ["2026-09-03,2300.00,2310.00,2320.00,2290.00,99000000,70000000000"]}})
+            if "getTopicZTPool" in url:
+                return json.dumps({"data": {"pool": []}})
+            if "getTopicZBPool" in url:
+                return json.dumps({"data": {"pool": []}})
+            if "getTopicDTPool" in url:
+                return json.dumps({"data": {"pool": []}})
+            raise AssertionError("unexpected url: " + url)
+
+        mock_get.side_effect = fake_get
+        res = SERVER.fetch_market_sentiment("2026-09-03")
+        self.assertEqual(res.get("data_status"), "ok", res)
+        self.assertEqual(res["sh_index_change"], "+0.91%")
+        self.assertEqual(res["total_turnover_billion"], 1360.0)
+
+    @patch.object(SERVER, "http_get")
+    def test_market_sentiment_historical_partial_without_em(self, mock_get):
+        """东财日K不可用时成交额缺失 => partial 且不输出情绪结论, 但涨跌幅仍可由腾讯提供"""
+        def fake_get(url, timeout=4, encoding="utf-8"):
+            if "fqkline" in url:
+                days = [
+                    ["2026-09-02", "3920.00", "3950.00", "3960.00", "3910.00", "123000000"],
+                    ["2026-09-03", "3955.00", "3986.00", "3990.00", "3950.00", "124000000"],
+                ]
+                return json.dumps({"data": {"sh000001": {"day": days}}})
+            if "getTopicZTPool" in url:
+                return json.dumps({"data": {"pool": []}})
+            if "getTopicZBPool" in url:
+                return json.dumps({"data": {"pool": []}})
+            if "getTopicDTPool" in url:
+                return json.dumps({"data": {"pool": []}})
+            raise OSError("em down")
+
+        mock_get.side_effect = fake_get
+        res = SERVER.fetch_market_sentiment("2026-09-03")
+        self.assertEqual(res["data_status"], "partial")
+        self.assertNotIn("market_broad_status", res)
+        self.assertTrue(any("成交额" in s for s in res["unavailable_sources"]))
+
+    @patch.object(SERVER, "http_get")
     def test_market_sentiment_rejects_non_trading_date(self, mock_get):
         """非交易日的历史查询应显式 unavailable, 不得以零值伪装 ok"""
-        SERVER.CACHE_STORE.clear()
+        def fake_get(url, timeout=4, encoding="utf-8"):
+            if "fqkline" in url:
+                return json.dumps({"data": {"sh000001": {"day": [["2026-09-03", "3955.00", "3986.00", "3990.00", "3950.00", "124000000"]]}}})
+            if "secid=1.000001" in url:
+                return json.dumps({"data": {"klines": ["2026-09-03,3955.00,3986.00,3990.00,3950.00,124000000,66000000000"]}})
+            raise OSError("no data")
 
-        def fake_http_get(url, timeout=4, encoding="utf-8"):
-            return json.dumps({"data": {"klines": ["2026-09-03,3955.00,3986.00,3990.00,3950.00,124000000,66000000000"]}})
-
-        mock_get.side_effect = fake_http_get
-        res = SERVER.fetch_market_sentiment("2026-09-06")  # 周日, 永远非交易日
+        mock_get.side_effect = fake_get
+        res = SERVER.fetch_market_sentiment("2026-01-01")  # 元旦休市, 永远非交易日且必为历史日期
         self.assertEqual(res["data_status"], "unavailable")
         self.assertIn("非交易日", res["error"])
 
     @patch.object(SERVER, "http_get", side_effect=OSError("upstream unavailable"))
     def test_market_sentiment_marks_partial_data(self, mock_get):
-        SERVER.CACHE_STORE.clear()
-        with patch("urllib.request.urlopen", side_effect=OSError("upstream unavailable")):
-            res = SERVER.fetch_market_sentiment("20260903")
+        res = SERVER.fetch_market_sentiment()  # 当日: 各上游失败 => partial, 不伪造情绪结论
         self.assertEqual(res["data_status"], "partial")
         self.assertNotIn("market_broad_status", res)
 
@@ -273,38 +328,20 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         self.assertEqual(res["top_inflow_sectors"][0]["net_inflow_billion"], "+25.00 亿")
         self.assertEqual(res["top_outflow_sectors"][0]["name"], "医药生物")
 
-    def test_fetch_longhubang_detail_parsing(self):
-        class MockResp:
-            def __init__(self, payload):
-                self.payload = json.dumps(payload).encode("utf-8")
-            def read(self):
-                return self.payload
-            def __enter__(self):
-                return self
-            def __exit__(self, *args):
-                pass
-
+    @patch.object(SERVER, "http_get")
+    def test_fetch_longhubang_detail_parsing(self, mock_get):
         mock_buy = {"result": {"data": [{"OPERATEDEPT_NAME": "机构专用", "BUY": 50000000, "SELL": 1000000, "NET": 49000000}]}}
         mock_sell = {"result": {"data": [{"OPERATEDEPT_NAME": "东方证券拉萨营业部", "BUY": 1000000, "SELL": 20000000, "NET": -19000000}]}}
         mock_sum = {"result": {"data": [{"SECURITY_NAME_ABBR": "思泉新材", "TRADE_DATE": "2026-09-03 00:00:00", "TOTAL_BUY": 100000000, "TOTAL_SELL": 50000000, "TOTAL_NET": 50000000}]}}
+        mock_get.side_effect = [json.dumps(mock_buy), json.dumps(mock_sell), json.dumps(mock_sum)]
 
-        with patch("urllib.request.urlopen", side_effect=[MockResp(mock_buy), MockResp(mock_sell), MockResp(mock_sum)]):
-            res = SERVER.fetch_longhubang_detail(symbol="301489")
-            self.assertEqual(res["name"], "思泉新材")
-            self.assertEqual(res["top5_buyers"][0]["seat_type"], "机构专用")
-            self.assertEqual(res["seat_quality_judgment"], "机构席位净买入")
+        res = SERVER.fetch_longhubang_detail(symbol="301489")
+        self.assertEqual(res["name"], "思泉新材")
+        self.assertEqual(res["top5_buyers"][0]["seat_type"], "机构专用")
+        self.assertEqual(res["seat_quality_judgment"], "机构席位净买入")
 
-    def test_fetch_company_quality_parsing(self):
-        class MockResp:
-            def __init__(self, payload):
-                self.payload = json.dumps(payload).encode("utf-8")
-            def read(self):
-                return self.payload
-            def __enter__(self):
-                return self
-            def __exit__(self, *args):
-                pass
-
+    @patch.object(SERVER, "http_get")
+    def test_fetch_company_quality_parsing(self, mock_get):
         mock_fina = {"result": {"data": [{
             "SECURITY_NAME_ABBR": "思泉新材", "REPORT_DATE_NAME": "2026中报",
             "TOTALOPERATEREVE": 521000000, "TOTALOPERATEREVETZ": 34.95,
@@ -314,12 +351,12 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         mock_lift = {"result": {"data": [{"FREE_DATE": "2026-10-24", "CURRENT_FREE_SHARES": 2969.61, "TOTAL_RATIO": 0.2554, "FREE_SHARES_TYPE": "首发限售"}]}}
         mock_balance = {"result": {"data": [{"GOODWILL": 0, "TOTAL_EQUITY": 1123000000, "INVENTORY": 271280000}]}}
 
-        with patch("urllib.request.urlopen", side_effect=[MockResp(mock_fina), MockResp(mock_lift), MockResp(mock_balance)]):
-            res = SERVER.fetch_company_quality(symbol="301489")
-            self.assertEqual(res["report_period"], "2026中报")
-            self.assertEqual(res["financial_summary"]["revenue_billion"], "5.21 亿元")
-            self.assertEqual(res["company_risk_level"], "待补充核验")
-            self.assertTrue(res["audit_opinion_status"].startswith("N/A"))
+        mock_get.side_effect = [json.dumps(mock_fina), json.dumps(mock_lift), json.dumps(mock_balance)]
+        res = SERVER.fetch_company_quality(symbol="301489")
+        self.assertEqual(res["report_period"], "2026中报")
+        self.assertEqual(res["financial_summary"]["revenue_billion"], "5.21 亿元")
+        self.assertEqual(res["company_risk_level"], "待补充核验")
+        self.assertTrue(res["audit_opinion_status"].startswith("N/A"))
 
     def test_normalize_date_str(self):
         self.assertEqual(SERVER.normalize_date_str("20260904"), "2026-09-04")
@@ -427,27 +464,16 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         """全市场概览传 YYYYMMDD 紧凑日期必须归一化为横杠格式, 否则上游必然查空"""
         captured = []
 
-        class MockResp:
-            def __init__(self, payload):
-                self.payload = json.dumps(payload).encode("utf-8")
-            def read(self):
-                return self.payload
-            def __enter__(self):
-                return self
-            def __exit__(self, *args):
-                pass
-
-        def fake_urlopen(req, timeout=4):
-            captured.append(req.full_url)
-            return MockResp({"result": {"data": [{
+        def fake_get(url, timeout=4, encoding="utf-8"):
+            captured.append(url)
+            return json.dumps({"result": {"data": [{
                 "SECURITY_CODE": "000017", "SECURITY_NAME_ABBR": "深中华A",
                 "TRADE_DATE": "2026-09-04 00:00:00", "CHANGE_RATE": -7.5,
                 "CLOSE_PRICE": 5.2, "TOTAL_NET": -45587543.84, "TURNRATE": 12.3,
                 "EXPLANATION": "日跌幅偏离值达到7%",
             }]}})
 
-        SERVER.CACHE_STORE.clear()
-        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        with patch.object(SERVER, "http_get", side_effect=fake_get):
             res = SERVER.fetch_longhubang_detail(symbol=None, date_str="20260904")
         self.assertEqual(res["data_status"], "ok")
         self.assertEqual(res["date"], "2026-09-04")
@@ -457,29 +483,73 @@ class MarketGraphMCPServerTest(unittest.TestCase):
 
     def test_lhb_org_seat_net_merges_buy_and_sell_sides(self):
         """机构专用净额必须按席位合并买卖两榜的 NET, 单边相减会丢席位自身对冲"""
-        SERVER.CACHE_STORE.clear()
-
-        class MockResp:
-            def __init__(self, payload):
-                self.payload = json.dumps(payload).encode("utf-8")
-            def read(self):
-                return self.payload
-            def __enter__(self):
-                return self
-            def __exit__(self, *args):
-                pass
-
         mock_buy = {"result": {"data": [{"OPERATEDEPT_NAME": "机构专用", "BUY": 50000000, "SELL": 0, "NET": 50000000}]}}
         mock_sell = {"result": {"data": [{"OPERATEDEPT_NAME": "机构专用", "BUY": 0, "SELL": 30000000, "NET": -30000000}]}}
         mock_sum = {"result": {"data": [{"SECURITY_NAME_ABBR": "思泉新材", "TRADE_DATE": "2026-09-04 00:00:00",
                                           "TOTAL_BUY": 100000000, "TOTAL_SELL": 50000000, "TOTAL_NET": 50000000}]}}
 
-        with patch("urllib.request.urlopen", side_effect=[MockResp(mock_buy), MockResp(mock_sell), MockResp(mock_sum)]):
+        with patch.object(SERVER, "http_get", side_effect=[json.dumps(mock_buy), json.dumps(mock_sell), json.dumps(mock_sum)]):
             res = SERVER.fetch_longhubang_detail(symbol="301489")
         self.assertEqual(res["org_seat_count"], 1)
         self.assertEqual(res["org_seat_net_wan"], "+2000.00 万元")  # 5000万 - 3000万
         self.assertEqual(res["seat_quality_judgment"], "机构席位净买入")
         self.assertEqual(res["org_seat_net_details"][0]["net_wan"], "+2000.00 万")
+
+    def test_host_throttle_enforces_min_interval(self):
+        """同一主机第二次请求必须先经过最小间隔限速; 不同主机不受影响"""
+        class MockResp:
+            def read(self, n=-1):
+                return b"{}"
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+
+        with patch("urllib.request.urlopen", return_value=MockResp()):
+            SERVER.http_get("https://push2.eastmoney.com/a?req=1")   # 首次不限速
+            SERVER.http_get("https://push2.eastmoney.com/a?req=2")   # 同主机 => 限速
+            SERVER.http_get("https://web.ifzq.gtimg.cn/b?req=1")     # 不同主机 => 不限速
+        self.assertEqual(self.sleep_mock.call_count, 1)
+        args, _ = self.sleep_mock.call_args
+        self.assertGreaterEqual(args[0], 0.3)
+        self.assertLessEqual(args[0], SERVER.HOST_MIN_INTERVAL_SECONDS + 0.01)
+
+    def test_circuit_breaker_opens_after_consecutive_failures(self):
+        """同主机连续 3 次连接失败后熔断: 第 4 次快速抛 ConnectionError 且不再发起真实请求"""
+        url = "https://push2.eastmoney.com/api/qt/clist/get?x=1"
+        with patch("urllib.request.urlopen", side_effect=OSError("down")):
+            for _ in range(SERVER.BREAKER_FAILURE_THRESHOLD):
+                with self.assertRaises(OSError):
+                    SERVER.http_get(url)
+            # 若仍发起真实请求, urlopen mock 会抛 OSError 而非 ConnectionError, 断言即失败
+            with self.assertRaises(ConnectionError):
+                SERVER.http_get("https://push2.eastmoney.com/api/qt/clist/get?x=2")
+
+    def test_circuit_breaker_resets_on_success(self):
+        """任一请求成功即清空该主机失败计数, 不影响后续正常调用"""
+        host = "push2.eastmoney.com"
+        SERVER._breaker_record_failure(host)
+        SERVER._breaker_record_failure(host)
+        self.assertIsNone(SERVER._HOST_FAILURE_STATE[host]["opened_at"])  # 2次未达阈值, 未熔断
+
+        class MockResp:
+            def read(self, n=-1):
+                return b"{}"
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+
+        with patch("urllib.request.urlopen", return_value=MockResp()):
+            SERVER.http_get("https://push2.eastmoney.com/x?ok=1")
+        self.assertNotIn(host, SERVER._HOST_FAILURE_STATE)
+
+    def test_ttl_for_history_long_caches_completed_days(self):
+        """收盘定格的历史日期用长缓存, 当日或无日期用短缓存"""
+        self.assertEqual(SERVER.ttl_for_history("2026-09-04 00:00:00"), SERVER.HISTORICAL_CACHE_TTL_SECONDS)
+        self.assertEqual(SERVER.ttl_for_history("2026-09-04"), SERVER.HISTORICAL_CACHE_TTL_SECONDS)
+        self.assertEqual(SERVER.ttl_for_history(datetime.now().strftime("%Y-%m-%d")), SERVER.CACHE_TTL_SECONDS)
+        self.assertEqual(SERVER.ttl_for_history(None), SERVER.CACHE_TTL_SECONDS)
 
     def test_unknown_tool_returns_error(self):
         res = SERVER.handle_tool_call("unknown_tool", {})

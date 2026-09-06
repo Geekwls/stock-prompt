@@ -30,6 +30,10 @@ if hasattr(sys.stderr, 'reconfigure'):
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 CACHE_STORE: Dict[str, Dict[str, Any]] = {}
 CACHE_TTL_SECONDS = 180  # 盘中常规缓存 3 分钟
+HISTORICAL_CACHE_TTL_SECONDS = 86400  # 收盘后不可变的历史数据长缓存
+HOST_MIN_INTERVAL_SECONDS = 0.5  # 同一数据主机最小请求间隔 (全局频控)
+BREAKER_FAILURE_THRESHOLD = 3  # 同主机连续连接失败次数阈值, 达到后熔断
+BREAKER_COOLDOWN_SECONDS = 600  # 熔断冷却时长 (冷却结束半开探测)
 MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 ALLOWED_HTTP_HOSTS = {
     "smartbox.gtimg.cn", "qt.gtimg.cn", "web.ifzq.gtimg.cn",
@@ -52,10 +56,60 @@ def set_cached(key: str, data: Any, ttl: int = CACHE_TTL_SECONDS):
     CACHE_STORE[key] = {"data": data, "time": time.time(), "ttl": ttl}
 
 
+# 同主机频控与断路器状态 (stdio 单线程模型, 进程级状态天然安全)
+_HOST_LAST_REQUEST: Dict[str, float] = {}
+_HOST_FAILURE_STATE: Dict[str, Dict[str, Any]] = {}
+
+
+def _throttle_host(hostname: str):
+    """同一数据主机全局最小请求间隔, 避免突发请求触发上游 IP 级频控"""
+    last = _HOST_LAST_REQUEST.get(hostname, 0.0)
+    wait = HOST_MIN_INTERVAL_SECONDS - (time.time() - last)
+    if wait > 0:
+        time.sleep(wait)
+    _HOST_LAST_REQUEST[hostname] = time.time()
+
+
+def _breaker_check(hostname: str):
+    """熔断中直接快速失败 (不发起网络请求); 冷却结束放行半开探测"""
+    rec = _HOST_FAILURE_STATE.get(hostname)
+    if rec and rec.get("opened_at") is not None:
+        remaining = BREAKER_COOLDOWN_SECONDS - (time.time() - rec["opened_at"])
+        if remaining > 0:
+            raise ConnectionError(f"上游 {hostname} 连续失败已熔断, 约{int(remaining)}秒后恢复探测")
+        rec["opened_at"] = None
+
+
+def _breaker_record_success(hostname: str):
+    _HOST_FAILURE_STATE.pop(hostname, None)
+
+
+def _breaker_record_failure(hostname: str):
+    rec = _HOST_FAILURE_STATE.setdefault(hostname, {"count": 0, "opened_at": None})
+    if rec["opened_at"] is not None:
+        return  # 半开探测失败, 维持熔断
+    rec["count"] += 1
+    if rec["count"] >= BREAKER_FAILURE_THRESHOLD:
+        rec["opened_at"] = time.time()
+
+
+def ttl_for_history(latest_date_str: Optional[str]) -> int:
+    """数据最新日期早于今天 => 收盘定格不可变, 用长缓存; 含当日盘中 => 短缓存"""
+    try:
+        if latest_date_str and str(latest_date_str)[:10] < datetime.now().strftime("%Y-%m-%d"):
+            return HISTORICAL_CACHE_TTL_SECONDS
+    except Exception:
+        pass
+    return CACHE_TTL_SECONDS
+
+
 def http_get(url: str, timeout: int = 4, encoding: str = "utf-8") -> str:
     parsed = urllib.parse.urlparse(url)
-    if parsed.scheme != "https" or parsed.hostname not in ALLOWED_HTTP_HOSTS:
+    hostname = parsed.hostname
+    if parsed.scheme != "https" or hostname not in ALLOWED_HTTP_HOSTS:
         raise ValueError("仅允许访问预设的 HTTPS 金融数据源")
+    _breaker_check(hostname)  # 熔断中直接抛 ConnectionError, 不发起请求
+    _throttle_host(hostname)
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     last_exc: Optional[Exception] = None
     for attempt in range(2):  # 上游偶发掐断连接时单次退避重试
@@ -64,16 +118,18 @@ def http_get(url: str, timeout: int = 4, encoding: str = "utf-8") -> str:
                 content = resp.read(MAX_HTTP_RESPONSE_BYTES + 1)
             if len(content) > MAX_HTTP_RESPONSE_BYTES:
                 raise ValueError("上游响应超过大小限制")
+            _breaker_record_success(hostname)
             try:
                 return content.decode(encoding)
             except UnicodeDecodeError:
                 return content.decode("gbk", errors="ignore")
         except urllib.error.HTTPError:
-            raise  # 4xx/5xx 属于确定性失败, 不重试
+            raise  # 4xx/5xx 属于确定性失败, 不重试也不计入熔断
         except Exception as exc:
             last_exc = exc
             if attempt == 0:
                 time.sleep(0.8)
+    _breaker_record_failure(hostname)
     raise last_exc
 
 
@@ -751,38 +807,31 @@ def fetch_market_sentiment(date_str: Optional[str] = None) -> Dict[str, Any]:
     zb_count = 0
     dt_count = 0
     max_height = 0
-    headers = {"User-Agent": USER_AGENT}
     unavailable_sources: List[str] = []
 
     try:
         # 涨停池
         zt_url = f"https://push2ex.eastmoney.com/getTopicZTPool?ut={EM_UT}&dpt={EM_DPT}&Pageindex=0&pagesize=500&sort=fbt:asc&date={compact_date}"
-        req_zt = urllib.request.Request(zt_url, headers=headers)
-        with urllib.request.urlopen(req_zt, timeout=4) as resp:
-            zt_data = json.loads(resp.read().decode("utf-8")).get("data", {}).get("pool", [])
-            zt_count = len(zt_data)
-            if zt_data:
-                max_height = max([int(x.get("lbc", 1)) for x in zt_data])
+        zt_data = json.loads(http_get(zt_url, timeout=4)).get("data", {}).get("pool", [])
+        zt_count = len(zt_data)
+        if zt_data:
+            max_height = max([int(x.get("lbc", 1)) for x in zt_data])
     except Exception as exc:
         unavailable_sources = [f"涨停池: {type(exc).__name__}"]
 
     try:
         # 炸板池
         zb_url = f"https://push2ex.eastmoney.com/getTopicZBPool?ut={EM_UT}&dpt={EM_DPT}&Pageindex=0&pagesize=500&sort=fbt:asc&date={compact_date}"
-        req_zb = urllib.request.Request(zb_url, headers=headers)
-        with urllib.request.urlopen(req_zb, timeout=4) as resp:
-            zb_data = json.loads(resp.read().decode("utf-8")).get("data", {}).get("pool", [])
-            zb_count = len(zb_data)
+        zb_data = json.loads(http_get(zb_url, timeout=4)).get("data", {}).get("pool", [])
+        zb_count = len(zb_data)
     except Exception as exc:
         unavailable_sources.append(f"炸板池: {type(exc).__name__}")
 
     try:
         # 跌停池
         dt_url = f"https://push2ex.eastmoney.com/getTopicDTPool?ut={EM_UT}&dpt={EM_DPT}&Pageindex=0&pagesize=500&sort=fund:asc&date={compact_date}"
-        req_dt = urllib.request.Request(dt_url, headers=headers)
-        with urllib.request.urlopen(req_dt, timeout=4) as resp:
-            dt_data = json.loads(resp.read().decode("utf-8")).get("data", {}).get("pool", [])
-            dt_count = len(dt_data)
+        dt_data = json.loads(http_get(dt_url, timeout=4)).get("data", {}).get("pool", [])
+        dt_count = len(dt_data)
     except Exception as exc:
         unavailable_sources.append(f"跌停池: {type(exc).__name__}")
 
@@ -806,30 +855,68 @@ def fetch_market_sentiment(date_str: Optional[str] = None) -> Dict[str, Any]:
         except Exception as exc:
             unavailable_sources.append(f"指数成交额: {type(exc).__name__}")
     else:
+        lookback = 30  # 容忍长假后的历史回看窗口
+        sh_close: Optional[float] = None
+        sh_prev_close: Optional[float] = None
+        date_found = False
+
+        # 指数涨跌幅主源: 腾讯指数日K (独立通道, 限流概率低); 东财日K为备源
         try:
-            lookback = 30  # 容忍长假后的历史回看窗口
-            sh_rows = fetch_em_index_daily("1.000001", lookback)
-            sh_idx = next((i for i, r in enumerate(sh_rows) if r["date"] == norm_date), -1)
-            if sh_idx < 0:
-                return {
-                    "source": "P3_Public_Financial_Gateways",
-                    "data_status": "unavailable",
-                    "date": compact_date,
-                    "error": f"{norm_date} 非交易日或指数日K未覆盖该日期",
-                }
-            if sh_idx > 0 and sh_rows[sh_idx - 1]["close"] > 0:
-                prev_close = sh_rows[sh_idx - 1]["close"]
-                sh_change = f"{((sh_rows[sh_idx]['close'] - prev_close) / prev_close * 100):+.2f}%"
-            sh_amount = sh_rows[sh_idx]["amount_yuan"] / 100000000.0  # 亿元
-            # 深市总成交额用深证综指 (覆盖全部深市股票) 的成交额口径
-            sz_rows = fetch_em_index_daily("0.399106", lookback)
-            sz_row = next((r for r in sz_rows if r["date"] == norm_date), None)
-            if sz_row:
-                sz_amount = sz_row["amount_yuan"] / 100000000.0
+            sh_bars = fetch_index_daily_bars(INDEX_ALIASES["SHCI"][0], lookback)
+            for i, bar in enumerate(sh_bars):
+                if bar["date"] == norm_date:
+                    date_found = True
+                    if i > 0 and sh_bars[i - 1]["close"] > 0:
+                        sh_prev_close = sh_bars[i - 1]["close"]
+                        sh_close = bar["close"]
+                    break
+        except Exception:
+            pass
+
+        # 东财指数日K: 兜底涨跌幅, 且是历史成交额的唯一来源 (腾讯指数日K无成交额字段)
+        em_sh_rows: List[Dict[str, Any]] = []
+        em_ok = True
+        try:
+            em_sh_rows = fetch_em_index_daily("1.000001", lookback)
+            if not date_found:
+                for i, r in enumerate(em_sh_rows):
+                    if r["date"] == norm_date:
+                        date_found = True
+                        if i > 0 and em_sh_rows[i - 1]["close"] > 0:
+                            sh_prev_close = em_sh_rows[i - 1]["close"]
+                            sh_close = r["close"]
+                        break
+        except Exception:
+            em_ok = False
+
+        if not date_found:
+            return {
+                "source": "P3_Public_Financial_Gateways",
+                "data_status": "unavailable",
+                "date": compact_date,
+                "error": f"{norm_date} 非交易日或指数日K未覆盖该日期",
+            }
+        if sh_close is not None and sh_prev_close:
+            sh_change = f"{((sh_close - sh_prev_close) / sh_prev_close * 100):+.2f}%"
+
+        # 历史两市成交额: 沪市取上证指数、深市用深证综指 (覆盖全部深市股票) 的成交额口径
+        if not em_ok:
+            unavailable_sources.append("历史成交额: 东财指数日K不可用")
+        else:
+            sh_amount_row = next((r for r in em_sh_rows if r["date"] == norm_date), None)
+            if sh_amount_row:
+                sh_amount = sh_amount_row["amount_yuan"] / 100000000.0
             else:
-                unavailable_sources.append("深市历史成交额: 深证综指未覆盖该日期")
-        except Exception as exc:
-            unavailable_sources.append(f"历史指数行情: {type(exc).__name__}")
+                unavailable_sources.append("沪市历史成交额: 指数日K未覆盖该日期")
+            try:
+                sz_rows = fetch_em_index_daily("0.399106", lookback)
+                sz_row = next((r for r in sz_rows if r["date"] == norm_date), None)
+                if sz_row:
+                    sz_amount = sz_row["amount_yuan"] / 100000000.0
+                else:
+                    unavailable_sources.append("深市历史成交额: 深证综指未覆盖该日期")
+            except Exception as exc:
+                unavailable_sources.append(f"深市历史成交额: {type(exc).__name__}")
 
     if unavailable_sources:
         return {
@@ -859,25 +946,26 @@ def fetch_market_sentiment(date_str: Optional[str] = None) -> Dict[str, Any]:
         "market_broad_status": "良性分歧" if break_rate < 30 else ("高位退潮" if break_rate > 45 else "震荡博弈"),
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
-    set_cached(cache_key, res)
+    set_cached(cache_key, res, ttl=CACHE_TTL_SECONDS if is_today else HISTORICAL_CACHE_TTL_SECONDS)
     return res
 
 
 def fetch_limit_up_ladder(date_str: Optional[str] = None) -> Dict[str, Any]:
     """获取 A 股连板天梯矩阵 (各板高度代表票与晋级梯队)"""
-    if not date_str:
-        date_str = datetime.now().strftime("%Y%m%d")
+    norm_date = normalize_date_str(date_str) if date_str else None
+    if date_str and not norm_date:
+        return {"error": "date_str 必须为 YYYYMMDD 或 YYYY-MM-DD", "data_status": "unavailable"}
+    compact_date = norm_date.replace("-", "") if norm_date else datetime.now().strftime("%Y%m%d")
+    is_today = compact_date == datetime.now().strftime("%Y%m%d")
 
-    cache_key = f"ladder_{date_str}"
+    cache_key = f"ladder_{compact_date}"
     cached = get_cached(cache_key)
     if cached:
         return cached
 
-    url = f"https://push2ex.eastmoney.com/getTopicZTPool?ut={EM_UT}&dpt={EM_DPT}&Pageindex=0&pagesize=500&sort=fbt:asc&date={date_str}"
+    url = f"https://push2ex.eastmoney.com/getTopicZTPool?ut={EM_UT}&dpt={EM_DPT}&Pageindex=0&pagesize=500&sort=fbt:asc&date={compact_date}"
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(req, timeout=4) as resp:
-            data = json.loads(resp.read().decode("utf-8")).get("data", {}).get("pool", [])
+        data = json.loads(http_get(url, timeout=4)).get("data", {}).get("pool", [])
 
         ladder: Dict[int, List[Dict[str, Any]]] = {}
         for item in data:
@@ -903,12 +991,12 @@ def fetch_limit_up_ladder(date_str: Optional[str] = None) -> Dict[str, Any]:
         res = {
             "source": "P3_Eastmoney_LimitUp_Ladder",
             "data_status": "ok",
-            "date": date_str,
+            "date": compact_date,
             "total_limit_up": len(data),
             "max_height": max(ladder.keys()) if ladder else 0,
             "ladder_distribution": summary,
         }
-        set_cached(cache_key, res)
+        set_cached(cache_key, res, ttl=CACHE_TTL_SECONDS if is_today else HISTORICAL_CACHE_TTL_SECONDS)
         return res
     except Exception as e:
         return {"error": f"获取连板天梯失败: {str(e)}"}
@@ -1045,7 +1133,7 @@ def fetch_sector_fund_history(sector_code: str, days: int) -> List[Dict[str, Any
             })
     if not hist:
         raise ValueError("资金流历史为空")
-    set_cached(cache_key, hist, ttl=300)
+    set_cached(cache_key, hist, ttl=ttl_for_history(hist[-1]["date"]))
     return hist
 
 
@@ -1210,7 +1298,6 @@ def fetch_longhubang_detail(symbol: Optional[str] = None, date_str: Optional[str
     if cached:
         return cached
 
-    headers = {"User-Agent": USER_AGENT}
     try:
         if code_only:
             filter_expr = f'(SECURITY_CODE="{code_only}")'
@@ -1258,17 +1345,11 @@ def fetch_longhubang_detail(symbol: Optional[str] = None, date_str: Optional[str
                     "client": "WEB",
                 })
             )
-            req_b = urllib.request.Request(buy_url, headers=headers)
-            with urllib.request.urlopen(req_b, timeout=4) as resp_b:
-                buy_rows = json.loads(resp_b.read().decode("utf-8")).get("result", {}).get("data", []) or []
+            buy_rows = json.loads(http_get(buy_url, timeout=4)).get("result", {}).get("data", []) or []
 
-            req_s = urllib.request.Request(sell_url, headers=headers)
-            with urllib.request.urlopen(req_s, timeout=4) as resp_s:
-                sell_rows = json.loads(resp_s.read().decode("utf-8")).get("result", {}).get("data", []) or []
+            sell_rows = json.loads(http_get(sell_url, timeout=4)).get("result", {}).get("data", []) or []
 
-            req_sum = urllib.request.Request(summary_url, headers=headers)
-            with urllib.request.urlopen(req_sum, timeout=4) as resp_sum:
-                sum_rows = json.loads(resp_sum.read().decode("utf-8")).get("result", {}).get("data", []) or []
+            sum_rows = json.loads(http_get(summary_url, timeout=4)).get("result", {}).get("data", []) or []
 
             if not buy_rows and not sell_rows and not sum_rows:
                 return {
@@ -1337,7 +1418,7 @@ def fetch_longhubang_detail(symbol: Optional[str] = None, date_str: Optional[str
                 "top5_buyers": buyer_seats,
                 "top5_sellers": seller_seats,
             }
-            set_cached(cache_key, res)
+            set_cached(cache_key, res, ttl=ttl_for_history(trade_date))
             return res
 
         else:
@@ -1356,9 +1437,7 @@ def fetch_longhubang_detail(symbol: Optional[str] = None, date_str: Optional[str
                 params["filter"] = filter_expr
 
             url = "https://datacenter-web.eastmoney.com/api/data/v1/get?" + urllib.parse.urlencode(params)
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=4) as resp:
-                data_rows = json.loads(resp.read().decode("utf-8")).get("result", {}).get("data", []) or []
+            data_rows = json.loads(http_get(url, timeout=4)).get("result", {}).get("data", []) or []
 
             stocks = []
             for r in data_rows:
@@ -1380,7 +1459,7 @@ def fetch_longhubang_detail(symbol: Optional[str] = None, date_str: Optional[str
                 "total_stocks_on_list": len(stocks),
                 "top_net_buy_stocks": stocks[:10],
             }
-            set_cached(cache_key, res)
+            set_cached(cache_key, res, ttl=ttl_for_history(res["date"]))
             return res
 
     except Exception as e:
@@ -1399,7 +1478,6 @@ def fetch_company_quality(symbol: str) -> Dict[str, Any]:
     if cached:
         return cached
 
-    headers = {"User-Agent": USER_AGENT}
     try:
         fina_url = (
             "https://datacenter-web.eastmoney.com/api/data/v1/get?"
@@ -1415,9 +1493,7 @@ def fetch_company_quality(symbol: str) -> Dict[str, Any]:
                 "client": "WEB",
             })
         )
-        req_f = urllib.request.Request(fina_url, headers=headers)
-        with urllib.request.urlopen(req_f, timeout=4) as resp_f:
-            fina_rows = json.loads(resp_f.read().decode("utf-8")).get("result", {}).get("data", []) or []
+        fina_rows = json.loads(http_get(fina_url, timeout=4)).get("result", {}).get("data", []) or []
 
         lift_url = (
             "https://datacenter-web.eastmoney.com/api/data/v1/get?"
@@ -1433,9 +1509,7 @@ def fetch_company_quality(symbol: str) -> Dict[str, Any]:
                 "client": "WEB",
             })
         )
-        req_l = urllib.request.Request(lift_url, headers=headers)
-        with urllib.request.urlopen(req_l, timeout=4) as resp_l:
-            lift_rows = json.loads(resp_l.read().decode("utf-8")).get("result", {}).get("data", []) or []
+        lift_rows = json.loads(http_get(lift_url, timeout=4)).get("result", {}).get("data", []) or []
 
         balance_url = (
             "https://datacenter-web.eastmoney.com/api/data/v1/get?"
@@ -1451,9 +1525,7 @@ def fetch_company_quality(symbol: str) -> Dict[str, Any]:
                 "client": "WEB",
             })
         )
-        req_b = urllib.request.Request(balance_url, headers=headers)
-        with urllib.request.urlopen(req_b, timeout=4) as resp_b:
-            balance_rows = json.loads(resp_b.read().decode("utf-8")).get("result", {}).get("data", []) or []
+        balance_rows = json.loads(http_get(balance_url, timeout=4)).get("result", {}).get("data", []) or []
 
         f0 = fina_rows[0] if fina_rows else {}
         b0 = balance_rows[0] if balance_rows else {}
@@ -1530,7 +1602,7 @@ def fetch_company_quality(symbol: str) -> Dict[str, Any]:
             "company_risk_assessment": "；".join(risk_reasons),
             "uncovered_risks": ["审计意见", "股权质押", "股东减持", "监管问询/处罚", "诉讼仲裁", "退市风险"],
         }
-        set_cached(cache_key, res)
+        set_cached(cache_key, res, ttl=ttl_for_history(f0.get("REPORT_DATE")))
         return res
 
     except Exception as e:
@@ -1662,7 +1734,7 @@ def fetch_stock_timeline(symbol: str) -> Dict[str, Any]:
 # -----------------------------------------------------------------------------
 SERVER_INFO = {
     "name": "marketgraph-data",
-    "version": "1.3.0",
+    "version": "1.3.1",
 }
 
 AVAILABLE_TOOLS = [
@@ -1765,8 +1837,8 @@ AVAILABLE_TOOLS = [
             "properties": {
                 "date_str": {
                     "type": "string",
-                    "description": "日期字符串，格式 YYYYMMDD，省略则为当天",
-                    "pattern": "^[0-9]{8}$",
+                    "description": "交易日期，格式 YYYYMMDD 或 YYYY-MM-DD，省略则为当天",
+                    "pattern": "^[0-9]{8}$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
                 }
             },
         },
@@ -1779,8 +1851,8 @@ AVAILABLE_TOOLS = [
             "properties": {
                 "date_str": {
                     "type": "string",
-                    "description": "日期字符串，格式 YYYYMMDD，省略则为当天",
-                    "pattern": "^[0-9]{8}$",
+                    "description": "交易日期，格式 YYYYMMDD 或 YYYY-MM-DD，省略则为当天",
+                    "pattern": "^[0-9]{8}$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
                 }
             },
         },

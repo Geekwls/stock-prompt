@@ -369,7 +369,37 @@ def fetch_index_kline(indices: Optional[List[str]] = None, count: int = 5) -> Di
                 })
             if not days:
                 raise ValueError("涨跌幅序列为空")
-            payload = {"name": name, "ts_code": ts_code, "days": days[-count:]}
+
+            # 指数技术指标: ATR14 (Z_ATR 判档)、均线体系与 20 日高低 (空间点位候补)
+            closes_full = [b["close"] for b in bars]
+            highs_full = [b["high"] for b in bars]
+            lows_full = [b["low"] for b in bars]
+            n_bars = len(bars)
+            atr14 = None
+            if n_bars >= 15:
+                trs = []
+                for i in range(n_bars - 14, n_bars):
+                    prev_close = closes_full[i - 1]
+                    trs.append(max(highs_full[i] - lows_full[i], abs(highs_full[i] - prev_close), abs(lows_full[i] - prev_close)))
+                atr14 = round(sum(trs) / 14.0, 2)
+            latest_close = closes_full[-1]
+
+            def index_ma(window: int) -> Optional[float]:
+                return round(sum(closes_full[-window:]) / window, 2) if n_bars >= window else None
+
+            payload = {
+                "name": name,
+                "ts_code": ts_code,
+                "days": days[-count:],
+                "latest_close": latest_close,
+                "atr14": atr14,
+                "atr14_pct": f"{(atr14 / latest_close * 100):.2f}%" if atr14 and latest_close > 0 else None,
+                "ma5": index_ma(5),
+                "ma20": index_ma(20),
+                "ma60": index_ma(60),
+                "high_20d": max(highs_full[-min(20, n_bars):]),
+                "low_20d": min(lows_full[-min(20, n_bars):]),
+            }
             set_cached(cache_key, payload, ttl=600)
             result[key] = payload
         except Exception:
@@ -1194,11 +1224,23 @@ def resolve_sector_code(keyword: str) -> Optional[str]:
     return None
 
 
+def _sector_ma(closes: List[float], window: int) -> Optional[float]:
+    return round(sum(closes[-window:]) / window, 2) if len(closes) >= window else None
+
+
+def _sector_return(closes: List[float], window: int) -> str:
+    n = len(closes)
+    w = min(window, n - 1)  # 序列不足窗口时退化为可得区间
+    base = closes[-(w + 1)]
+    return f"{((closes[-1] - base) / base * 100):+.2f}%" if base > 0 else "N/A"
+
+
 def fetch_sector_kline(sector: str, count: int = 130) -> Dict[str, Any]:
     """
-    获取东财行业板块指数日K收盘序列、均线体系、区间涨幅与主力净流入累计
-    直供 stock-analysis L4 行业基准 (板块 5/20 日收益) 与 L2 板块强度证据
-    数据源为 fflow daykline 网关 (含收盘点位, 无盘中高低价)
+    获取东财行业板块指数日K序列、均线体系、区间涨幅与资金证据
+    主源为东财标准K线 (完整OHLCV+成交额, 支撑板块资金延续评分的成交额对比);
+    主源不可用时自动兜底 fflow daykline (收盘序列+主力净额, 高低点为收盘价口径)
+    直供 stock-analysis L4 行业基准、daily-review 资金延续 V 项与 L2 板块强度证据
     """
     if not isinstance(count, int) or not 20 <= count <= 250:
         return {"error": "count 必须是 20 至 250 的整数", "data_status": "unavailable"}
@@ -1214,6 +1256,71 @@ def fetch_sector_kline(sector: str, count: int = 130) -> Dict[str, Any]:
     if cached:
         return cached
 
+    # 主源: 东财标准K线 (完整 OHLCV + 成交额)
+    try:
+        kline_url = (
+            "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+            f"?secid=90.{sector_code}&klt=101&fqt=1&lmt={count}&end=20500101"
+            "&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57"
+        )
+        data = (json.loads(http_get(kline_url, timeout=5)).get("data") or {})
+        klines = data.get("klines") or []
+        rows = []
+        for line in klines[-count:]:
+            parts = line.split(",")
+            if len(parts) >= 7:
+                rows.append({
+                    "date": parts[0],
+                    "open": safe_float(parts[1], 0.0),
+                    "close": safe_float(parts[2], 0.0),
+                    "high": safe_float(parts[3], 0.0),
+                    "low": safe_float(parts[4], 0.0),
+                    "amount_billion": round(safe_float(parts[6], 0.0) / 100000000.0, 2),
+                })
+        closes = [r["close"] for r in rows]
+        n = len(closes)
+        if n >= 2 and closes[-1] > 0:
+            amounts = [r["amount_billion"] for r in rows]
+            prev_amount = amounts[-2] if n >= 2 else None
+            res = {
+                "source": "P3_Eastmoney_Sector_Kline",
+                "data_status": "ok",
+                "ohlc_source": True,
+                "sector_code": sector_code,
+                "sector_name": data.get("name", sector),
+                "valid_bars": n,
+                "latest_date": rows[-1]["date"],
+                "latest_close": closes[-1],
+                "latest_open": rows[-1]["open"],
+                "latest_high": rows[-1]["high"],
+                "latest_low": rows[-1]["low"],
+                "latest_change_pct": _sector_return(closes, 1),
+                "ma5": _sector_ma(closes, 5),
+                "ma10": _sector_ma(closes, 10),
+                "ma20": _sector_ma(closes, 20),
+                "ma60": _sector_ma(closes, 60),
+                "recent_5d_return": _sector_return(closes, 5),
+                "recent_20d_return": _sector_return(closes, 20),
+                "recent_60d_return": _sector_return(closes, 60),
+                "high_20d": max(r["high"] for r in rows[-min(20, n):]),
+                "low_20d": min(r["low"] for r in rows[-min(20, n):]),
+                "high_60d": max(r["high"] for r in rows[-min(60, n):]),
+                "low_60d": min(r["low"] for r in rows[-min(60, n):]),
+                "latest_amount_billion": amounts[-1],
+                "prev_amount_billion": prev_amount,
+                "amount_ratio_1d": round(amounts[-1] / prev_amount, 2) if prev_amount and prev_amount > 0 else None,
+                "avg_amount_5d_billion": round(sum(amounts[-min(5, n):]) / min(5, n), 2),
+                "note": "完整OHLCV+成交额口径 (东财板块标准K线)；amount_ratio_1d 即板块资金延续评分 (Capital Continuity) 成交连续度 V 项的直接输入",
+            }
+            if n < count:
+                res["data_status"] = "partial"
+                res["note"] += f"；实际仅取得 {n} 根 (不足请求的 {count} 根)"
+            set_cached(cache_key, res, ttl=ttl_for_history(rows[-1]["date"]))
+            return res
+    except Exception:
+        pass  # 主源不可用, 自动走 fflow 兜底
+
+    # 兜底: fflow daykline (收盘序列 + 主力净额, 无盘中高低价与成交额)
     url = (
         "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get"
         f"?lmt={count}&klt=101&secid=90.{sector_code}&secid2=90.{sector_code}"
@@ -1240,37 +1347,30 @@ def fetch_sector_kline(sector: str, count: int = 130) -> Dict[str, Any]:
         if n < 2 or closes[-1] <= 0:
             return {"error": "板块日K序列不完整", "data_status": "unavailable"}
 
-        def sector_ma(window: int) -> Optional[float]:
-            return round(sum(closes[-window:]) / window, 2) if n >= window else None
-
-        def sector_return(window: int) -> str:
-            w = min(window, n - 1)  # 序列不足窗口时退化为可得区间
-            base = closes[-(w + 1)]
-            return f"{((closes[-1] - base) / base * 100):+.2f}%" if base > 0 else "N/A"
-
         res = {
             "source": "P3_Eastmoney_Sector_Kline",
             "data_status": "ok",
+            "ohlc_source": False,
             "sector_code": sector_code,
             "sector_name": data.get("name", sector),
             "valid_bars": n,
             "latest_date": rows[-1]["date"],
             "latest_close": closes[-1],
             "latest_change_pct": rows[-1]["change_pct"],
-            "ma5": sector_ma(5),
-            "ma10": sector_ma(10),
-            "ma20": sector_ma(20),
-            "ma60": sector_ma(60),
-            "recent_5d_return": sector_return(5),
-            "recent_20d_return": sector_return(20),
-            "recent_60d_return": sector_return(60),
+            "ma5": _sector_ma(closes, 5),
+            "ma10": _sector_ma(closes, 10),
+            "ma20": _sector_ma(closes, 20),
+            "ma60": _sector_ma(closes, 60),
+            "recent_5d_return": _sector_return(closes, 5),
+            "recent_20d_return": _sector_return(closes, 20),
+            "recent_60d_return": _sector_return(closes, 60),
             "high_close_20d": max(closes[-min(20, n):]),
             "low_close_20d": min(closes[-min(20, n):]),
             "high_close_60d": max(closes[-min(60, n):]),
             "low_close_60d": min(closes[-min(60, n):]),
             "cum_main_net_inflow_5d_billion": round(sum(r["main_net_inflow_billion"] for r in rows[-5:]), 2),
             "cum_main_net_inflow_20d_billion": round(sum(r["main_net_inflow_billion"] for r in rows[-min(20, n):]), 2),
-            "note": "收盘序列来自东财板块资金流日K网关 (无盘中高低价, 高低点为收盘价口径)；近5/20日主力净流入累计为板块资金延续证据",
+            "note": "收盘序列来自东财板块资金流日K网关 (无盘中高低价与成交额, 高低点为收盘价口径)；近5/20日主力净流入累计为板块资金延续证据",
         }
         if n < count:
             res["data_status"] = "partial"
@@ -1866,7 +1966,7 @@ def fetch_stock_timeline(symbol: str) -> Dict[str, Any]:
 # -----------------------------------------------------------------------------
 SERVER_INFO = {
     "name": "marketgraph-data",
-    "version": "1.4.0",
+    "version": "1.5.0",
 }
 
 AVAILABLE_TOOLS = [
@@ -1926,7 +2026,7 @@ AVAILABLE_TOOLS = [
     },
     {
         "name": "get_index_kline",
-        "description": "获取核心指数（上证指数/深证成指/创业板指/中证全指/沪深300）最近 N 个交易日的收盘与逐日涨跌幅序列，确定性直连腾讯指数日K网关（直供5日轮动全窗口指数强弱，无需依赖不稳定的网页搜索）",
+        "description": "获取核心指数（上证指数/深证成指/创业板指/中证全指/沪深300）最近 N 个交易日的收盘、逐日涨跌幅、ATR14、MA5/20/60 与 20 日高低点，确定性直连腾讯指数日K网关（ATR14 支撑盘前 Z_ATR 判档，均线与高低点支撑空间点位测算；直供5日轮动全窗口指数强弱与个股 L4 宽基基准）",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -1937,7 +2037,7 @@ AVAILABLE_TOOLS = [
                 },
                 "count": {
                     "type": "integer",
-                    "description": "交易日数量，默认 5；最大 130 (覆盖 L4 的 120 日相对强度窗口)",
+                    "description": "交易日数量，默认 5；最大 130 (覆盖 L4 的 120 日相对强度窗口；count>=15 时输出 ATR14)",
                     "default": 5,
                     "minimum": 2,
                     "maximum": 130,
@@ -2014,7 +2114,7 @@ AVAILABLE_TOOLS = [
     },
     {
         "name": "get_sector_kline",
-        "description": "获取东财行业板块指数日K收盘序列（板块 MA5/10/20/60、5/20/60日区间涨幅、20/60日收盘高低点、近5/20日主力净流入累计；支持板块代码 BK1036 或中文板块名，直供个股 L4 行业基准相对强度与 L2 板块强度证据）",
+        "description": "获取东财行业板块指数日K序列（主源为完整OHLCV+成交额：板块 MA5/10/20/60、5/20/60日区间涨幅、20/60日高低点、最新/前一日成交额与量比 amount_ratio_1d；主源不可用自动兜底收盘序列+主力净额口径。支持板块代码 BK1036 或中文板块名，直供个股 L4 行业基准、daily-review 资金延续 V 项与板块强度证据）",
         "inputSchema": {
             "type": "object",
             "properties": {

@@ -393,6 +393,30 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         self.assertEqual(days[0]["date"], "2026-08-31")
         self.assertEqual(days[0]["change_pct"], "+1.95%")  # (3986.30-3910)/3910
         self.assertEqual(days[1]["change_pct"], "-0.16%")
+        # 技术指标字段: 短窗口无 ATR/MA, 但有 20 日高低
+        self.assertIsNone(res["indices"]["SHCI"]["atr14"])
+        self.assertIsNone(res["indices"]["SHCI"]["ma5"])
+        self.assertEqual(res["indices"]["SHCI"]["high_20d"], 3995.0)
+        self.assertEqual(res["indices"]["SHCI"]["low_20d"], 3890.0)
+
+    @patch.object(SERVER, "http_get")
+    def test_fetch_index_kline_atr_and_ma(self, mock_get):
+        """count>=15 时指数 payload 输出 ATR14 与均线 (盘前 Z_ATR 判档与空间引擎输入)"""
+        SERVER.CACHE_STORE.clear()
+        mock_bars = []
+        for i in range(17):  # fetch count+1 根; TR 恒为 3 (high-low=3 主导)
+            p = 100.0 + i * 0.2
+            mock_bars.append([f"2026-01-{i + 1:02d}", f"{p:.2f}", f"{p + 1:.2f}", f"{p + 2:.2f}", f"{p - 1:.2f}", "1000"])
+        mock_get.return_value = json.dumps({"data": {"sh000001": {"day": mock_bars}}})
+
+        res = SERVER.fetch_index_kline(indices=["SHCI"], count=16)
+        self.assertEqual(res["data_status"], "ok", res)
+        idx = res["indices"]["SHCI"]
+        self.assertEqual(idx["atr14"], 3.0)
+        self.assertEqual(idx["ma5"], 103.8)  # i=12..16 收盘 (p+1) 均值
+        self.assertEqual(idx["high_20d"], 105.2)
+        self.assertEqual(idx["low_20d"], 99.0)
+        self.assertEqual(idx["atr14_pct"], "2.88%")  # 3.0/104.2
 
     @patch.object(SERVER, "http_get")
     def test_fetch_market_breadth(self, mock_get):
@@ -431,6 +455,37 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         self.assertEqual(rows[1]["red_rate"], "68.18%")
         self.assertEqual(res["latest_exact_snapshot"]["date"], "2026-09-04")
 
+    @patch.object(SERVER, "http_get")
+    def test_fetch_sector_kline_full_ohlc(self, mock_get):
+        """主源 kline/get 可用时输出完整 OHLCV+成交额口径, amount_ratio_1d 直供资金延续 V 项"""
+        SERVER.CACHE_STORE.clear()
+        kline_rows = [
+            "2026-09-01,2700.00,2710.00,2720.00,2690.00,123456789,45000000000",
+            "2026-09-02,2710.00,2705.00,2718.00,2695.00,120000000,42000000000",
+            "2026-09-03,2700.00,2690.50,2710.00,2680.00,130000000,46000000000",
+            "2026-09-04,2690.00,2635.14,2695.00,2620.00,210000000,62000000000",
+        ]
+
+        def fake_get(url, timeout=4, encoding="utf-8"):
+            if "stock/kline/get" in url and "fflow" not in url and "secid=90.BK1036" in url:
+                return json.dumps({"data": {"name": "半导体", "klines": kline_rows}})
+            raise AssertionError("unexpected url: " + url)
+
+        mock_get.side_effect = fake_get
+        res = SERVER.fetch_sector_kline("BK1036", count=20)
+        self.assertEqual(res["data_status"], "partial", res)  # 4 根 < 20 根 => partial
+        self.assertTrue(res["ohlc_source"])
+        self.assertEqual(res["sector_name"], "半导体")
+        self.assertEqual(res["latest_close"], 2635.14)
+        self.assertEqual(res["latest_high"], 2695.00)
+        self.assertEqual(res["latest_low"], 2620.00)
+        self.assertEqual(res["high_20d"], 2720.00)  # 真实 OHLC 高点
+        self.assertEqual(res["low_20d"], 2620.00)
+        self.assertEqual(res["latest_amount_billion"], 620.0)
+        self.assertEqual(res["prev_amount_billion"], 460.0)
+        self.assertEqual(res["amount_ratio_1d"], 1.35)
+        self.assertEqual(res["latest_change_pct"], "-2.06%")  # (2635.14-2690.50)/2690.50 = -2.0576%
+
     def test_fetch_index_kline_rejects_oversized_count(self):
         res = SERVER.fetch_index_kline(indices=["SHCI"], count=200)
         self.assertEqual(res["data_status"], "unavailable")
@@ -449,12 +504,12 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         def fake_get(url, timeout=4, encoding="utf-8"):
             if "fflow/daykline" in url and "secid=90.BK1036" in url:
                 return json.dumps({"data": {"name": "半导体", "klines": fflow_lines}})
-            raise AssertionError("unexpected url: " + url)
+            raise OSError("primary kline/get unavailable")  # 主源不可用 => fflow 兜底
 
         mock_get.side_effect = fake_get
         res = SERVER.fetch_sector_kline("BK1036", count=20)
         self.assertEqual(res["data_status"], "partial", res)  # mock 仅 3 根 < 20 根 => partial 降级
-        self.assertIn("不足请求的 20 根", res["note"])
+        self.assertFalse(res["ohlc_source"])
         self.assertEqual(res["sector_name"], "半导体")
         self.assertEqual(res["valid_bars"], 3)
         self.assertEqual(res["latest_close"], 2635.14)
@@ -479,7 +534,7 @@ class MarketGraphMCPServerTest(unittest.TestCase):
                     "2026-09-03,-1.0,0,0,0,0,0,0,0,0,0,2690.50,-0.84,2690.50,-0.84",
                     "2026-09-04,-2.0,0,0,0,0,0,0,0,0,0,2635.14,-2.88,2635.14,-2.88",
                 ]}})
-            raise AssertionError("unexpected url: " + url)
+            raise OSError("primary kline/get unavailable")  # 主源不可用 => fflow 兜底
 
         mock_get.side_effect = fake_get
         res = SERVER.fetch_sector_kline("半导体", count=20)

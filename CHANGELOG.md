@@ -1,5 +1,14 @@
 # CHANGELOG (更新日志)
 
+## [v6.5.0] - 2026-09-06
+### 🧭 三大 Skill 全面接线 MCP v6.4+ 能力 (Cross-Skill Data Wiring)
+- **`get_index_kline` 新增指数技术指标**：每个指数输出 ATR14（`count>=15`，盘前 Z_ATR 三态判档必需）、MA5/MA20/MA60 与 20 日高低点（空间点位引擎的均线候补与 ±0.8/±1.5 ATR 波动率上下沿输入）——修复 market-prediction 的 E4 判档与空间测算此前完全无确定性数据源的断点。
+- **`get_sector_kline` 升级双源口径**：主源切换东财标准K线（完整 OHLCV+成交额），新增 `latest_amount_billion`/`prev_amount_billion`/`amount_ratio_1d`（直接支撑 daily-review 资金延续评分 V 项的成交额对比）与 `avg_amount_5d_billion`；主源不可用自动兜底 fflow daykline（收盘序列+主力净额，`ohlc_source` 字段区分口径）。
+- **`daily-review` 接线**：MCP 路由补齐 `get_market_breadth`（涨跌家数比 25 分项的红盘率直供）与 `get_market_sentiment` 历史 `date_str` 回补 5 日成交额（"较5日均量 ±15%"量能判定）；新增 V 项降级规则（板块成交额不可得时按剩余权重归一化，禁止以主力净流入近似替代）。
+- **`market-prediction` 接线**：E4 路由补齐 `get_market_breadth`（盘前快照即 T-1 收盘口径）与 `get_index_kline`（ATR14/均线）；空间点位章节明确候补取数与期权/POC 的 N/A 降级；9:25 竞价章节接入 `get_stock_timeline`（`morning_call_auction`），并明确竞价量比不得用全天量比冒充。
+- **`sector-rotation` 接线**：MCP 路由补齐 `get_sector_kline`（板块 5 日累计涨幅与 SEI 量价背离输入）；情绪温度公式新增 B_d 项精度规则——历史交易日红盘率非精确口径时 B_d 记 0 并标注覆盖率，不得用涨跌停家数估算补位。
+- **测试**：新增板块 OHLC 全量口径/指数 ATR 与均线等 2 项单测并修正既有断言，全套 47 项通过。
+
 ## [v6.4.0] - 2026-09-06
 ### 🔍 个股诊断 Skill 接线确定性数据与板块指数日K (Stock-Analysis Data Wiring)
 - **新增 `get_sector_kline`（第 11 个工具）**：东财行业板块指数日K收盘序列，输出板块 MA5/10/20/60、5/20/60 日区间涨幅、20/60 日收盘高低点与近 5/20 日主力净流入累计；支持 BK 代码或中文板块名（clist 全量表精确匹配，24h 缓存）。填补 L4"相对行业指数基准"此前只能靠搜索或记 N/A 的确定性缺口。

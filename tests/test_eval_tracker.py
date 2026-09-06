@@ -108,5 +108,77 @@ class LedgerRoundtripTest(unittest.TestCase):
             self.assertIn("点位有效率", output)
 
 
+class DailyScoresLedgerTest(unittest.TestCase):
+    def test_record_daily_writes_metrics(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            daily = str(Path(temporary) / "daily_scores.jsonl")
+            record = argparse.Namespace(
+                date="2026-09-04", up_ratio=43.44, premium=1.2, promotion=50.0,
+                break_rate=48.0, volume_dev=-8.0, sentiment_total=62.0,
+                capital_continuity=71.0, opportunity=66.0, top_sector="半导体",
+                daily_ledger=daily,
+            )
+            with redirect_stdout(io.StringIO()):
+                TRACKER.cmd_record_daily(record)
+            lines = [json.loads(line) for line in Path(daily).read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(len(lines), 1)
+            rec = lines[0]
+            self.assertEqual(rec["type"], "daily_review")
+            self.assertEqual(rec["date"], "2026-09-04")
+            self.assertEqual(rec["up_ratio"], 43.44)
+            self.assertEqual(rec["top_sector"], "半导体")
+
+    def test_record_daily_requires_at_least_one_metric(self):
+        record = argparse.Namespace(
+            date="2026-09-04", up_ratio=None, premium=None, promotion=None,
+            break_rate=None, volume_dev=None, sentiment_total=None,
+            capital_continuity=None, opportunity=None, top_sector="",
+            daily_ledger="unused.jsonl",
+        )
+        with self.assertRaises(SystemExit):
+            TRACKER.cmd_record_daily(record)
+
+    def test_record_daily_rejects_out_of_range(self):
+        record = argparse.Namespace(
+            date="2026-09-04", up_ratio=143.0, premium=None, promotion=None,
+            break_rate=None, volume_dev=None, sentiment_total=None,
+            capital_continuity=None, opportunity=None, top_sector="",
+            daily_ledger="unused.jsonl",
+        )
+        with self.assertRaises(SystemExit):
+            TRACKER.cmd_record_daily(record)
+
+    def test_report_daily_threshold_percentiles(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            daily = str(Path(temporary) / "daily_scores.jsonl")
+            for i, ratio in enumerate([30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0]):
+                record = argparse.Namespace(
+                    date=f"2026-09-{i + 1:02d}", up_ratio=ratio, premium=1.0,
+                    promotion=50.0, break_rate=30.0, volume_dev=0.0,
+                    sentiment_total=60.0, capital_continuity=None, opportunity=None,
+                    top_sector="", daily_ledger=daily,
+                )
+                with redirect_stdout(io.StringIO()):
+                    TRACKER.cmd_record_daily(record)
+            # 同日期重复写入 => 后写覆盖, 不产生重复样本
+            dup = argparse.Namespace(
+                date="2026-09-07", up_ratio=95.0, premium=1.0, promotion=50.0,
+                break_rate=30.0, volume_dev=0.0, sentiment_total=60.0,
+                capital_continuity=None, opportunity=None, top_sector="", daily_ledger=daily,
+            )
+            with redirect_stdout(io.StringIO()):
+                TRACKER.cmd_record_daily(dup)
+            report = argparse.Namespace(window=60, daily_ledger=daily)
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                TRACKER.cmd_report_daily(report)
+            output = buffer.getvalue()
+            self.assertIn("涨跌家数比%", output)
+            self.assertIn("固定阈值历史落位", output)
+            # 70 阈值落位: 去重后 7 个值 (30..80,95), <=70 的有 5 个 => P71
+            self.assertIn("70 -> P71", output)
+            self.assertIn("样本 7 日 < 60 日", output)
+
+
 if __name__ == "__main__":
     unittest.main()

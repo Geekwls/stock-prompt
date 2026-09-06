@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-market-prediction 评估台账工具 (Evaluation Ledger Tracker)
+market-prediction / daily-review 评估台账工具 (Evaluation Ledger Tracker)
 
 闭环流程：
-  1. 盘前 8:30-9:15  →  record  记录当日三态概率 / Opportunity / 第一主线
-  2. 收盘 15:00 后   →  result  记录实际 Z_ATR / 最强主线 Top3 / 点位触碰
-  3. 任意时点        →  report  滚动计算 Brier / 方向命中 / 校准 / 锐度 / 主线命中率 / 点位有效率
+  1. 盘前 8:30-9:15  →  record         记录当日三态概率 / Opportunity / 第一主线
+  2. 收盘 15:00 后   →  result         记录实际 Z_ATR / 最强主线 Top3 / 点位触碰
+  3. 任意时点        →  report         滚动计算 Brier / 方向命中 / 校准 / 锐度 / 主线命中率 / 点位有效率
+  4. 收盘复盘后      →  record-daily   记录当日情绪五项分 / 资金延续 / 机会评分 (daily_scores.jsonl)
+  5. 任意时点        →  report-daily   输出各评分分布与固定阈值的历史分位落位 (阈值校准依据)
 
 台账默认固定写入 ~/.stock-prompt/eval/predictions.jsonl（不随工作目录漂移），
-market-prediction 记录与 daily-review 回测共用同一份。首次运行若检测到旧版相对
-路径台账 ./eval/predictions.jsonl，会自动复制迁移到新位置（原文件保留）。
-优先级：--ledger 参数 > STOCK_PROMPT_LEDGER 环境变量 > 默认固定路径。
+market-prediction 记录与 daily-review 回测共用同一份；每日评分台账为同目录
+daily_scores.jsonl。首次运行若检测到旧版相对路径台账 ./eval/predictions.jsonl，
+会自动复制迁移到新位置（原文件保留）。
+优先级：--ledger 参数 > STOCK_PROMPT_LEDGER 环境变量 > 默认固定路径；
+每日台账同理（--daily-ledger > STOCK_PROMPT_DAILY_LEDGER > 预测台账同目录）。
 同一日期重复写入视为更新（后写覆盖）。
 """
 
@@ -146,6 +150,105 @@ def merge_pairs(preds, results):
     return [(d, preds[d], results[d]) for d in sorted(set(preds) & set(results))]
 
 
+DAILY_METRICS = [
+    ("up_ratio", "涨跌家数比%", [30.0, 50.0, 70.0]),
+    ("premium", "昨日涨停溢价(超额)%", [0.0, 1.0, 3.0]),
+    ("promotion", "连板晋级率%", [20.0, 40.0, 60.0]),
+    ("break_rate", "全市场炸板率%", [20.0, 30.0, 40.0]),
+    ("volume_dev", "量能偏离5日均量%", [-15.0, 15.0]),
+    ("sentiment_total", "情绪总分", [50.0, 80.0]),
+]
+DAILY_EXTRA_METRICS = [("capital_continuity", "资金延续评分"), ("opportunity", "机会评分")]
+
+
+def load_daily_ledger(path):
+    """每日评分台账：同日期后写覆盖，按日期排序返回"""
+    daily = {}
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if rec.get("type") == "daily_review" and rec.get("date"):
+                    daily[rec["date"]] = rec
+    return [daily[d] for d in sorted(daily)]
+
+
+def percentile_of(sorted_vals, p):
+    """线性插值分位数；sorted_vals 需已升序"""
+    if not sorted_vals:
+        return None
+    k = (len(sorted_vals) - 1) * p / 100.0
+    f, c = math.floor(k), math.ceil(k)
+    if f == c:
+        return sorted_vals[int(k)]
+    return sorted_vals[f] * (c - k) + sorted_vals[c] * (k - f)
+
+
+def threshold_percentile(vals, t):
+    """阈值在历史样本中的落位：样本中 <= 阈值的比例 (%)"""
+    if not vals:
+        return None
+    return sum(1 for v in vals if v <= t) / len(vals) * 100.0
+
+
+def cmd_record_daily(args):
+    metrics = {
+        "up_ratio": args.up_ratio,
+        "premium": args.premium,
+        "promotion": args.promotion,
+        "break_rate": args.break_rate,
+        "volume_dev": args.volume_dev,
+        "sentiment_total": args.sentiment_total,
+        "capital_continuity": args.capital_continuity,
+        "opportunity": args.opportunity,
+    }
+    if all(v is None for v in metrics.values()):
+        sys.exit("[ERR] 至少提供一项评分指标 (--up-ratio / --premium / --promotion / --break-rate / --volume-dev / --sentiment-total / --capital-continuity / --opportunity)")
+    for key in ("up_ratio", "promotion", "break_rate", "sentiment_total", "capital_continuity", "opportunity"):
+        if metrics[key] is not None and not 0 <= metrics[key] <= 100:
+            sys.exit(f"[ERR] --{key.replace('_', '-')} 必须位于 0-100")
+    rec = {"type": "daily_review", "date": args.date, "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")}
+    rec.update({k: round(v, 2) for k, v in metrics.items() if v is not None})
+    if args.top_sector:
+        rec["top_sector"] = args.top_sector
+    append_record(args.daily_ledger, rec)
+    print(f"[OK] 已记录 {args.date} 每日评分 -> {args.daily_ledger}")
+
+
+def cmd_report_daily(args):
+    records = load_daily_ledger(args.daily_ledger)
+    recent = records[-args.window:] if args.window and args.window > 0 else records
+    print(f"=== daily-review 每日评分台账（最近 {len(recent)} 个交易日，累计 {len(records)} 日） ===")
+    if not recent:
+        print("台账为空。每日收盘复盘后执行 record-daily 落盘，累计 ≥60 日后用于阈值分位校准。")
+        return
+    for key, label, thresholds in DAILY_METRICS:
+        vals = sorted(r[key] for r in recent if r.get(key) is not None)
+        if not vals:
+            print(f"• {label}: 无样本")
+            continue
+        dist = " | ".join(f"P{p} {percentile_of(vals, p):.2f}" for p in (10, 25, 50, 75, 90))
+        print(f"• {label}: n={len(vals)} | {dist}")
+        if thresholds and len(vals) >= 5:
+            positions = " | ".join(f"{t:g} -> P{threshold_percentile(vals, t):.0f}" for t in thresholds)
+            print(f"    固定阈值历史落位: {positions}")
+    for key, label in DAILY_EXTRA_METRICS:
+        vals = sorted(r[key] for r in recent if r.get(key) is not None)
+        if vals:
+            dist = " | ".join(f"P{p} {percentile_of(vals, p):.2f}" for p in (25, 50, 75))
+            print(f"• {label}: n={len(vals)} | {dist}")
+    if len(recent) < 60:
+        print(f"[NOTE] 样本 {len(recent)} 日 < 60 日：继续使用固定回退阈值，并每日 record-daily 落盘；满 60 日后以本报告的分位落位校准阈值并披露样本期。")
+    else:
+        print("[NOTE] 样本 ≥ 60 日：与设计意图偏差显著的固定阈值档位（如落位 P90+ 或 P10 以下）应改用台账分位校准，并披露样本期。")
+
+
 def brier_multiclass(probs, actual_state):
     return sum((probs[s] / 100.0 - (1.0 if s == actual_state else 0.0)) ** 2 for s in STATES)
 
@@ -203,8 +306,9 @@ def cmd_report(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="market-prediction 评估台账：record / result / report")
+    parser = argparse.ArgumentParser(description="评估台账：record / result / report / record-daily / report-daily")
     parser.add_argument("--ledger", default=None, help=f"台账文件路径 (默认 {default_ledger()}，固定不随目录漂移)")
+    parser.add_argument("--daily-ledger", default=None, help="每日评分台账路径 (默认为预测台账同目录 daily_scores.jsonl)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_rec = sub.add_parser("record", help="盘前记录当日预测")
@@ -235,8 +339,27 @@ def main():
     p_rpt.add_argument("--window", type=int, default=20, help="滚动窗口天数 (默认 20)")
     p_rpt.set_defaults(func=cmd_report)
 
+    p_drec = sub.add_parser("record-daily", help="收盘复盘后记录当日情绪/延续/机会评分")
+    p_drec.add_argument("--date", required=True, help="交易日 YYYY-MM-DD")
+    p_drec.add_argument("--up-ratio", type=float, help="涨跌家数比 (红盘率%%)")
+    p_drec.add_argument("--premium", type=float, help="昨日涨停股今日平均涨幅相对全市场的超额%%")
+    p_drec.add_argument("--promotion", type=float, help="连板晋级率%%")
+    p_drec.add_argument("--break-rate", type=float, help="全市场炸板率%%")
+    p_drec.add_argument("--volume-dev", type=float, help="两市成交额较5日均量偏离%%")
+    p_drec.add_argument("--sentiment-total", type=float, help="情绪总分 0-100")
+    p_drec.add_argument("--capital-continuity", type=float, help="资金延续评分 0-100")
+    p_drec.add_argument("--opportunity", type=float, help="机会评分 0-100")
+    p_drec.add_argument("--top-sector", default="", help="第一主线板块名称")
+    p_drec.set_defaults(func=cmd_record_daily)
+
+    p_drpt = sub.add_parser("report-daily", help="输出每日评分分布与固定阈值历史落位")
+    p_drpt.add_argument("--window", type=int, default=60, help="滚动窗口交易日 (默认 60)")
+    p_drpt.set_defaults(func=cmd_report_daily)
+
     args = parser.parse_args()
     args.ledger = resolve_ledger(args.ledger)
+    args.daily_ledger = (args.daily_ledger or os.environ.get("STOCK_PROMPT_DAILY_LEDGER")
+                         or os.path.join(os.path.dirname(args.ledger), "daily_scores.jsonl"))
     args.func(args)
 
 

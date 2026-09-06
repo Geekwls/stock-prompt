@@ -1333,7 +1333,8 @@ def fetch_sector_kline(sector: str, count: int = 130) -> Dict[str, Any]:
         data = json.loads(http_get(url, timeout=5)).get("data") or {}
         klines = data.get("klines") or []
         if len(klines) < 2:
-            return {"error": f"未获取到板块日K序列: {sector}", "data_status": "unavailable"}
+            return {"error": f"未获取到板块日K序列: {sector}", "data_status": "unavailable",
+                    "hint": "东财板块源不可用时, 可改用 get_basket_index 传入板块主要成分股构造等权代理序列 (使用边界见公共研究契约)"}
 
         rows = []
         for line in klines[-count:]:
@@ -1381,7 +1382,121 @@ def fetch_sector_kline(sector: str, count: int = 130) -> Dict[str, Any]:
         set_cached(cache_key, res, ttl=ttl_for_history(rows[-1]["date"]))
         return res
     except Exception as exc:
-        return {"error": f"获取板块日K出错: {type(exc).__name__}", "data_status": "unavailable"}
+        return {"error": f"获取板块日K出错: {type(exc).__name__}", "data_status": "unavailable",
+                "hint": "东财板块源不可用时, 可改用 get_basket_index 传入板块主要成分股构造等权代理序列 (使用边界见公共研究契约)"}
+
+
+def fetch_basket_index(stocks: List[str], count: int = 20) -> Dict[str, Any]:
+    """
+    以腾讯前复权日K构造等权篮子指数（日度再平衡口径：篮子日收益 = 成分股当日收益的等权均值）
+    用途：东财板块指数网关抖动时的代理序列（如保险 BK0735 仅 6 只成分股，等权大票覆盖度高）、
+    主线篮子相对强度对照。输出为构造序列（series_type=equal_weight_constructed），
+    只能用于方向性对照，不得用于精确评分阈值——使用边界见公共研究契约
+    """
+    if not isinstance(stocks, list) or len(stocks) < 2 or len(stocks) > 10:
+        return {"error": "stocks 必须是 2 至 10 个标的的数组", "data_status": "unavailable"}
+    if not all(isinstance(s, str) and s.strip() for s in stocks):
+        return {"error": "stocks 必须是非空字符串数组", "data_status": "unavailable"}
+    if not isinstance(count, int) or not 5 <= count <= 60:
+        return {"error": "count 必须是 5 至 60 的整数", "data_status": "unavailable"}
+
+    cache_key = f"basket_{'|'.join(dict.fromkeys(s.strip() for s in stocks))}_{count}"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+
+    # 1. 逐标的拉取前复权收盘序列 (去重; 停牌/未上市日期自然缺失, 由 ffill 与按日可用集处理)
+    series_by_stock: Dict[str, Dict[str, float]] = {}
+    succeeded: List[str] = []
+    failed: List[str] = []
+    for raw in dict.fromkeys(stocks):
+        ts_code = normalize_symbol(raw)
+        try:
+            url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={ts_code},day,,,{count + 1},qfq"
+            data = json.loads(http_get(url, timeout=5)).get("data", {}).get(ts_code, {})
+            bars = data.get("qfqday") or data.get("day") or []
+            closes = {str(r[0]): float(r[2]) for r in bars[-(count + 1):] if len(r) >= 3}
+            if len(closes) >= 2:
+                series_by_stock[ts_code] = closes
+                succeeded.append(f"{raw}({ts_code})")
+            else:
+                failed.append(str(raw))
+        except Exception:
+            failed.append(str(raw))
+
+    if len(series_by_stock) < 2:
+        return {
+            "error": f"有效成分股不足 2 只 (成功: {succeeded or '无'}; 失败: {failed or '无'})",
+            "data_status": "unavailable",
+        }
+
+    # 2. 交易日并集 + 逐标的 ffill; 每日收益只纳入当日有前收盘价的标的
+    all_dates = sorted({d for s in series_by_stock.values() for d in s})
+    basket_dates = all_dates[-(count + 1):]
+    if len(basket_dates) < 2:
+        return {"error": "有效交易日不足", "data_status": "unavailable"}
+
+    levels: List[Dict[str, Any]] = []
+    level = 100.0
+    prev_date: Optional[str] = None
+    for d in basket_dates:
+        if prev_date is not None:
+            rets = []
+            for closes in series_by_stock.values():
+                cur = closes.get(d) or _last_close_on_or_before(closes, d)
+                prev = closes.get(prev_date) or _last_close_on_or_before(closes, prev_date)
+                if cur is not None and prev is not None and prev > 0:
+                    rets.append(cur / prev - 1.0)
+            if rets:
+                level *= (1.0 + sum(rets) / len(rets))
+            levels.append({
+                "date": d,
+                "level": round(level, 2),
+                "change_pct": f"{(sum(rets) / len(rets) * 100):+.2f}%" if rets else "0.00%",
+                "stocks_counted": len(rets),
+            })
+        else:
+            levels.append({"date": d, "level": 100.0, "change_pct": "0.00% (基期)", "stocks_counted": len(series_by_stock)})
+        prev_date = d
+
+    ret_5 = _basket_return(levels, 5)
+    ret_20 = _basket_return(levels, 20)
+    res = {
+        "source": "P3_Tencent_Constructed_Basket",
+        "data_status": "partial" if failed else "ok",
+        "series_type": "equal_weight_constructed",
+        "basket_size": len(series_by_stock),
+        "stocks_succeeded": succeeded,
+        "stocks_failed": failed,
+        "valid_bars": len(levels) - 1,
+        "latest_date": levels[-1]["date"],
+        "latest_level": levels[-1]["level"],
+        "recent_5d_return": ret_5,
+        "recent_20d_return": ret_20,
+        "series": levels,
+        "note": ("等权构造序列 (日度再平衡口径, 腾讯前复权收盘): 与板块官方市值加权指数存在口径差异, "
+                 "只能用于方向性强弱对照, 不得用于精确评分阈值或赔率计算; 报告中必须标注'代理序列'并披露成分覆盖度"),
+    }
+    if failed:
+        res["note"] += f"；未纳入成分: {', '.join(failed)}"
+    set_cached(cache_key, res, ttl=300)
+    return res
+
+
+def _last_close_on_or_before(closes: Dict[str, float], date_str: str) -> Optional[float]:
+    """返回 closes 中不晚于 date_str 的最近收盘价 (处理停牌/迟到上市)"""
+    earlier = [d for d in closes if d <= date_str]
+    return closes[max(earlier)] if earlier else None
+
+
+def _basket_return(levels: List[Dict[str, Any]], window: int) -> str:
+    if len(levels) < window + 1:
+        w = len(levels) - 1
+    else:
+        w = window
+    if w <= 0 or levels[-(w + 1)]["level"] <= 0:
+        return "N/A"
+    return f"{((levels[-1]['level'] - levels[-(w + 1)]['level']) / levels[-(w + 1)]['level'] * 100):+.2f}%"
 
 
 def fetch_sector_fund_flow(count: int = 20, days: int = 1) -> Dict[str, Any]:
@@ -1969,7 +2084,7 @@ def fetch_stock_timeline(symbol: str) -> Dict[str, Any]:
 # -----------------------------------------------------------------------------
 SERVER_INFO = {
     "name": "marketgraph-data",
-    "version": "1.5.0",
+    "version": "1.6.0",
 }
 
 AVAILABLE_TOOLS = [
@@ -2137,6 +2252,28 @@ AVAILABLE_TOOLS = [
         },
     },
     {
+        "name": "get_basket_index",
+        "description": "以腾讯前复权日K构造等权篮子指数（日度再平衡口径，披露成分覆盖度与失败清单）：东财板块指数网关不可用时的合规代理序列（如保险 BK0735 仅6只成分股），也可用于主线篮子相对强度对照；构造序列只能用于方向性对照，不得用于精确评分阈值（使用边界见公共研究契约）",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "stocks": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "成分股列表（2-10 个，支持代码或中文名），如 ['601318','601628','601601','601366']",
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "交易日数量，默认 20",
+                    "default": 20,
+                    "minimum": 5,
+                    "maximum": 60,
+                },
+            },
+            "required": ["stocks"],
+        },
+    },
+    {
         "name": "get_longhubang_detail",
         "description": "获取 A 股交易所公开龙虎榜席位明细（全市场当日上榜概览或指定个股前5大买卖席位穿透，支持代码或中文名）",
         "inputSchema": {
@@ -2182,6 +2319,12 @@ def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
             return {"error": "sector 必须是非空字符串", "data_status": "unavailable"}
         if arguments.get("count", 130) is not None and (not isinstance(arguments.get("count", 130), int) or not 20 <= arguments.get("count", 130) <= 250):
             return {"error": "count 必须是 20 至 250 的整数", "data_status": "unavailable"}
+    if name == "get_basket_index":
+        stocks = arguments.get("stocks")
+        if not isinstance(stocks, list) or len(stocks) < 2 or len(stocks) > 10 or not all(isinstance(s, str) and s.strip() for s in stocks):
+            return {"error": "stocks 必须是 2 至 10 个非空字符串的数组", "data_status": "unavailable"}
+        if arguments.get("count", 20) is not None and (not isinstance(arguments.get("count", 20), int) or not 5 <= arguments.get("count", 20) <= 60):
+            return {"error": "count 必须是 5 至 60 的整数", "data_status": "unavailable"}
     if name == "get_sector_fund_flow" and (not isinstance(arguments.get("count", 20), int) or not 1 <= arguments.get("count", 20) <= 100):
         return {"error": "count 必须是 1 至 100 的整数", "data_status": "unavailable"}
     if name == "get_index_kline" and arguments.get("count", 5) is not None and (not isinstance(arguments.get("count", 5), int) or not 2 <= arguments.get("count", 5) <= 130):
@@ -2214,6 +2357,8 @@ def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         return fetch_sector_fund_flow(arguments.get("count", 20), arguments.get("days", 1))
     elif name == "get_sector_kline":
         return fetch_sector_kline(arguments.get("sector", ""), arguments.get("count", 130))
+    elif name == "get_basket_index":
+        return fetch_basket_index(arguments.get("stocks", []), arguments.get("count", 20))
     elif name == "get_longhubang_detail":
         return fetch_longhubang_detail(arguments.get("symbol"), arguments.get("date_str"))
     elif name == "get_company_quality":
@@ -2358,6 +2503,10 @@ if __name__ == "__main__":
         elif tool_name == "get_sector_kline":
             # --test 默认标的是个股代码, 板块工具需独立默认板块名
             out = fetch_sector_kline(sys.argv[3] if len(sys.argv) > 3 else "半导体")
+        elif tool_name == "get_basket_index":
+            default_stocks = ["601318", "601628", "601601", "601366"]  # 保险板块四大成分
+            stocks = sys.argv[3].split(",") if len(sys.argv) > 3 and sys.argv[3].strip() else default_stocks
+            out = fetch_basket_index(stocks)
         elif tool_name == "get_longhubang_detail":
             out = fetch_longhubang_detail(target_symbol)
         elif tool_name == "get_company_quality":

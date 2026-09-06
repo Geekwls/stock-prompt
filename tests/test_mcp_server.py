@@ -43,7 +43,7 @@ class MarketGraphMCPServerTest(unittest.TestCase):
 
     def test_tools_schema_validity(self):
         tools = SERVER.AVAILABLE_TOOLS
-        self.assertGreaterEqual(len(tools), 11)
+        self.assertGreaterEqual(len(tools), 12)
         tool_names = {t["name"] for t in tools}
         self.assertIn("get_stock_quote", tool_names)
         self.assertIn("get_stock_kline", tool_names)
@@ -54,6 +54,7 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         self.assertIn("get_market_breadth", tool_names)
         self.assertIn("get_sector_fund_flow", tool_names)
         self.assertIn("get_sector_kline", tool_names)
+        self.assertIn("get_basket_index", tool_names)
         self.assertIn("get_longhubang_detail", tool_names)
         self.assertIn("get_company_quality", tool_names)
         for t in tools:
@@ -454,6 +455,62 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         self.assertEqual(rows[1]["down_count"], 60)
         self.assertEqual(rows[1]["red_rate"], "68.18%")
         self.assertEqual(res["latest_exact_snapshot"]["date"], "2026-09-04")
+
+    @patch.object(SERVER, "http_get")
+    def test_fetch_basket_index_parsing(self, mock_get):
+        """等权篮子指数: 日度再平衡口径, 基期 100, 成分覆盖度披露"""
+        SERVER.CACHE_STORE.clear()
+        stock_a = [["2026-09-03", "100.00", "100.00", "101.00", "99.00", "1000"],
+                   ["2026-09-04", "101.00", "110.00", "111.00", "100.00", "2000"]]
+        stock_b = [["2026-09-03", "200.00", "200.00", "202.00", "198.00", "3000"],
+                   ["2026-09-04", "201.00", "210.00", "212.00", "200.00", "4000"]]
+
+        def fake_get(url, timeout=4, encoding="utf-8"):
+            if "fqkline" in url and "sh600519" in url:
+                return json.dumps({"data": {"sh600519": {"qfqday": stock_a}}})
+            if "fqkline" in url and "sh601318" in url:
+                return json.dumps({"data": {"sh601318": {"qfqday": stock_b}}})
+            raise AssertionError("unexpected url: " + url)
+
+        mock_get.side_effect = fake_get
+        res = SERVER.fetch_basket_index(["600519", "601318"], count=5)
+        self.assertEqual(res["data_status"], "ok", res)
+        self.assertEqual(res["series_type"], "equal_weight_constructed")
+        self.assertEqual(res["basket_size"], 2)
+        self.assertEqual(res["valid_bars"], 1)
+        self.assertEqual(res["latest_level"], 107.5)  # (10% + 5%) 等权均值 +7.5%
+        self.assertEqual(res["recent_5d_return"], "+7.50%")
+        self.assertEqual(res["series"][-1]["stocks_counted"], 2)
+        self.assertIn("代理序列", res["note"])
+
+    @patch.object(SERVER, "http_get")
+    def test_fetch_basket_index_partial_coverage(self, mock_get):
+        """个别成分拉取失败 => partial 且披露失败清单; 剩余成分照常构造"""
+        SERVER.CACHE_STORE.clear()
+        stock_a = [["2026-09-03", "100.00", "100.00", "101.00", "99.00", "1000"],
+                   ["2026-09-04", "101.00", "110.00", "111.00", "100.00", "2000"]]
+        stock_b = [["2026-09-03", "200.00", "200.00", "202.00", "198.00", "3000"],
+                   ["2026-09-04", "201.00", "210.00", "212.00", "200.00", "4000"]]
+
+        def fake_get(url, timeout=4, encoding="utf-8"):
+            if "sh600519" in url:
+                return json.dumps({"data": {"sh600519": {"qfqday": stock_a}}})
+            if "sh601318" in url:
+                return json.dumps({"data": {"sh601318": {"qfqday": stock_b}}})
+            raise OSError("gateway flake")
+
+        mock_get.side_effect = fake_get
+        res = SERVER.fetch_basket_index(["600519", "601318", "601601"], count=5)
+        self.assertEqual(res["data_status"], "partial", res)
+        self.assertEqual(res["basket_size"], 2)
+        self.assertEqual(res["stocks_failed"], ["601601"])
+        self.assertEqual(res["latest_level"], 107.5)
+
+    def test_basket_index_validation(self):
+        res = SERVER.fetch_basket_index(["601318"], count=20)  # 少于 2 只
+        self.assertEqual(res["data_status"], "unavailable")
+        res2 = SERVER.fetch_basket_index(["601318", "600519"], count=70)  # count 超上限
+        self.assertEqual(res2["data_status"], "unavailable")
 
     @patch.object(SERVER, "http_get")
     def test_fetch_sector_kline_full_ohlc(self, mock_get):

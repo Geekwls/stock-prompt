@@ -17,7 +17,7 @@ P5 模型推断，只能参与解释，不能生成事实或精确数值
 
 - **个股行情与结构**：`get_stock_kline`（默认 750 日前复权日 K + MA20/50/120/250/500 均线矩阵 + 3年分位 + 周线共振 + 量比/120日量能分位）仅当返回 `adjustment: qfq`、`data_status: ok` 且至少 120 根时，可通过行情结构门槛；`get_stock_quote` 与 `get_stock_timeline` 提供实时盘口与分时承接。
 - **L1 市场环境专用**：`get_index_kline`（宽基指数逐日涨跌幅，`count` 最大 130，覆盖 L4 的 120 日窗口）、`get_market_breadth`（红盘率与涨跌家数，最新交易日为精确口径，历史交易日为情绪池替代并以 `breadth_precision` 标注）、`get_market_sentiment`（两市成交额与涨停池）。三者均为确定性网关，优先于网页搜索，且不得以个股数据替代。
-- **L2 板块证据**：`get_sector_fund_flow`（当日全行业资金流榜；`days=2-10` 回补 N 日主力净流入历史、累计净额与趋势定性）、`get_sector_kline`（板块指数日K收盘序列、MA5/10/20/60 与 5/20/60 日区间涨幅，兼作 L4 的行业基准）。
+- **L2 板块证据**：`get_sector_fund_flow`（当日全行业资金流榜；`days=2-10` 回补 N 日主力净流入历史、累计净额与趋势定性）、`get_sector_kline`（板块指数日K序列、MA5/10/20/60 与 5/20/60 日区间涨幅，兼作 L4 的行业基准）；东财板块源不可用时按公共契约改用 `get_basket_index` 传入板块主要成分股构造等权代理序列（标注"代理序列"与覆盖度，仅作方向性 RS 对照）。
 - **席位与公司质量**：`get_longhubang_detail`（龙虎榜席位穿透，含机构专用逐席位净额明细 `org_seat_net_details`）；`get_company_quality`（财务、商誉、解禁与排雷筛查）。
 - **服务端预计算标签的边界**：`get_stock_kline` 返回的 `wyckoff_multi_timeframe`、`weekly_alignment`、`macro_wyckoff_phase` 等结构标签按 P3 线索记录，只能用于宏观定调与交叉核对；L5 的威科夫主假设、竞争假设及 `Confirmed/Probable` 分级必须由模型基于 OHLCV 独立完成，不得直接照抄服务端标签充当结构确认——服务端标签与模型独立结论冲突时，必须并列披露并解释分歧。
 - 公司审计、监管与事件风险仍须交易所公告或定期报告核验。

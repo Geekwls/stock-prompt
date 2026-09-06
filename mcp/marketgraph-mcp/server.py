@@ -1183,9 +1183,12 @@ def fetch_sector_fund_history(sector_code: str, days: int) -> List[Dict[str, Any
 
 def fund_flow_trend_label(hist: List[Dict[str, Any]]) -> str:
     """根据逐日主力净额符号序列给出资金趋势定性"""
-    signs = [1 if h["main_net_inflow_billion"] > 0 else -1 for h in hist]
-    if not signs:
+    if not hist:
         return "N/A"
+    values = [h["main_net_inflow_billion"] for h in hist]
+    if all(v == 0 for v in values):
+        return "零净流入"  # 全零序列按符号判定会被误标为"连续净流出"
+    signs = [1 if v > 0 else -1 for v in values]
     if all(s > 0 for s in signs):
         return "连续净流入"
     if all(s < 0 for s in signs):
@@ -2353,7 +2356,8 @@ if __name__ == "__main__":
             days = int(sys.argv[3]) if len(sys.argv) > 3 and sys.argv[3].isdigit() else 1
             out = fetch_sector_fund_flow(10 if days > 1 else 20, days)
         elif tool_name == "get_sector_kline":
-            out = fetch_sector_kline(target_symbol if target_symbol else "半导体")
+            # --test 默认标的是个股代码, 板块工具需独立默认板块名
+            out = fetch_sector_kline(sys.argv[3] if len(sys.argv) > 3 else "半导体")
         elif tool_name == "get_longhubang_detail":
             out = fetch_longhubang_detail(target_symbol)
         elif tool_name == "get_company_quality":

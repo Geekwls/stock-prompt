@@ -56,5 +56,34 @@ class StockReportValidationTest(unittest.TestCase):
             REPORT.validate_report_data("stock", data)
 
 
+class AllTypesValidationTest(unittest.TestCase):
+    NON_STOCK_TYPES = ("prediction", "daily", "rotation")
+
+    def test_minimal_complete_data_passes_for_non_stock_types(self):
+        for report_type in self.NON_STOCK_TYPES:
+            data = {field: "x" for field in REPORT.REQUIRED_FIELDS[report_type]}
+            REPORT.validate_report_data(report_type, data)
+
+    def test_missing_required_field_rejected_for_every_type(self):
+        for report_type, fields in REPORT.REQUIRED_FIELDS.items():
+            with self.subTest(report_type=report_type):
+                data = valid_stock_data() if report_type == "stock" else {field: "x" for field in fields}
+                data.pop(sorted(fields)[0])
+                with self.assertRaisesRegex(ValueError, "缺少必要字段"):
+                    REPORT.validate_report_data(report_type, data)
+
+    def test_empty_list_counts_as_missing(self):
+        data = {field: "x" for field in REPORT.REQUIRED_FIELDS["prediction"]}
+        data["evidence"] = []
+        with self.assertRaisesRegex(ValueError, "evidence"):
+            REPORT.validate_report_data("prediction", data)
+
+    def test_none_value_counts_as_missing(self):
+        data = {field: "x" for field in REPORT.REQUIRED_FIELDS["daily"]}
+        data["sentiment_breakdown"] = None
+        with self.assertRaisesRegex(ValueError, "缺少必要字段"):
+            REPORT.validate_report_data("daily", data)
+
+
 if __name__ == "__main__":
     unittest.main()

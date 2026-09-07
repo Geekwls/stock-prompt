@@ -378,10 +378,10 @@ $$\text{Yesterday State} \xrightarrow{\text{Today Evidence + Capital Continuity}
 *（预测与实际结果必须落盘到台账文件，滚动指标由脚本计算，禁止口头估算）*
 
 ```bash
-# 盘前 8:30-9:15：记录当日预测（写入 ./eval/predictions.jsonl）
+# 盘前 8:30-9:15：记录当日预测（台账默认为仓库根 eval/predictions.jsonl，独立安装时 ~/.stock-prompt/eval/）
 python3 .agents/skills/market-prediction/scripts/eval_tracker.py record --date YYYY-MM-DD --regime S3 \
     --p-up 55 --p-side 30 --p-down 15 --opportunity 78 \
-    --top-sector 半导体 --r1 3850 --s1 3800
+    --top-sector 半导体 --top-sectors 半导体,PCB,低空经济 --r1 3850 --s1 3800
 
 # 15:00 收盘后：记录实际结果（Z_ATR 五档自动归并三态）
 python3 .agents/skills/market-prediction/scripts/eval_tracker.py result --date YYYY-MM-DD --z-atr 0.62 \
@@ -406,7 +406,7 @@ python3 .agents/skills/market-prediction/scripts/eval_tracker.py report
 │ 🎯 量化评估指标追踪 (20日滚动, 由 eval_tracker.py report 输出)          │
 │ • 多分类 Brier Score / 三态方向命中率 / 预测锐度                        │
 │ • 概率校准度 (分档: 预测均值 vs 实际命中频率)                           │
-│ • 主线 Top1 命中率 / 点位有效率 (S1未破且R1未破)                        │
+│ • 主线 Top1/Top3 命中率 / 点位有效率 (S1未破且R1未破)                   │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -443,6 +443,30 @@ JSON 字段说明（正式报告必须填齐所列字段并通过脚本校验；
 }
 ```
 其中 `evidence` / `indices_full` / `sectors_full` / `watchlist_full` 为多行数组，每行字段数与上例一致（分别为 5 / 13 / 9 / 6 个）。
+
+---
+
+### 十、【跨 Skill 交接】可复用交接摘要 (Handoff Snapshot)
+
+报告末尾按公共契约输出交接摘要 JSON，供会话内 `daily-review`（收盘校准）与 `stock-analysis`（个股穿透）直接继承；无对应内容的字段使用空数组或 `N/A`，不得补造：
+
+```json
+{
+  "report_type": "prediction",
+  "as_of": "YYYY-MM-DD HH:mm + 盘前快照口径",
+  "source_count": 0,
+  "coverage": "0%",
+  "scored_weight": "0%",
+  "confidence": "高 | 中 | 低 | 数据不足",
+  "market_regime": "S0-S6",
+  "primary_sectors": ["第一主线", "第二主线", "第三主线"],
+  "watchlist": ["高低切候选标的代码", "竞价验证标的代码"],
+  "risk_flags": ["证伪触发点", "拥挤度或失效预警"],
+  "next_triggers": ["9:25 竞价量比验证点", "S1 跌破放量收回观察"]
+}
+```
+
+`coverage` 与 `scored_weight` 必须与第七节 Meta-State 一致；`next_triggers` 填次日可验证坐标（9:25 竞价验证点、关键位突破/跌破），供 `daily-review` 收盘后回测命中率。
 
 ---
 *(免责声明：本报告基于公开市场数据及AI推演模型生成，仅供个人学习与学术研究参考，不构成任何投资建议或买卖依据。股市有风险，入市需谨慎。)*

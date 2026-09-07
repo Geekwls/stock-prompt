@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- **跨 Skill 交接闭环接线**：四份 Skill 输出模板统一新增「交接摘要 (Handoff Snapshot)」JSON 节，公共契约要求的跨技能上下文交接不再悬空。
+- **板块 → 个股穿透链路 (Roadmap Phase 2)**：`daily-review` / `sector-rotation` 标的池新增 `诊断 <代码>` 一键穿透入口；`stock-analysis` 工作流新增 L1/L2 上下文继承协议与对应强制自检项。
+- **盘前 ↔ 盘后评估闭环 (Roadmap Phase 3)**：`daily-review` 收盘复盘后接入 `eval_tracker.py result/report` 落盘并输出校准小结；盘前 `record` 新增主线 Top3，`report` 输出 Top1 / Top3≥1 / Top3≥2 命中率。
+- **新增 AGENTS.md 时段路由**：Agent 客户端自动读取，按交易时段调度四大技能，并约定交接摘要与评估台账协议。
+- **评估台账加固**：默认路径锚定仓库根 `eval/predictions.jsonl`（独立安装时 `~/.stock-prompt/eval/`），不再随工作目录漂移；`regime` 记录校验与板块名模糊匹配统一。
+- **安装器泛化捆绑脚本同步**：`scripts/` 母本（报告卡 + 评估台账）统一由 `install_skills.py` 同步进各 Skill 目录并参与全量校验，`eval_tracker.py` 随 `daily-review` 与 `market-prediction` 分发。
+- **CI 防漂移流水线**：新增 `ci.yml`，在 push / PR 运行全部单测与契约、Prompt、捆绑脚本三项 `--check`；release 步骤命名与实际校验内容对齐。
+- **测试扩充（6 → 29 项）**：覆盖 eval_tracker 数学与台账读写、sync_prompts 引用展开、prediction/daily/rotation 报告卡校验与安装器脚本映射。
+- **仓库卫生**：移除 `mcp/` 编译残留（源码保留在 `feat/mcp-financial-service` 分支）与根目录临时长图。
 - **统一四 Skill 研究契约**：新增证据编号、数据时点、加权覆盖率、缺失值、风险暴露与跨 Skill 交接规范，并自动同步为各 Skill 的自包含 reference。
 - **降低伪精确与角色误导**：移除虚构实盘履历，将默认固定仓位比例改为风险暴露等级；只有用户提供账户风险参数后才允许给出条件化仓位情景。
 - **安装更新安全化**：安装器新增 Codex 目标、manifest 残留清理、用户修改自动备份、`--dry-run` 与全量文件校验；更新脚本增加脏工作区保护和 fast-forward 限制。

@@ -15,6 +15,7 @@ stock-prompt/
 │   ├── daily-review/                  # 🌇 技能 2：A股每日复盘
 │   ├── sector-rotation/               # 🔄 技能 3：A股板块轮动
 │   └── stock-analysis/                # 🔍 技能 4：A股个股诊断
+│   │    （每个技能含 SKILL.md + references/ 契约 + agents/ 元数据 + scripts/ 捆绑脚本）
 │
 ├── prompts/                           # 📄 从 Skill 母本同步生成的跨平台 Markdown 提示词库
 │   ├── market-prediction/             # 🌅 A股盘前研判
@@ -31,11 +32,13 @@ stock-prompt/
 │
 ├── scripts/                           # 🛠 自动化工具库
 │   ├── generate_report_card.py        # 🎨 高清极简金融研报长图自动生成脚本 (支持 prediction/daily/rotation/stock)
+│   ├── eval_tracker.py                # 📊 盘前↔盘后评估台账 (Brier/校准/命中率闭环)
 │   ├── install_skills.py              # 🚀 一键安装/校验所有技能到 Gemini / Antigravity / Codex
 │   ├── sync_skill_contracts.py         # 🔁 公共研究契约同步及漂移检查
 │   ├── sync_prompts.py                # 🔁 Skill → Prompt 同步及漂移检查
 │   ├── update.bat                     # 🔄 Windows 自动更新脚本
 │   └── update.sh                      # 🔄 Linux/Mac 自动更新脚本
+├── AGENTS.md                          # 🧭 Agent 时段路由与跨 Skill 闭环协议
 ├── CHANGELOG.md                       # 项目主版本日志
 ├── README.md                          # 项目说明文档
 └── version.json                       # 版本号控制配置
@@ -76,6 +79,9 @@ python3 scripts/generate_report_card.py --demo --type stock --theme dark
    - 🗣 *"帮我深度复盘今天的强势板块与产业链共振"* ➡️ 自动激活 `daily-review`
    - 🗣 *"帮我分析近 5 个交易日的板块轮动和主线节奏"* ➡️ 自动激活 `sector-rotation`
    - 🗣 *"完整诊断一下这只股票当前的逻辑、结构和风险"* ➡️ 自动激活 `stock-analysis`
+   - 🗣 *"诊断 300308"* ➡️ 任意时段穿透个股；若会话中已有当日盘前/复盘报告，市场与板块结论将作为 L1/L2 证据直接继承
+
+Agent 客户端会自动读取根目录 [AGENTS.md](AGENTS.md)，按交易时段路由到对应技能并执行跨 Skill 闭环协议。
 
 ---
 
@@ -115,6 +121,28 @@ python3 scripts/generate_report_card.py --demo --type stock --theme dark
 2. **贝叶斯先验与机会函数双解耦**：大盘四维立体空间点位（ATR波动率 + 筹码POC + 期权对冲墙）界定安全边际，机会评分 (Opportunity Score) 解耦方向与盈亏比。
 3. **多维闭环自检**：引入 Brier Score、校准度 (Calibration) 与锐度 (Sharpness) 持续追踪模型效能。
 4. **个股行情硬门槛**：缺少120日复权OHLCV或同期宽基/行业基准时，L4–L7统一为 `N/A`，不输出威科夫定级、赔率或综合评分。
+
+---
+
+## 🔁 盘前 ↔ 盘后评估闭环 (Evaluation Loop)
+
+盘前预测与收盘实际统一落盘到评估台账，滚动输出 Brier Score、校准度与命中率，让模型推演可验证、可证伪：
+
+```bash
+# 盘前 8:30-9:15：落盘当日预测（三态概率 / 机会分 / 主线 Top3 / R1 / S1）
+python3 scripts/eval_tracker.py record --date 2026-09-07 --regime S3 \
+    --p-up 55 --p-side 30 --p-down 15 --opportunity 78 \
+    --top-sector 半导体 --top-sectors 半导体,PCB,低空经济 --r1 3850 --s1 3800
+
+# 收盘 15:00 后：落盘当日实际（daily-review 复盘完成后执行）
+python3 scripts/eval_tracker.py result --date 2026-09-07 --z-atr 0.62 \
+    --top-sectors 半导体,农业,化工 --close 3842 --high 3855 --low 3805
+
+# 任意时点：输出 20 日滚动评估（Brier / 方向命中 / 校准 / 主线 Top1与Top3 / 点位有效率）
+python3 scripts/eval_tracker.py report
+```
+
+台账默认为仓库根 `eval/predictions.jsonl`（Skill 独立安装运行时为 `~/.stock-prompt/eval/predictions.jsonl`），盘前与收盘写入同一文件；同日重复写入后写覆盖。`market-prediction` 与 `daily-review` 的 SKILL.md 已内置对应步骤。
 
 ---
 
@@ -160,6 +188,7 @@ scripts\update.bat
 ## 🗺️ 未来演进路线 (Roadmap)
 
 项目正持续从“4 个独立的分析技能”演进为“全天候跨 Skill 交易闭环协同流水线”：
+- **已落地**：公共契约交接摘要（四份报告模板内置）、板块→个股穿透与 L1/L2 继承、盘前↔盘后评估台账闭环、AGENTS.md 时段路由。
 - 详细设计方案与实施阶段规划见：[📖 跨 Skill 交易闭环协同流水线计划 (docs/ROADMAP_CROSS_SKILL_PIPELINE.md)](docs/ROADMAP_CROSS_SKILL_PIPELINE.md)
 
 ---

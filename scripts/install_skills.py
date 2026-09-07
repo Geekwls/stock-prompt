@@ -22,7 +22,13 @@ if hasattr(sys.stdout, "reconfigure"):
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE_ROOT = ROOT / ".agents" / "skills"
 GENERATOR = ROOT / "scripts" / "generate_report_card.py"
+EVAL_TRACKER = ROOT / "scripts" / "eval_tracker.py"
 SKILL_NAMES = ("daily-review", "market-prediction", "sector-rotation", "stock-analysis")
+# 需要保持多副本一致的捆绑脚本: (母本, 接收该脚本的技能)
+SYNCED_SCRIPTS = (
+    (GENERATOR, SKILL_NAMES),
+    (EVAL_TRACKER, ("daily-review", "market-prediction")),
+)
 MANIFEST_NAME = ".stock-prompt-manifest.json"
 
 
@@ -59,21 +65,24 @@ def source_files():
             if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc":
                 relative = Path(skill) / path.relative_to(skill_root)
                 files[relative.as_posix()] = path
-        files[f"{skill}/scripts/generate_report_card.py"] = GENERATOR
+    for master, skills in SYNCED_SCRIPTS:
+        for skill in skills:
+            files[f"{skill}/scripts/{master.name}"] = master
     return files
 
 
-def sync_workspace_generator(dry_run=False):
+def sync_workspace_scripts(dry_run=False):
     changed = 0
-    for skill in SKILL_NAMES:
-        destination = SOURCE_ROOT / skill / "scripts" / GENERATOR.name
-        if destination.exists() and file_hash(destination) == file_hash(GENERATOR):
-            continue
-        changed += 1
-        print(f"[SYNC] {destination.relative_to(ROOT)}")
-        if not dry_run:
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(GENERATOR, destination)
+    for master, skills in SYNCED_SCRIPTS:
+        for skill in skills:
+            destination = SOURCE_ROOT / skill / "scripts" / master.name
+            if destination.exists() and file_hash(destination) == file_hash(master):
+                continue
+            changed += 1
+            print(f"[SYNC] {destination.relative_to(ROOT)}")
+            if not dry_run:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(master, destination)
     return changed
 
 
@@ -196,18 +205,19 @@ def parse_args():
 
 def main():
     args = parse_args()
-    if not GENERATOR.is_file():
-        print(f"[ERR] 报告卡母本不存在: {GENERATOR}")
-        return 1
+    for master, _ in SYNCED_SCRIPTS:
+        if not master.is_file():
+            print(f"[ERR] 捆绑脚本母本不存在: {master}")
+            return 1
 
     if args.check:
         failures = 0
-        master_hash = file_hash(GENERATOR)
-        for skill in SKILL_NAMES:
-            bundled = SOURCE_ROOT / skill / "scripts" / GENERATOR.name
-            if not bundled.is_file() or file_hash(bundled) != master_hash:
-                print(f"[DRIFT] workspace/{skill}/scripts/{GENERATOR.name}")
-                failures += 1
+        for master, skills in SYNCED_SCRIPTS:
+            for skill in skills:
+                bundled = SOURCE_ROOT / skill / "scripts" / master.name
+                if not bundled.is_file() or file_hash(bundled) != file_hash(master):
+                    print(f"[DRIFT] workspace/{skill}/scripts/{master.name}")
+                    failures += 1
         files = source_files()
         for label, root in target_roots(args.target):
             failures += check_target(label, root, files)
@@ -217,7 +227,7 @@ def main():
         print("[SUCCESS] Skill 一致性检查通过")
         return 0
 
-    sync_workspace_generator(args.dry_run)
+    sync_workspace_scripts(args.dry_run)
     files = source_files()
     for label, root in target_roots(args.target):
         install_to(label, root, files, args.dry_run)

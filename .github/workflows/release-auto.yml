@@ -18,7 +18,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate version.json & SKILL Syntax
+      - name: Validate version.json
         run: |
           echo "🔍 检查 version.json 存在性与 JSON 格式合规性..."
           python3 -c "import json; json.load(open('version.json'))"

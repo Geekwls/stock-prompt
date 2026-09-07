@@ -263,6 +263,8 @@ $$\text{Opportunity Score} = \operatorname{Clamp}(0.3S + 0.4R + 0.3C - D, 0, 100
 | **容量中军** | [代码 名称] | +X.X% | 成交XX亿 / 机构净买入 | **等待**：早盘分歧后出现放量承接确认 |
 | **低位补涨/弹性** | [代码 名称] | 首板/20cm | 细分扩散弹性先锋 | **避免**：后排无跟风杂毛盲目追涨 |
 
+- **一键穿透**：核心股池中的龙头与中军可直接回复 `诊断 <代码或名称>`（如 `诊断 300308`）唤醒 `stock-analysis` 完成八层深度诊断；本报告的 Market Regime、第一主线与状态机结论将作为该标的的 L1/L2 证据被直接继承，无需重复采集市场与板块数据。
+
 ---
 
 ### 五、综合机会评分仪表盘与次日推演
@@ -290,7 +292,49 @@ $$\text{Opportunity Score} = \operatorname{Clamp}(0.3S + 0.4R + 0.3C - D, 0, 100
 
 ---
 
-### 六、【可选交付】战报长图渲染 (Report Card)
+### 六、【闭环落盘】盘前预测校准与评估台账
+
+复盘完成后，将当日实际结果写入评估台账（与 `market-prediction` 共用同一文件），并输出滚动评估；这是盘前预测 Brier/校准闭环的收盘侧入口：
+
+```bash
+# 1. 落盘当日实际（Z_ATR=(今收-昨收)/ATR14，或等价的 收益率/ATR百分比；实际最强主线 Top3 逗号分隔）
+python3 .agents/skills/daily-review/scripts/eval_tracker.py result --date YYYY-MM-DD --z-atr 0.62 \
+    --top-sectors 半导体,农业,化工 --close 3842 --high 3855 --low 3805
+
+# 2. 输出 20 日滚动评估（Brier / 三态方向命中率 / 校准度 / 主线 Top1/Top3 命中率 / 点位有效率）
+python3 .agents/skills/daily-review/scripts/eval_tracker.py report
+```
+
+- 台账默认路径为仓库根 `eval/predictions.jsonl`（独立安装时 `~/.stock-prompt/eval/predictions.jsonl`），与盘前 `record` 写入同一文件；同一日期重复写入视为更新。
+- 若台账中存在今晨预测，必须在报告本节给出校准小结：三态方向是否命中、第一主线是否进入实际 Top3、收盘是否落在预测区间 $[S_1, R_1]$；无配对记录时明确说明“今晨未落盘预测”。
+
+---
+
+### 七、【跨 Skill 交接】可复用交接摘要 (Handoff Snapshot)
+
+报告末尾按公共契约输出交接摘要 JSON，供会话内 `market-prediction`（次日盘前）与 `stock-analysis`（个股穿透）直接继承；无对应内容的字段使用空数组或 `N/A`，不得补造：
+
+```json
+{
+  "report_type": "daily",
+  "as_of": "YYYY-MM-DD 15:00 + 收盘数据口径",
+  "source_count": 0,
+  "coverage": "0%",
+  "scored_weight": "0%",
+  "confidence": "高 | 中 | 低 | 数据不足",
+  "market_regime": "S0-S6 + 情绪分",
+  "primary_sectors": ["第一主线", "强轮动板块"],
+  "watchlist": ["领航龙头代码", "容量中军代码"],
+  "risk_flags": ["退潮/分歧预警", "一日游刹车命中项"],
+  "next_triggers": ["情景A触发条件", "情景B触发条件", "情景C触发条件"]
+}
+```
+
+`next_triggers` 直接复用第五节的次日验证点；`watchlist` 只填有证据支持的核心股池标的。
+
+---
+
+### 八、【可选交付】战报长图渲染 (Report Card)
 
 当用户需要图片版战报（或提到“生成卡片 / 长图 / 战报图”）时，将报告关键结论写入 JSON 后调用：
 

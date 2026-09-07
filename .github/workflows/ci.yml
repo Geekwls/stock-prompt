@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 单元测试
+        run: python3 -m unittest discover -s tests -v
+
+      - name: 公共契约防漂移检查
+        run: python3 scripts/sync_skill_contracts.py --check
+
+      - name: Prompt 防漂移检查
+        run: python3 scripts/sync_prompts.py --check
+
+      - name: Skill 捆绑脚本一致性检查
+        run: python3 scripts/install_skills.py --check --target workspace

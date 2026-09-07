@@ -30,6 +30,9 @@ stock-prompt/
 ├── contracts/                         # 📐 四个 Skill 共用研究契约的项目级母本
 │   └── common-research-contract.md
 │
+├── docs/                              # 📖 设计文档
+│   └── ROADMAP_CROSS_SKILL_PIPELINE.md  # 跨 Skill 交易闭环流水线路线图
+│
 ├── scripts/                           # 🛠 自动化工具库
 │   ├── generate_report_card.py        # 🎨 高清极简金融研报长图自动生成脚本 (支持 prediction/daily/rotation/stock)
 │   ├── eval_tracker.py                # 📊 盘前↔盘后评估台账 (Brier/校准/命中率闭环)
@@ -38,6 +41,10 @@ stock-prompt/
 │   ├── sync_prompts.py                # 🔁 Skill → Prompt 同步及漂移检查
 │   ├── update.bat                     # 🔄 Windows 自动更新脚本
 │   └── update.sh                      # 🔄 Linux/Mac 自动更新脚本
+│
+├── tests/                             # ✅ 单元测试 (评估台账 / 安装器 / 报告卡校验 / Prompt 同步)
+│
+├── .github/workflows/                 # ⚙️ CI 防漂移检查 (push/PR) + 自动发布流水线 (tag)
 ├── AGENTS.md                          # 🧭 Agent 时段路由与跨 Skill 闭环协议
 ├── CHANGELOG.md                       # 项目主版本日志
 ├── README.md                          # 项目说明文档
@@ -119,8 +126,9 @@ Agent 客户端会自动读取根目录 [AGENTS.md](AGENTS.md)，按交易时段
 
 1. **严谨的数据覆盖率与防幻觉**：所有提示词均设有 `Data Coverage` 和缺失值规则；关键覆盖率不足时只输出条件情景，不用中性值、0分或示例行情伪造精确结论。
 2. **贝叶斯先验与机会函数双解耦**：大盘四维立体空间点位（ATR波动率 + 筹码POC + 期权对冲墙）界定安全边际，机会评分 (Opportunity Score) 解耦方向与盈亏比。
-3. **多维闭环自检**：引入 Brier Score、校准度 (Calibration) 与锐度 (Sharpness) 持续追踪模型效能。
-4. **个股行情硬门槛**：缺少120日复权OHLCV或同期宽基/行业基准时，L4–L7统一为 `N/A`，不输出威科夫定级、赔率或综合评分。
+3. **多维闭环自检**：盘前预测与收盘实际统一落盘评估台账，滚动追踪 Brier Score、校准度 (Calibration)、锐度 (Sharpness) 与主线/点位命中率（用法见下方「盘前 ↔ 盘后评估闭环」一节）。
+4. **跨 Skill 交接与穿透**：每份报告末尾输出标准化交接摘要 JSON，市场与板块结论可被后续技能直接继承；复盘标的支持 `诊断 <代码>` 一键穿透至个股八层诊断。
+5. **个股行情硬门槛**：缺少120日复权OHLCV或同期宽基/行业基准时，L4–L7统一为 `N/A`，不输出威科夫定级、赔率或综合评分。
 
 ---
 
@@ -196,3 +204,6 @@ scripts\update.bat
 ## 🤝 贡献与反馈
 
 欢迎提交 PR 或 Issue 共同完善 A 股 AI 策略提示词库！
+
+- 修改 `SKILL.md` 或公共契约后，请先运行 `python3 scripts/sync_prompts.py` 与 `python3 scripts/sync_skill_contracts.py` 再提交；仓库纪律详见 [AGENTS.md](AGENTS.md)。
+- PR 会自动触发 CI：运行全部单元测试（本地可用 `python3 -m unittest discover -s tests`）与契约、Prompt、捆绑脚本三项防漂移检查。

@@ -10,6 +10,11 @@
 
 ```text
 stock-prompt/
+├── plugin.json                       # 🌟 核心入口：Agent Plugins 1.0 标准插件清单 (兼容 Cursor/Copilot/Gemini)
+│
+├── mcp/                              # 🔌 A 股公开数据 MCP 服务端（本地 stdio、免 Token）
+│   └── marketgraph-mcp/              # 腾讯/东财公开网关（行情、750日K线与周线共振、指数日K、市场广度、资金流历史与公开财务筛查）
+│
 ├── .agents/skills/                    # 🤖 Antigravity / Agent 专用 Skill 目录
 │   ├── market-prediction/             # 🌅 技能 1：A股盘前研判
 │   ├── daily-review/                  # 🌇 技能 2：A股每日复盘
@@ -59,20 +64,22 @@ stock-prompt/
 
 ```bash
 # 1. 个股完整诊断与威科夫结构研报长图 (输入任意个股使用)
-python3 scripts/generate_report_card.py --demo --type stock
+python scripts/generate_report_card.py --demo --type stock
 
 # 2. 每日收盘强势板块与产业链复盘长图 (15:00 收盘后使用)
-python3 scripts/generate_report_card.py --demo --type daily
+python scripts/generate_report_card.py --demo --type daily
 
 # 3. 5 日板块轮动与主线节奏复盘长图 (周五/周末/月末使用)
-python3 scripts/generate_report_card.py --demo --type rotation
+python scripts/generate_report_card.py --demo --type rotation
 
 # 4. 盘前全景量化推演战报长图 (08:30-09:15 使用)
-python3 scripts/generate_report_card.py --demo --type prediction
+python scripts/generate_report_card.py --demo --type prediction
 
 # 5. 深色科技风卡片 (末尾加上 --theme dark)
-python3 scripts/generate_report_card.py --demo --type stock --theme dark
+python scripts/generate_report_card.py --demo --type stock --theme dark
 ```
+
+> Linux/macOS 环境请将 `python` 替换为 `python3`。正式报告通过 `--json` 传入完整数据（各技能内置已通过校验的最小示例 `references/report-card-example.json`，可直接复制修改）；未指定 `--output` 时输出文件名自动带日期，不会覆盖历史战报。
 
 ---
 
@@ -138,19 +145,19 @@ Agent 客户端会自动读取根目录 [AGENTS.md](AGENTS.md)，按交易时段
 
 ```bash
 # 盘前 8:30-9:15：落盘当日预测（三态概率 / 机会分 / 主线 Top3 / R1 / S1）
-python3 scripts/eval_tracker.py record --date 2026-09-07 --regime S3 \
+python scripts/eval_tracker.py record --date 2026-09-07 --regime S3 \
     --p-up 55 --p-side 30 --p-down 15 --opportunity 78 \
     --top-sector 半导体 --top-sectors 半导体,PCB,低空经济 --r1 3850 --s1 3800
 
 # 收盘 15:00 后：落盘当日实际（daily-review 复盘完成后执行）
-python3 scripts/eval_tracker.py result --date 2026-09-07 --z-atr 0.62 \
+python scripts/eval_tracker.py result --date 2026-09-07 --z-atr 0.62 \
     --top-sectors 半导体,农业,化工 --close 3842 --high 3855 --low 3805
 
 # 任意时点：输出 20 日滚动评估（Brier / 方向命中 / 校准 / 主线 Top1与Top3 / 点位有效率）
-python3 scripts/eval_tracker.py report
+python scripts/eval_tracker.py report
 ```
 
-台账默认为仓库根 `eval/predictions.jsonl`（Skill 独立安装运行时为 `~/.stock-prompt/eval/predictions.jsonl`），盘前与收盘写入同一文件；同日重复写入后写覆盖。`market-prediction` 与 `daily-review` 的 SKILL.md 已内置对应步骤。
+> Linux/macOS 环境请将 `python` 替换为 `python3`。台账固定写入 `~/.stock-prompt/eval/predictions.jsonl`（不随工作目录漂移；旧 `./eval/` 台账首次运行自动迁移，`--ledger` 参数与 `STOCK_PROMPT_LEDGER` 环境变量可覆盖）。收盘复盘后另可执行 `record-daily` 将情绪五项分落盘至同目录 `daily_scores.jsonl`，`report-daily` 输出固定阈值的历史分位落位（阈值自校准依据）。`market-prediction` 与 `daily-review` 的 SKILL.md 已内置对应步骤。
 
 ---
 
@@ -189,7 +196,9 @@ bash scripts/update.sh
 scripts\update.bat
 ```
 
-更新脚本会先检查本地修改；存在未提交内容时停止，避免覆盖用户定制。随后以 fast-forward 方式拉取 GitHub main，并运行 `install_skills.py` 将四大技能同步到 Gemini、Antigravity 与 Codex。安装器通过 manifest 清理旧版本残留，只处理本项目记录的文件；`--check` 会校验完整 Skill 文件，而不只是报告卡脚本。当前版本见 `version.json`，每次更新的内容见 `CHANGELOG.md`。
+更新脚本会先检查本地修改；存在未提交内容时停止，避免覆盖用户定制。随后先比对远程再以 fast-forward 方式拉取 GitHub main，并运行 `install_skills.py` 将四大技能同步到 Gemini、Antigravity 与 Codex。安装器通过 manifest 清理旧版本残留，只处理本项目记录的文件；`--check` 会校验完整 Skill 文件，而不只是报告卡脚本。
+
+安装成功后会自动打印 **30 秒快速上手速查表**，并检测 MarketGraph MCP 数据网关的注册状态——未注册时会给出配置片段与自测命令（手动配置见 [mcp/marketgraph-mcp/README.md](mcp/marketgraph-mcp/README.md)）。配置 MCP 后，`get_stock_kline` 默认返回 750 日（3 年）前复权日 K 线（支持 20–800 根调节），内置 MA20/50/120/250/500 全套均线矩阵、3 年宏观时空坐标、内存无损周线共振（周线 MA10/MA30 与 52 周高低区间）及三层威科夫时空模型；默认 Token 精简模式（附最近 30 日 K 线），仅在明确返回前复权、完整且至少 120 根数据时通过行情结构门槛。其余公开网关数据按 P3 线索使用，关键公司事实仍须公告/报告核验。当前版本见 `version.json`，每次更新的内容见 `CHANGELOG.md`。
 
 ---
 

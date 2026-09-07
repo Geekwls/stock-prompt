@@ -1335,14 +1335,18 @@ if __name__ == "__main__":
 
     out_file = args.output
     if not out_file:
-        if args.type == "rotation":
-            out_file = "demo_sector_rotation_card.png"
-        elif args.type == "daily":
-            out_file = "demo_daily_review_card.png"
-        elif args.type == "stock":
-            out_file = "demo_stock_analysis_card.png"
+        if args.demo:
+            if args.type == "rotation":
+                out_file = "demo_sector_rotation_card.png"
+            elif args.type == "daily":
+                out_file = "demo_daily_review_card.png"
+            elif args.type == "stock":
+                out_file = "demo_stock_analysis_card.png"
+            else:
+                out_file = "demo_report_card.png"
         else:
-            out_file = "demo_report_card.png"
+            # 正式报告默认文件名带日期，避免覆盖历史战报
+            out_file = f"report_{args.type}_{datetime.now().strftime('%Y%m%d')}.png"
 
     data = None
     if args.json and not args.demo:

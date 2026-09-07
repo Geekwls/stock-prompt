@@ -19,6 +19,15 @@
 - 报告必须给出 `as_of`，区分盘中快照、收盘数据、公告日期和财务报告期。过期数据可作背景，不得伪装成当前状态。
 - 不同来源、日期或统计口径的数据不得直接拼接计算；存在冲突时并列披露并降低置信度。
 
+## MCP 与确定性数据源协议
+
+当宿主智能体环境已挂载 MCP 金融数据工具（如 `marketgraph-data`）时，执行以下优先路由协议：
+
+- **公开网关数据为 P3，可优先调用但不可自动升为 P1**：`marketgraph-data` 提供 `get_stock_quote`、`get_stock_kline`、`get_stock_timeline`、`get_index_kline`、`get_market_breadth`、`get_market_sentiment`、`get_limit_up_ladder`、`get_sector_fund_flow`、`get_longhubang_detail` 与 `get_company_quality` 共 10 个工具。每次调用必须保留其 `source`、`data_status`、数据日期/`as_of`；`data_status != ok` 时不得参与计算或输出方向结论。工具支持代码与常见中文名称解析；`get_market_sentiment`、`get_limit_up_ladder` 与 `get_longhubang_detail` 支持历史 `date_str`（`YYYYMMDD` 或工具声明的格式）；`get_sector_fund_flow` 传 `days`（2-10）可回补板块主力资金 N 日历史；`get_index_kline` 提供核心指数 N 日逐日涨跌幅；`get_market_breadth` 最新交易日为精确涨跌家数与红盘率、历史交易日为情绪池替代口径（以 `breadth_precision` 区分，历史红盘率不得估算）。
+- **行情硬门槛仅验证序列完整性**：仅当 `get_stock_kline` 明确返回 `adjustment: qfq`、`data_status: ok` 且 `valid_bars >= 120` 时，才可通过“120 日复权 OHLCV”结构门槛；其来源仍按 P3 记录，涉及交易所公告、审计意见、监管和公司事件的关键事实仍须 P2/P1 原始来源核验。
+- **构造代理序列边界**：东财板块指数等网关不可用时，代理序列只能来自 `get_basket_index` 等权构造（须显式传入成分股、披露成分覆盖度与失败清单，`series_type=equal_weight_constructed`），不得由模型临时挑选成分股自行拼凑。代理序列属"构造数据"（非 P1–P3 网关原始输出）：只能用于方向性强弱对照（如板块相对强度、主线篮子走势），不得用于精确评分阈值、赔率计算或情绪得分，报告中必须标注"代理序列"并注明成分覆盖度（如"4/6 只成分股"）；等权口径与板块官方市值加权指数存在系统性差异，覆盖度不足（少于半数成分）时宁可保留 N/A。
+- **无感优雅回退**：若未检测到 MCP 工具，自动平滑回退至网络检索（P4）与公告核验（P2），并严格执行常规数据缺省审计。
+
 ## 覆盖率与缺失数据
 
 统一公式：
@@ -63,6 +72,8 @@ Scored Weight = 实际参与评分的原始权重
 }
 ```
 
+- 交接摘要除在报告末尾输出外，必须同时落盘到固定位置 `~/.stock-prompt/state/handoff-<YYYYMMDD>-<report_type>.json`（如 `handoff-20260904-daily.json`），保证跨会话可继承。读取方（`market-prediction` / `stock-analysis`）优先检查最近 3 个交易日内最新的落盘交接文件，其次回退到当前会话上下文。
+- `market-prediction` 的预测台账统一写入 `~/.stock-prompt/eval/predictions.jsonl`（由 `scripts/eval_tracker.py` 固定，不随工作目录漂移）；`daily-review` 收盘回测读取同一份文件，禁止在其他位置另建台账。
 - `daily-review` 提供收盘市场状态、主线和次日验证变量。
 - `market-prediction` 读取最近收盘交接摘要，并根据隔夜与竞价证据更新。
 - `sector-rotation` 提供中期板块阶段、候选方向和衰竭风险。
@@ -84,6 +95,13 @@ Scored Weight = 实际参与评分的原始权重
 - **一致日警惕追高，分歧日验证核心承接**：高潮加速日防利好兑现；冰点分歧日观察核心承接是否成立。
 - **严禁编造数据**：若数据缺失，严格执行降级与标注规则。
 
+### 🗣️ 口语化自然语言意图映射 (Natural Language Intent Mapping)
+当用户输入以下非标准化口语提问时，自动路由并激活本 Skill 执行收盘复盘：
+- **市场大盘**：“今天大盘怎么看”、“今天股市怎么样”、“今天为什么大盘跌了/大涨”、“今天行情怎么样”
+- **行业板块**：“今天哪个板块最强/最猛”、“主力资金今天净流入哪个行业”、“今天有哪些强势板块”
+- **短线情绪**：“今天涨停多不多/炸板率高不高”、“今天最高连板到几板了”、“今天龙虎榜机构买了什么”
+- **复盘指令**：“复盘”、“每日复盘”、“盘后总结”、“看下今天的盘面”
+
 ---
 
 ## 二、数据获取与数据降级规则（最高优先级）
@@ -93,12 +111,17 @@ Scored Weight = 实际参与评分的原始权重
    - `"[T日日期] A股 盘后复盘 涨停复盘 连板梯队 炸板率"`
    - `"[T日日期] A股 行业主力资金净流入 龙虎榜 机构席位"`
    - `"[T日日期] 强势板块 产业链 催化剂"`
-3. **统一口径与可追溯性**：
+3. **MCP 优先补数**：宿主已挂载 `marketgraph-data` MCP 时，结构化数据优先按下列路由调用，调用失败或未挂载时再回退到上述搜索协议；两者取得的数据同样执行统一口径与覆盖率审计。
+   - **全市场情绪与广度**：`get_market_sentiment`（两市量能/涨跌停/炸板率/最高连板高度；传历史 `date_str` 可回补 T-1~T-4 的成交额与指数涨跌幅，直接支撑"较5日均量 ±15%"的量能判定）；`get_market_breadth`（精确上涨/下跌家数与红盘率，直供涨跌家数比 25 分项；最新交易日为精确口径，历史交易日为情绪池替代口径）；`get_limit_up_ladder`（连板天梯与各高度代表龙头，支持历史 `date_str`）。
+   - **板块证据**：`get_sector_fund_flow`（行业板块主力资金净流入榜与领涨龙头）；`get_sector_kline`（板块日K，`latest_amount_billion`/`prev_amount_billion`/`amount_ratio_1d` 直接支撑资金延续评分 V 项的成交额对比，板块 5/20 日涨幅用于主线定位）。
+   - **席位**：`get_longhubang_detail`（龙虎榜机构/游资席位明细，含机构专用逐席位净额）。
+   - **V 项降级规则**：板块成交额经 `get_sector_kline` 仍不可得时，资金延续评分的 V 项记缺失并按剩余权重重新归一化，不得以主力净流入近似替代成交额。
+4. **统一口径与可追溯性**：
    - 每个核心数字注明数据日期、统计口径与来源链接；不同平台口径不一致时不得拼接计算。
    - “炸板率”默认指全市场炸板率；用于板块评分时必须改用“板块炸板率”并明确标注。
    - 输出 `Data Coverage`：可得权重 ÷ 计划总权重，并披露参与评分权重。覆盖率低于 70% 时只给观察性结论，不给精确评分或个性化风险暴露。
-   - 文中的固定阈值是缺少历史样本时的回退值；拥有至少60个交易日同口径数据后，优先使用滚动分位数并同时披露样本期，禁止事后挑选阈值。
-4. **数据缺失降级规则表**：
+   - 文中的固定阈值是缺少历史样本时的回退值。每日复盘必须将情绪五项分、资金延续与机会评分落盘（阈值校准闭环）：`python scripts/eval_tracker.py record-daily --date YYYY-MM-DD --up-ratio .. --premium .. --promotion .. --break-rate .. --volume-dev .. --sentiment-total .. --capital-continuity .. --opportunity .. --top-sector ..`（全局安装用户路径为 `<技能安装目录>/scripts/eval_tracker.py`，台账写入 `~/.stock-prompt/eval/daily_scores.jsonl`）。台账 ≥60 个交易日时运行 `python scripts/eval_tracker.py report-daily` 查看各固定阈值的历史分位落位，据此校准阈值并披露样本期，禁止事后挑选阈值。
+5. **数据缺失降级规则表**：
 
 | 数据项 | 缺失处理规则 |
 |---|---|
@@ -119,10 +142,10 @@ Scored Weight = 实际参与评分的原始权重
 $$\text{情绪总分} = \text{涨跌比得分}(25) + \text{昨日涨停溢价}(20) + \text{连板晋级率}(20) + \text{炸板率得分}(20) + \text{两市成交量能}(15)$$
 
 - **涨跌家数比 (25分)**：>70%→25 | 50-70%→18 | 30-50%→10 | <30%→0
-- **昨日涨停溢价 (20分)**：今日红盘率 >70%→20 | 50-70%→12 | 30-50%→6 | <30%→0
-- **连板晋级率 (20分)**：≥60%→20 | 40-60%→12 | 20-40%→6 | <20%→0
+- **昨日涨停溢价 (20分)**：以**平均溢价幅度**度量——昨日涨停个股今日平均涨幅 − 全市场平均涨幅（超额）：≥3%→20 | 1%~3%→12 | 0~1%→6 | <0→0。**禁止**用"昨日涨停股今日红盘率"度量：红盘占比属高基数指标，与涨跌家数比同族，会构成同向重复计权。计算路径：`get_limit_up_ladder(date_str=T-1)` 取昨日涨停名单 → 腾讯行情批量接口（qt.gtimg.cn 单次约 50 只，分批）取今日涨幅；全市场平均涨幅用 `get_index_kline` 当日涨跌近似并注明口径。
+- **连板晋级率 (20分)**：≥60%→20 | 40-60%→12 | 20-40%→6 | <20%→0。晋级率 = 昨日涨停个股中今日再度涨停的比例（`get_limit_up_ladder` 传 T-1 与 T 各取一次名单对比）。**最小样本门槛**：昨日涨停 <10 家时四档得分 ×0.5，并在覆盖率审计标注"晋级率小样本"；<5 家时该项记 N/A 按可得权重归一化。
 - **炸板率得分 (20分)**：<20%→20 | 20-30%→12 | 30-40%→6 | >40%→0
-- **两市总成交量能 (15分)**：放量（较5日均值 ≥15%）→15 | 平量（±15%）→8 | 缩量（≤-15%）→0
+- **两市总成交量能 (15分)**：放量（较5日均值 ≥15%）→15 | 平量（±15%）→8 | 缩量（≤-15%）→0（近 5 日成交额可用 `get_market_sentiment` 传历史 `date_str` 逐日回补）
 
 - **量价背离防守规则**：
   - **缩量上涨**：全市场缩量但指数大涨，情绪总分**强制封顶 60 分**（防无量诱多）。
@@ -146,7 +169,7 @@ $$V = \operatorname{Clamp}\left(\frac{T\text{日板块成交额}}{T-1\text{日�
 $$Q = (1 - T\text{日板块炸板率}) \times 100$$
 $$\text{Capital Continuity} = 0.6V + 0.4Q$$
 
-其中炸板率必须使用该板块内部“触板后未封住家数 ÷ 触板家数”；若板块触板数为 0，则 `Q` 缺失并对可得权重重新归一化，不得借用全市场炸板率。
+其中炸板率必须使用该板块内部“触板后未封住家数 ÷ 触板家数”——可执行路径：涨停池与炸板池数据均带 `hybk` 行业字段，按板块名过滤出"涨停池 + 炸板池 = 触板集合"与"炸板池 = 未封住集合"；板块触板家数 <3 时 `Q` 记缺失并对可得权重重新归一化（小样本炸板率不稳定），不得借用全市场炸板率。
 
 - **$\ge 80$ (强延续)**：成交活跃且封板质量较高，主线持续性强。
 - **$50 \sim 79$ (良性换手)**：正常筹码换手博弈。
@@ -263,7 +286,8 @@ $$\text{Opportunity Score} = \operatorname{Clamp}(0.3S + 0.4R + 0.3C - D, 0, 100
 | **容量中军** | [代码 名称] | +X.X% | 成交XX亿 / 机构净买入 | **等待**：早盘分歧后出现放量承接确认 |
 | **低位补涨/弹性** | [代码 名称] | 首板/20cm | 细分扩散弹性先锋 | **避免**：后排无跟风杂毛盲目追涨 |
 
-- **一键穿透**：核心股池中的龙头与中军可直接回复 `诊断 <代码或名称>`（如 `诊断 300308`）唤醒 `stock-analysis` 完成八层深度诊断；本报告的 Market Regime、第一主线与状态机结论将作为该标的的 L1/L2 证据被直接继承，无需重复采集市场与板块数据。
+- **标的穿透快捷指令（Cross-Skill 极速穿透）**：
+  > 💡 **个股深度诊断**：回复 `诊断 [股票代码/名称]`（例如 `诊断 300308` 或 `诊断 中际旭创`），将自动继承本复盘已确立的 L1（市场环境 Market Regime）与 L2（板块共振与角色定位）结论，直接对该标的开展 7+1 威科夫量价与赔率深度穿透（免去重复大盘检索）。
 
 ---
 
@@ -284,6 +308,12 @@ $$\text{Opportunity Score} = \operatorname{Clamp}(0.3S + 0.4R + 0.3C - D, 0, 100
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
+- **早盘预测自动校准回测（Prediction Calibration 闭环）**：
+  * 若早盘执行过 `market-prediction`（存在固定台账 `~/.stock-prompt/eval/predictions.jsonl` 或会话预测快照），收盘后自动比对并执行落盘（`python scripts/eval_tracker.py result ...`，仓库根目录运行；该脚本已随技能捆绑，全局安装用户路径为 `<技能安装目录>/scripts/eval_tracker.py`）：
+    1. **点位命中**：收盘价是否落在早盘预估区间 $[S_1, R_1]$ 之内。
+    2. **主线命中**：早盘推演的前列主线是否进入实际全市场领涨 Top 10%。
+    3. **方向偏差**：实际 $Z_{\text{ATR}}$ 对应三态与早盘最大概率方向是否一致。
+- **每日评分落盘（阈值校准闭环）**：本报告的情绪五项分、资金延续评分与机会评分必须执行 `record-daily` 落盘（命令见第二节第 4 条）；`report-daily` 输出各固定阈值的历史分位落位，台账满 60 日后优先按分位校准并披露样本期。
 - **次日验证点**（只提供给 `market-prediction` 作为次日输入，不在收盘复盘中生成新的盘前概率）：
   * **情景 A (强势延续)**：触发条件为 [龙头高开 >3% 且开盘快速封板]
   * **情景 B (分歧转一致)**：触发条件为 [早盘小幅低开回踩分时均线获大单放量承接]
@@ -292,54 +322,12 @@ $$\text{Opportunity Score} = \operatorname{Clamp}(0.3S + 0.4R + 0.3C - D, 0, 100
 
 ---
 
-### 六、【闭环落盘】盘前预测校准与评估台账
+### 六、【可选交付】战报长图渲染 (Report Card)
 
-复盘完成后，将当日实际结果写入评估台账（与 `market-prediction` 共用同一文件），并输出滚动评估；这是盘前预测 Brier/校准闭环的收盘侧入口：
-
-```bash
-# 1. 落盘当日实际（Z_ATR=(今收-昨收)/ATR14，或等价的 收益率/ATR百分比；实际最强主线 Top3 逗号分隔）
-python3 .agents/skills/daily-review/scripts/eval_tracker.py result --date YYYY-MM-DD --z-atr 0.62 \
-    --top-sectors 半导体,农业,化工 --close 3842 --high 3855 --low 3805
-
-# 2. 输出 20 日滚动评估（Brier / 三态方向命中率 / 校准度 / 主线 Top1/Top3 命中率 / 点位有效率）
-python3 .agents/skills/daily-review/scripts/eval_tracker.py report
-```
-
-- 台账默认路径为仓库根 `eval/predictions.jsonl`（独立安装时 `~/.stock-prompt/eval/predictions.jsonl`），与盘前 `record` 写入同一文件；同一日期重复写入视为更新。
-- 若台账中存在今晨预测，必须在报告本节给出校准小结：三态方向是否命中、第一主线是否进入实际 Top3、收盘是否落在预测区间 $[S_1, R_1]$；无配对记录时明确说明“今晨未落盘预测”。
-
----
-
-### 七、【跨 Skill 交接】可复用交接摘要 (Handoff Snapshot)
-
-报告末尾按公共契约输出交接摘要 JSON，供会话内 `market-prediction`（次日盘前）与 `stock-analysis`（个股穿透）直接继承；无对应内容的字段使用空数组或 `N/A`，不得补造：
-
-```json
-{
-  "report_type": "daily",
-  "as_of": "YYYY-MM-DD 15:00 + 收盘数据口径",
-  "source_count": 0,
-  "coverage": "0%",
-  "scored_weight": "0%",
-  "confidence": "高 | 中 | 低 | 数据不足",
-  "market_regime": "S0-S6 + 情绪分",
-  "primary_sectors": ["第一主线", "强轮动板块"],
-  "watchlist": ["领航龙头代码", "容量中军代码"],
-  "risk_flags": ["退潮/分歧预警", "一日游刹车命中项"],
-  "next_triggers": ["情景A触发条件", "情景B触发条件", "情景C触发条件"]
-}
-```
-
-`next_triggers` 直接复用第五节的次日验证点；`watchlist` 只填有证据支持的核心股池标的。
-
----
-
-### 八、【可选交付】战报长图渲染 (Report Card)
-
-当用户需要图片版战报（或提到“生成卡片 / 长图 / 战报图”）时，将报告关键结论写入 JSON 后调用：
+当用户需要图片版战报（或提到“生成卡片 / 长图 / 战报图”）时，将报告关键结论写入 JSON 后调用（仓库根目录运行；未指定 `--output` 时默认输出文件名自动带日期，避免覆盖旧战报）：
 
 ```bash
-python3 scripts/generate_report_card.py --type daily --json report.json --output 复盘战报.png
+python scripts/generate_report_card.py --type daily --json report.json
 ```
 
 JSON 字段说明（正式报告必须填齐所列字段并通过脚本校验；只有显式 `--demo` 才可使用内置示例值）：
@@ -365,7 +353,31 @@ JSON 字段说明（正式报告必须填齐所列字段并通过脚本校验；
   "risk_line": "[风控底线] ..."
 }
 ```
-其中 `sentiment_breakdown`(5行×2列) / `regime_notes`(5×2) / `sectors_daily`(≤4×9) / `resonance_cards`(4×3) / `stocks_pool`(≤4×6) / `scenarios`(3×2) 为多行数组，每行字段数与上例一致。
+其中 `sentiment_breakdown`(5行×2列) / `regime_notes`(5×2) / `sectors_daily`(≤4×9) / `resonance_cards`(4×3) / `stocks_pool`(≤4×6) / `scenarios`(3×2) 为多行数组，每行字段数与上例一致。**已通过脚本校验的最小可用示例**见 [战报长图 JSON 示例](references/report-card-example.json)，可直接复制该文件修改后传入 `--json`。
+
+---
+
+### 七、【跨 Skill 交接】可复用交接摘要 (Handoff Snapshot)
+
+报告末尾按公共契约输出交接摘要 JSON，供会话内 `market-prediction`（次日盘前）与 `stock-analysis`（个股穿透）直接继承；无对应内容的字段使用空数组或 `N/A`，不得补造：
+
+```json
+{
+  "report_type": "daily",
+  "as_of": "YYYY-MM-DD 15:00 + 收盘数据口径",
+  "source_count": 0,
+  "coverage": "0%",
+  "scored_weight": "0%",
+  "confidence": "高 | 中 | 低 | 数据不足",
+  "market_regime": "S0-S6 + 情绪分",
+  "primary_sectors": ["第一主线", "强轮动板块"],
+  "watchlist": ["领航龙头代码", "容量中军代码"],
+  "risk_flags": ["退潮/分歧预警", "一日游刹车命中项"],
+  "next_triggers": ["情景A触发条件", "情景B触发条件", "情景C触发条件"]
+}
+```
+
+`next_triggers` 直接复用第五节的次日验证点；`watchlist` 只填有证据支持的核心股池标的。摘要同时落盘到 `~/.stock-prompt/state/handoff-<YYYYMMDD>-daily.json`，保证跨会话可继承。
 
 ---
 *(数据来源：东方财富、同花顺、财联社等公开财经平台)*

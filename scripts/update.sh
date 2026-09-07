@@ -42,13 +42,19 @@ else
 fi
 
 echo ""
-echo "🛠 正在同步技能到本机全局环境 (Antigravity / Gemini)..."
+echo "🛠 正在同步技能到本机全局环境 (Gemini / Antigravity / Codex)..."
+PY_BIN=""
 if command -v python3 >/dev/null 2>&1; then
-    if python3 scripts/install_skills.py && python3 scripts/install_skills.py --check; then
+    PY_BIN=python3
+elif command -v python >/dev/null 2>&1; then
+    PY_BIN=python
+fi
+if [ -n "$PY_BIN" ]; then
+    if "$PY_BIN" scripts/install_skills.py && "$PY_BIN" scripts/install_skills.py --check; then
         echo "✅ 全局技能副本已同步并通过一致性校验。"
     else
         echo "[WARN] 全局同步未完全成功，可稍后手动运行: python3 scripts/install_skills.py"
     fi
 else
-    echo "[WARN] 未检测到 python3，跳过全局同步（仓库内技能已是最新）。"
+    echo "[WARN] 未检测到 python3 或 python，跳过全局同步（仓库内技能已是最新）。"
 fi

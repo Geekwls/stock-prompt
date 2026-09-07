@@ -51,22 +51,15 @@ class InstallSkillsTest(unittest.TestCase):
 
 
 class SourceFilesTest(unittest.TestCase):
-    def test_synced_scripts_map_to_masters(self):
+    def test_bundled_scripts_map_to_masters(self):
         files = INSTALLER.source_files()
-        for skill in INSTALLER.SKILL_NAMES:
-            self.assertEqual(
-                files[f"{skill}/scripts/generate_report_card.py"],
-                INSTALLER.GENERATOR,
-            )
-        for skill in ("daily-review", "market-prediction"):
-            self.assertEqual(
-                files[f"{skill}/scripts/eval_tracker.py"],
-                INSTALLER.EVAL_TRACKER,
-            )
+        for name, (source, skills) in INSTALLER.BUNDLED_SCRIPTS.items():
+            for skill in skills:
+                self.assertEqual(files[f"{skill}/scripts/{name}"], source)
         self.assertNotIn("sector-rotation/scripts/eval_tracker.py", files)
         self.assertNotIn("stock-analysis/scripts/eval_tracker.py", files)
 
-    def test_workspace_sync_copies_eval_tracker(self):
+    def test_workspace_sync_copies_bundled_scripts(self):
         with tempfile.TemporaryDirectory() as temporary:
             original_root = INSTALLER.SOURCE_ROOT
             original_repo = INSTALLER.ROOT
@@ -75,12 +68,10 @@ class SourceFilesTest(unittest.TestCase):
                 INSTALLER.ROOT = Path(temporary)
                 changed = INSTALLER.sync_workspace_scripts(dry_run=False)
                 self.assertGreaterEqual(changed, 1)
-                for skill in ("daily-review", "market-prediction"):
-                    bundled = Path(temporary) / skill / "scripts" / "eval_tracker.py"
-                    self.assertEqual(
-                        bundled.read_bytes(),
-                        INSTALLER.EVAL_TRACKER.read_bytes(),
-                    )
+                for name, (_, skills) in INSTALLER.BUNDLED_SCRIPTS.items():
+                    for skill in skills:
+                        bundled = Path(temporary) / skill / "scripts" / name
+                        self.assertTrue(bundled.is_file(), f"缺少捆绑副本: {bundled}")
             finally:
                 INSTALLER.SOURCE_ROOT = original_root
                 INSTALLER.ROOT = original_repo

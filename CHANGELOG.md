@@ -1,16 +1,111 @@
 # CHANGELOG (更新日志)
 
-## [Unreleased]
-
-- **跨 Skill 交接闭环接线**：四份 Skill 输出模板统一新增「交接摘要 (Handoff Snapshot)」JSON 节，公共契约要求的跨技能上下文交接不再悬空。
-- **板块 → 个股穿透链路 (Roadmap Phase 2)**：`daily-review` / `sector-rotation` 标的池新增 `诊断 <代码>` 一键穿透入口；`stock-analysis` 工作流新增 L1/L2 上下文继承协议与对应强制自检项。
-- **盘前 ↔ 盘后评估闭环 (Roadmap Phase 3)**：`daily-review` 收盘复盘后接入 `eval_tracker.py result/report` 落盘并输出校准小结；盘前 `record` 新增主线 Top3，`report` 输出 Top1 / Top3≥1 / Top3≥2 命中率。
+## [v6.9.0] - 2026-09-07
+### 🔗 跨 Skill 交接闭环接线与 CI 防漂移 (Handoff Wiring & CI Gates)
+- **交接摘要进入输出模板**：四份 Skill 输出模板统一新增「交接摘要 (Handoff Snapshot)」JSON 节（与公共契约 `~/.stock-prompt/state/handoff-*` 落盘规范字段一致），契约要求的跨技能上下文交接不再悬空；`stock-analysis` 报告清单同步新增交接摘要条目与「继承的 L1/L2 是否标注来源」强制自检项。
+- **盘前主线 Top3 命中率**：`eval_tracker.py record` 新增 `--top-sectors`（盘前推演主线 Top3），`report` 新增 Top3≥1 / Top3≥2 命中率两档指标；`regime` 记录增加 S0-S6 约定校验，板块名模糊匹配统一为 `sector_match` 助手。
 - **新增 AGENTS.md 时段路由**：Agent 客户端自动读取，按交易时段调度四大技能，并约定交接摘要与评估台账协议。
-- **评估台账加固**：默认路径锚定仓库根 `eval/predictions.jsonl`（独立安装时 `~/.stock-prompt/eval/`），不再随工作目录漂移；`regime` 记录校验与板块名模糊匹配统一。
-- **安装器泛化捆绑脚本同步**：`scripts/` 母本（报告卡 + 评估台账）统一由 `install_skills.py` 同步进各 Skill 目录并参与全量校验，`eval_tracker.py` 随 `daily-review` 与 `market-prediction` 分发。
 - **CI 防漂移流水线**：新增 `ci.yml`，在 push / PR 运行全部单测与契约、Prompt、捆绑脚本三项 `--check`；release 步骤命名与实际校验内容对齐。
-- **测试扩充（6 → 29 项）**：覆盖 eval_tracker 数学与台账读写、sync_prompts 引用展开、prediction/daily/rotation 报告卡校验与安装器脚本映射。
-- **仓库卫生**：移除 `mcp/` 编译残留（源码保留在 `feat/mcp-financial-service` 分支）与根目录临时长图。
+- **测试合并扩充**：在远端既有用例基础上新增 Z_ATR 边界、Brier 数学、Top3 命中率输出、损坏行容忍、同日覆盖、Prompt 引用展开、prediction/daily/rotation 报告卡校验与安装器捆绑映射等用例。
+
+## [v6.8.0] - 2026-09-06
+### 📐 每日复盘评分逻辑修正与阈值自校准基建 (Daily-Review Logic & Calibration)
+- **昨日涨停溢价定义修正（消双计权）**：从"昨日涨停股今日红盘率"（高基数指标，与涨跌家数比同族，45/100 权重重复计权且几乎恒得高分）改为"昨日涨停股今日平均涨幅 − 全市场平均涨幅"的**超额溢价幅度**（≥3%→20 | 1~3%→12 | 0~1%→6 | <0→0），并给出可执行计算路径（T-1 天梯名单 + 腾讯批量行情）。
+- **连板晋级率最小样本门槛**：昨日涨停 <10 家时四档得分 ×0.5 并标注"晋级率小样本"，<5 家记 N/A 归一化——消除 2 只样本的 50% 与 40 只样本的 50% 同权的统计失真。
+- **板块炸板率可执行路径**：明确用涨停池/炸板池的 `hybk` 行业字段过滤出板块触板集合与未封住集合，触板 <3 家时 Q 记缺失归一化。
+- **阈值自校准基建（`eval_tracker.py` 新增 record-daily / report-daily）**：每日复盘将情绪五项分、资金延续、机会评分落盘至 `~/.stock-prompt/eval/daily_scores.jsonl`（同日去重、`--daily-ledger`/`STOCK_PROMPT_DAILY_LEDGER` 可覆盖）；`report-daily` 输出各评分的分布分位与**每个固定阈值的历史落位**（如"70% 红盘率阈值 → 历史 P71"），样本 <60 日提示继续固定回退阈值、满 60 日按分位校准——"60 日滚动分位优先"从空话变成可执行闭环。
+- **量能判定的数据路径补充**：近 5 日成交额可用 `get_market_sentiment` 传历史 `date_str` 逐日回补。
+- 资金延续 V 项的放量信息压缩问题按计划保留：待台账积累 ≥60 日数据后以分位证据驱动公式修订，避免拍脑袋调参。
+- **测试**：新增 record-daily/report-daily 等 4 项单测（CLI 冒烟通过），全套 54 项通过。
+
+## [v6.7.0] - 2026-09-06
+### 🔀 板块指数降级通道：等权篮子代理序列 (Sector Index Fallback)
+- **背景**：实战中东财保险板块指数（BK0735）因网关抖动返回 N/A，模型临时用 4 只成分股等权 proxy 替代——方向正确但不可复现、无方法论护栏。
+- **新增 `get_basket_index`（第 12 个工具）**：以腾讯前复权日K构造等权篮子指数（日度再平衡口径，基期 100），披露成分覆盖度（成功/失败清单、逐日计入家数）；支持停牌 ffill 与迟到上市标的按日可用集处理；独立于东财通道（gtimg），天然对冲东财网关抖动。
+- **构造代理序列契约化**：公共研究契约新增边界条款——代理序列只能来自 `get_basket_index`（显式传成分股、披露覆盖度），不得由模型临时挑选成分股拼凑；属"构造数据"，只能用于方向性强弱对照，不得用于精确评分阈值、赔率或情绪得分；等权口径与官方市值加权指数存在系统性差异，覆盖度不足半数时宁可保留 N/A。
+- **降级路由闭环**：`get_sector_kline` 失败时返回 `hint` 引导改用 `get_basket_index`；stock-analysis 数据契约 L2/L4 路由同步注明替代路径。
+- **测试**：新增篮子指数解析/覆盖度降级/参数校验等 3 项单测，全套 50 项通过。
+
+## [v6.6.0] - 2026-09-06
+### 💬 个股诊断报告白话化：结论前置与术语注释 (Plain-Language Output Layer)
+- **白话速览前置（方案 A）**：报告第一屏改为 30 秒白话三段——"现在发生了什么 / 为什么这么看 / 什么情况说明判断错了"，用无行话中文回答；专业详情（研判基准、复权口径、覆盖率审计表、L1–L8 证据表）整体后置。数据不足时白话说明且明确"数据不足 ≠ 看空"。
+- **术语首次出现强制白话注释（方案 B）**：威科夫结构词（吸筹/派发/Spring/UTAD/SOS/SOW/LPS）、技术指标（ATR/Bias/RS/均线）、证据评级词（P1–P5/Confirmed/Probable/Data Coverage）首次出现必须附一句话白话解释；白话速览段内完全禁止未解释术语。
+- **表达分离原则入章程**：新增"分析纪律与表达方式分离"原则——八层证据、硬门槛、覆盖率审计等防幻觉纪律一项不减，只改表达顺序与方式；输出自检清单新增白话速览检查项。
+- **动机**：意图映射把"能买吗/被套了怎么办"等小白问题路由进本 Skill，但原输出首屏即机构级审计内容，对普通用户不友好；本次只解耦表达层，分析纪律零改动。
+
+## [v6.5.0] - 2026-09-06
+### 🧭 三大 Skill 全面接线 MCP v6.4+ 能力 (Cross-Skill Data Wiring)
+- **`get_index_kline` 新增指数技术指标**：每个指数输出 ATR14（`count>=15`，盘前 Z_ATR 三态判档必需）、MA5/MA20/MA60 与 20 日高低点（空间点位引擎的均线候补与 ±0.8/±1.5 ATR 波动率上下沿输入）——修复 market-prediction 的 E4 判档与空间测算此前完全无确定性数据源的断点。
+- **`get_sector_kline` 升级双源口径**：主源切换东财标准K线（完整 OHLCV+成交额），新增 `latest_amount_billion`/`prev_amount_billion`/`amount_ratio_1d`（直接支撑 daily-review 资金延续评分 V 项的成交额对比）与 `avg_amount_5d_billion`；主源不可用自动兜底 fflow daykline（收盘序列+主力净额，`ohlc_source` 字段区分口径）。
+- **`daily-review` 接线**：MCP 路由补齐 `get_market_breadth`（涨跌家数比 25 分项的红盘率直供）与 `get_market_sentiment` 历史 `date_str` 回补 5 日成交额（"较5日均量 ±15%"量能判定）；新增 V 项降级规则（板块成交额不可得时按剩余权重归一化，禁止以主力净流入近似替代）。
+- **`market-prediction` 接线**：E4 路由补齐 `get_market_breadth`（盘前快照即 T-1 收盘口径）与 `get_index_kline`（ATR14/均线）；空间点位章节明确候补取数与期权/POC 的 N/A 降级；9:25 竞价章节接入 `get_stock_timeline`（`morning_call_auction`），并明确竞价量比不得用全天量比冒充。
+- **`sector-rotation` 接线**：MCP 路由补齐 `get_sector_kline`（板块 5 日累计涨幅与 SEI 量价背离输入）；情绪温度公式新增 B_d 项精度规则——历史交易日红盘率非精确口径时 B_d 记 0 并标注覆盖率，不得用涨跌停家数估算补位。
+- **测试**：新增板块 OHLC 全量口径/指数 ATR 与均线等 2 项单测并修正既有断言，全套 47 项通过。
+
+## [v6.4.0] - 2026-09-06
+### 🔍 个股诊断 Skill 接线确定性数据与板块指数日K (Stock-Analysis Data Wiring)
+- **新增 `get_sector_kline`（第 11 个工具）**：东财行业板块指数日K收盘序列，输出板块 MA5/10/20/60、5/20/60 日区间涨幅、20/60 日收盘高低点与近 5/20 日主力净流入累计；支持 BK 代码或中文板块名（clist 全量表精确匹配，24h 缓存）。填补 L4"相对行业指数基准"此前只能靠搜索或记 N/A 的确定性缺口。
+- **`get_index_kline` count 上限 60→130**：覆盖个股 L4 所需的 120 日宽基相对强度窗口（此前按 5 日轮动设计偏窄）。
+- **`get_stock_kline` compact 模式新增量能结构字段**：`volume_ratio_20d`（20 日量比）与 `volume_percentile_120d`（120 日量能分位），模型无需全量 K 线即可完成 L5 量价分位与 L6 量能过热判断。
+- **`stock-analysis` Skill 全面接线 MCP v6.3+ 能力**：L1 接入 `get_index_kline`/`get_market_breadth`/`get_market_sentiment` 确定性市场数据路由；L2 接入板块资金流 5 日历史与板块指数日K；L4 明确双基准（宽基 + 行业）的 MCP 取数路径；L5/L6 接入 750 日宏观坐标（MA250/MA500 乖离、3 年分位、周线共振）与量能字段。
+- **服务端结构标签防滥用条款**：数据契约明确 `wyckoff_multi_timeframe`/`weekly_alignment` 等预计算标签按 P3 线索记录，L5 主假设与 Confirmed/Probable 分级必须由模型基于 OHLCV 独立完成，标签与独立结论冲突时并列披露——防止模型照抄服务端标签架空"四项证据"规则。
+- **测试**：新增板块K线解析/中文名解析/未知板块拒绝/count 上限/量能字段等 5 项单测，全套 45 项通过。
+
+## [v6.3.1] - 2026-09-06
+### 🛡️ 上游频控自愈与缓存策略加固 (Throttle Resilience)
+- **全局限速器**：`http_get` 对同一数据主机强制 0.5 秒最小请求间隔，突发密集请求不再可能触发东财 IP 级频控（此前仅 fflow 批量回补有局部节流）。
+- **断路器**：同一主机连续 3 次连接类失败后熔断 10 分钟快速失败（不再空等超时加重冷却负担），冷却结束自动半开探测；熔断期间工具直接返回 `partial`/`unavailable` 并列明 `unavailable_sources`。
+- **历史数据长缓存**：龙虎榜、板块资金流历史、公司财务、历史情绪/连板等收盘定格数据缓存 24 小时（当日盘中数据仍 3 分钟），大幅减少对上游的重复请求。
+- **指数日K主备切换**：历史日期的指数涨跌幅改为腾讯指数日K主源（独立通道，限流概率低）、东财日K备源；两市历史成交额仍由东财提供（腾讯日K无成交额字段），缺失时降级 `partial` 而非伪造。
+- **统一请求通道**：东财池接口（涨停/炸板/跌停）与龙虎榜、公司质量网关全部收敛到 `http_get`，统一享受限速/重试/熔断保护；`get_market_sentiment` 与 `get_limit_up_ladder` 的 `date_str` 现兼容 YYYY-MM-DD 格式。
+- **测试**：新增限速器/断路器/主备切换/长缓存判定等 6 项单测，全套 41 项通过；测试基座增加全局缓存与熔断状态隔离。
+
+## [v6.3.0] - 2026-09-05
+### 🎯 补齐 5 日轮动复盘四类数据缺口 (Rotation Data Gap Closure)
+- **新增 `get_index_kline`**：核心指数（上证指数/深证成指/创业板指/中证全指/沪深300）最近 N 个交易日逐日涨跌幅，确定性直连腾讯指数日K网关；个股网关会把 `000001` 解析为平安银行，指数此前只能依赖不稳定的网页搜索，现改为确定性数据源（支持代码别名与中文名）。
+- **新增 `get_market_breadth`**：全市场广度 N 日序列——最新交易日返回精确的上涨/下跌/平盘家数与红盘率（东财涨跌分布快照）；历史交易日官方公开网关不提供全市场涨跌家数，以涨停/炸板/跌停池与沪指逐日涨跌幅替代，并以 `breadth_precision` 显式标注精度，绝不估算。
+- **`get_sector_fund_flow` 支持 `days` 参数（2-10）**：对流入/流出榜板块逐个回补主力资金 N 日历史、累计净额与趋势定性（连续净流入/流出/反转），解决"历史 5 日行业资金流仅 T 日可用"的缺口；批量回补带板块级缓存与请求节流。
+- **龙虎榜两处修复**：全市场概览的 `date_str` 未做 YYYYMMDD→横杠格式归一化导致必查空（个股分支原本有归一化）；机构专用席位净额从"买榜 BUY 减卖榜 SELL"改为按席位合并买卖两榜的 NET 合计，并新增逐席位机构净额明细（`org_seat_net_details`）。
+- **情绪工具历史口径修复**：`get_market_sentiment` 历史日期的沪指涨跌幅与两市成交额改为指数日K回补（沪市用上证指数、深市用深证综指成交额），不再把实时快照混贴到历史日期；非交易日显式返回 `unavailable`，不以零值伪装 ok。
+- **健壮性**：`http_get` 增加单次退避重试（仅连接类异常）；允许主机新增 `push2his.eastmoney.com`。
+- **文档与契约**：MCP 工具清单 8→10 个并同步四 Skill 公共研究契约、`prompts/` 与 MCP README；sector-rotation 的 MCP 路由提示改为按缺口分项路由。
+- **测试**：新增 9 项单测（指数解析/广度精度标注/资金流历史与上限/日期归一化/机构席位合并/历史情绪回补/非交易日拒绝），全套 35 项通过。
+
+## [v6.2.0] - 2026-09-05
+### 🌡️ 3年宏观威科夫时空引擎与周线多周期共振 (3Y Macro Wyckoff Engine)
+- **`get_stock_kline` 扩展至 750 日（3年）前复权宏观时序**（支持 20–800 根自由调节），自动计算 MA20/50/120/250/500 全套均线矩阵（MA120 半年线 / MA250 年线 / MA500 两年牛熊分水岭）、3 年与 1 年高低区间及分位、年线与两年线乖离率。
+- **内存无损周线多周期共振**：由日 K 直接聚合周线体系（周线 MA10/MA30、`BULLISH_UPTREND` 等四态趋势定调、52 周高低区间），支撑大级别底部/顶部结构判别，无需上游单独提供周线数据。
+- **三层威科夫时空模型**：宏观牛熊阶段（MA250/MA500 + 3 年分位）+ 周线大势 + 微观 60 日交易区间与量价触发，单次网关调用同时输出三层结构信号。
+- **默认 Token 精简模式**：`compact=true` 时仅附最近 30 根日 K 线与全量宏观/周线指标（节省约 85% Token），传 `false` 返回全量日线数组；行情硬门槛保持"前复权 + `data_status: ok` + ≥120 根"不变。
+- **公共研究契约校准并全量同步**：MCP 优先路由协议完整枚举 8 个工具，明确 `get_market_sentiment` / `get_limit_up_ladder` / `get_longhubang_detail` 支持历史 `date_str` 回补；四大 Skill 与 `prompts/` 库跨端副本逐字节一致。
+- **测试扩充**：MCP 单测覆盖 750 日序列、周线聚合与精简模式，全套单测增至 26 项并通过。
+
+## [v6.1.1] - 2026-09-04
+### 🛡 MCP 数据可信度与安装链路加固
+- MarketGraph MCP 的腾讯/东财公开网关输出统一标为 P3，补充 `data_status`；上游任一关键市场情绪源不可用时直接返回 `partial`，不再用零值计算情绪结论。
+- 120 日 K 线只接受明确的前复权序列；龙虎榜个股历史日期真正参与过滤，机构席位不再被推断为“外资+游资合力”；公司质量接口不再臆测审计意见或输出“无重大风险”。
+- 公开请求切换 HTTPS 并限制主机与响应大小；补充输入范围约束、异常回归测试，并将 MCP 服务端随全局 Skill 安装一并分发。
+- 公共研究契约改为：MCP 数据可优先调用但仍按 P3 记录；只有完整前复权序列才可通过行情结构门槛，关键公司事实仍需原始公告/报告核验。
+
+## [v6.1.0] - 2026-09-04
+### 🛠 使用链路全面打磨：MCP 补数提示、固定台账锚点、装后引导与示例模板
+- **评估台账固定锚点（自动迁移）**：`eval_tracker.py` 台账默认路径从 `./eval/predictions.jsonl`（随工作目录漂移，回测闭环会静默失效）固定为 `~/.stock-prompt/eval/predictions.jsonl`；首次运行检测到旧台账时自动复制迁移（原文件保留），并支持 `--ledger` 参数与 `STOCK_PROMPT_LEDGER` 环境变量覆盖。脚本母本迁移至 `scripts/`，并捆绑分发到 `market-prediction` 与 `daily-review`，修复 daily-review 引用了自身没有的脚本的问题。
+- **跨 Skill 交接落盘**：公共契约规定交接摘要（Handoff JSON）必须落盘到 `~/.stock-prompt/state/handoff-<日期>-<类型>.json`，`market-prediction` / `stock-analysis` 优先读取最近 3 个交易日的落盘文件，“免重复检索提速”不再局限于同一会话内。
+- **MCP 优先补数落到各 Skill 正文**：`daily-review` / `market-prediction` / `sector-rotation` 的数据获取章节新增 MCP 工具优先路由提示（含 `get_market_sentiment` / `get_limit_up_ladder` / `get_longhubang_detail` 支持历史 `date_str` 回补 T-1~T-4 数据），避免有确定性数据源可用时直接走降级；`stock-analysis` 数据契约明确 `get_stock_kline` 成功即通过行情硬门槛。
+- **安装后引导恢复**：`install_skills.py` 安装成功后输出 30 秒快速上手速查表（自然语言触发示例 / 长图命令 / 更新命令），并自动检测 MarketGraph MCP 注册状态，未注册时打印配置片段与自测命令。
+- **战报长图示例模板**：四个技能各内置已通过脚本校验的 `references/report-card-example.json`（含 stock 全字段），新增测试强制保证示例与校验规则同步；未指定 `--output` 时正式报告默认文件名自动带日期（如 `report_prediction_20260904.png`），避免覆盖历史战报。
+- **脚本调用统一**：SKILL.md 内所有命令统一为仓库根目录 `python scripts/...`（Windows 兼容；全局安装用户替换为技能目录路径），消除同文件内两种路径写法与 `python`/`python3` 混用。
+- **更新脚本对称化**：`update.bat` 与 `update.sh` 行为对齐——先 fetch 比对再决定 pull、已是最新时明确提示、Python 探测均带 python/python3 回退、install 失败提示统一。
+- **测试扩充**：新增 `tests/test_eval_tracker.py`（锚点解析/旧台账迁移/record-result-report 闭环）与 `tests/test_report_card_examples.py`（四类示例必须通过校验），全套单测增至 24 项。
+
+## [v6.0.0] - 2026-09-03
+### 🌟 对齐 Agent Plugins 1.0 标准与内置 MarketGraph MCP 确定性金融服务
+- **Agent Plugins 1.0 标准对齐**：根目录新增 `plugin.json`，将 4 大核心 Skills 与 `mcpServers` 统一打包为跨智能体（Cursor / VS Code Copilot / Gemini CLI / Claude Code）通用的标准插件包。
+- **内置原生金融数据 MCP (`mcp/marketgraph-mcp`)**：零注册、免 Token、零第三方外部依赖（基于 Python 3.8+ 标准库与腾讯/东财公开网关），提供 120 日前复权 K 线、ATR(14)、MA20/50、实时盘口、全市场炸板率与连板天梯。
+- **打通 P1 级确定性数据闭环**：公共研究契约新增 MCP 优先路由协议，成功获取 120 根 K 线时自动通过行情硬门槛，彻底解决网页搜索不稳定与行情缺失问题。
+- **自动化测试集扩展**：新增 `tests/test_mcp_server.py`，全套回归单测增至 13 项并通过一致性校验。
+
+## [v5.1.1] - 2026-09-02
 - **统一四 Skill 研究契约**：新增证据编号、数据时点、加权覆盖率、缺失值、风险暴露与跨 Skill 交接规范，并自动同步为各 Skill 的自包含 reference。
 - **降低伪精确与角色误导**：移除虚构实盘履历，将默认固定仓位比例改为风险暴露等级；只有用户提供账户风险参数后才允许给出条件化仓位情景。
 - **安装更新安全化**：安装器新增 Codex 目标、manifest 残留清理、用户修改自动备份、`--dry-run` 与全量文件校验；更新脚本增加脏工作区保护和 fast-forward 限制。

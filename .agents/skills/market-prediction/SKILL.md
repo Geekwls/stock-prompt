@@ -22,6 +22,12 @@ description: >-
 1. **Layer 1 市场状态预测 (Market Forecast)**：今天市场大概率处于什么三态分布（$P_{\text{Up}}, P_{\text{Side}}, P_{\text{Down}}$）。
 2. **Layer 2 交易机会函数 (Opportunity Detection)**：基于剩余空间、主线质量、资金延续评分与拥挤度，评估**今天是否具备可验证的结构性机会**。
 
+### 🗣️ 口语化自然语言意图映射 (Natural Language Intent Mapping)
+当用户输入以下非标准化口语提问时，自动路由并激活本 Skill 执行盘前与竞价推演：
+- **盘前方向**：“明天大盘怎么走”、“明天大盘会跌吗/会涨吗”、“早盘看多还是看空”、“明天能不能买/要不要减仓”
+- **竞价窗口**：“9:25 竞价怎么看”、“今天开盘强不强”、“竞价超预期了吗”、“今天早盘开盘策略”
+- **推演指令**：“盘前预测”、“今日推演”、“早盘研判”、“大盘概率推演”
+
 ```
                 ┌────────────────────────┐
                 │   ① Market Regime      │
@@ -86,6 +92,11 @@ description: >-
 - 国家级重大政策、部委行业规划、重组公告、海外关键产业突破。（普通媒体观点与小作文不作为证据）。
 ### 4. 证据簇 4：A股内生量价与连板结构簇 ($E_4$)
 - 上证、深证、创业板、中证1000、沪深300 T-1 收盘、两市成交额（vs 5日均量偏离度）、涨跌比、炸板率、连板梯队。
+- **MCP 优先补数**：宿主已挂载 `marketgraph-data` MCP 时，$E_4$ 的 T-1 量价与连板结构优先调用：
+  * `get_market_sentiment`（两市量能/涨跌停/炸板率/最高连板）与 `get_limit_up_ladder`（连板天梯），两者均支持传 `date_str`（YYYYMMDD 或 YYYY-MM-DD）取 T-1 历史数据。
+  * `get_market_breadth`：盘前调用时涨跌分布快照即 T-1 收盘口径，提供精确上涨/下跌家数与红盘率（涨跌比证据）。
+  * `get_index_kline`：T-1 的指数 ATR14 与逐日涨跌幅（Z_ATR 判档必需），并附 MA5/MA20/MA60 与 20 日高低点（空间点位引擎的均线候补与 ATR 波动率上下沿输入）。
+  调用失败或未挂载时再回退联网搜索。$E_1$/$E_2$（隔夜外盘与宏观汇率）不在 MCP 覆盖范围，只能来自联网搜索并标注来源。
 
 ---
 
@@ -159,6 +170,7 @@ $$P(\text{State} | E_1, E_2, E_3, E_4) \propto P(\text{Regime Prior}) \times \pr
 - **空间指标**：
   * 上方剩余空间：$\text{Space}_{\text{Up}} = \frac{R_1 - \text{现价}}{\text{现价}} \times 100\%$
   * 下方安全垫：$\text{Space}_{\text{Down}} = \frac{\text{现价} - S_1}{\text{现价}} \times 100\%$
+- **点位候补取数**：`get_index_kline` 返回的 MA5/MA20/MA60、20 日高低点与 ATR14 可直接充当 MA 候补、前高/前低与 ATR 波动率上下沿（$\pm 0.8/\pm 1.5$ ATR 以现价与 ATR14 计算）；期权墙与筹码 POC 无公开确定性数据源时保留 `N/A` 并降级为价格结构候补，不得虚构。
 
 ---
 
@@ -289,6 +301,9 @@ $$\text{Yesterday State} \xrightarrow{\text{Today Evidence + Capital Continuity}
 ### 五、【实战执行】9:25 竞价贝叶斯后验更新与策略适配
 
 #### 1. 09:25 竞价增量证据更新
+
+> **MCP 竞价取数**：龙头与主线代表标的的 9:25 竞价价格与开盘承接力可调用 `get_stock_timeline`（`morning_call_auction` 字段）；竞价量比按同一标的或主线篮子相对昨日竞价成交额计算，不得用全天量比冒充竞价量比。
+
 | 核心标的/主线 | 竞价量能比 | 价格方向 | 核心一致性 | 竞价证据判定 | 贝叶斯后验修正 |
 |:---|:---:|:---:|:---:|:---:|:---|
 | **第一主线板块** | 相对昨日同篮子竞价 $\ge1.5$ / $<1.0$ | 高开/低开 | 强/弱 | 🟢强确认 / 🟡高位分歧 / 🔴资金撤退 | 提高优先级 / 转为观察 / 否决计划 |
@@ -319,20 +334,22 @@ $$\text{Yesterday State} \xrightarrow{\text{Today Evidence + Capital Continuity}
 ---
 
 ### 八、【闭环自检】多维模型量化评估体系 (Evaluation Engine)
-*（预测与实际结果必须落盘到台账文件，滚动指标由脚本计算，禁止口头估算）*
+*（预测与实际结果必须落盘到台账文件，滚动指标由脚本计算，禁止口头估算。台账固定写入 `~/.stock-prompt/eval/predictions.jsonl`，不随工作目录漂移，`daily-review` 收盘回测读取同一份。）*
+
+以下命令均在**仓库根目录**执行（全局安装用户请把路径替换为 `<技能安装目录>/scripts/eval_tracker.py`；Windows 用 `python`，Linux/macOS 可用 `python3`）：
 
 ```bash
-# 盘前 8:30-9:15：记录当日预测（台账默认为仓库根 eval/predictions.jsonl，独立安装时 ~/.stock-prompt/eval/）
-python3 .agents/skills/market-prediction/scripts/eval_tracker.py record --date YYYY-MM-DD --regime S3 \
+# 盘前 8:30-9:15：记录当日预测（写入 ~/.stock-prompt/eval/predictions.jsonl）
+python scripts/eval_tracker.py record --date YYYY-MM-DD --regime S3 \
     --p-up 55 --p-side 30 --p-down 15 --opportunity 78 \
     --top-sector 半导体 --top-sectors 半导体,PCB,低空经济 --r1 3850 --s1 3800
 
 # 15:00 收盘后：记录实际结果（Z_ATR 五档自动归并三态）
-python3 .agents/skills/market-prediction/scripts/eval_tracker.py result --date YYYY-MM-DD --z-atr 0.62 \
+python scripts/eval_tracker.py result --date YYYY-MM-DD --z-atr 0.62 \
     --top-sectors 半导体,农业,化工 --close 3842 --high 3855 --low 3805
 
 # 任意时点：输出 20 日滚动评估
-python3 .agents/skills/market-prediction/scripts/eval_tracker.py report
+python scripts/eval_tracker.py report
 ```
 
 ```text
@@ -358,10 +375,10 @@ python3 .agents/skills/market-prediction/scripts/eval_tracker.py report
 
 ### 九、【可选交付】战报长图渲染 (Report Card)
 
-当用户需要图片版战报（或提到“生成卡片 / 长图 / 战报图”）时，将报告关键结论写入 JSON 后调用：
+当用户需要图片版战报（或提到“生成卡片 / 长图 / 战报图”）时，将报告关键结论写入 JSON 后调用（仓库根目录运行；未指定 `--output` 时默认输出文件名自动带日期，避免覆盖旧战报）：
 
 ```bash
-python3 scripts/generate_report_card.py --type prediction --json report.json --output 盘前战报.png
+python scripts/generate_report_card.py --type prediction --json report.json
 ```
 
 JSON 字段说明（正式报告必须填齐所列字段并通过脚本校验；只有显式 `--demo` 才可使用内置示例值）：
@@ -386,7 +403,7 @@ JSON 字段说明（正式报告必须填齐所列字段并通过脚本校验；
   "risk_warning": "[失效风险预警] ..."
 }
 ```
-其中 `evidence` / `indices_full` / `sectors_full` / `watchlist_full` 为多行数组，每行字段数与上例一致（分别为 5 / 13 / 9 / 6 个）。
+其中 `evidence` / `indices_full` / `sectors_full` / `watchlist_full` 为多行数组，每行字段数与上例一致（分别为 5 / 13 / 9 / 6 个）。**已通过脚本校验的最小可用示例**见 [战报长图 JSON 示例](references/report-card-example.json)，可直接复制该文件修改后传入 `--json`。
 
 ---
 
@@ -410,7 +427,7 @@ JSON 字段说明（正式报告必须填齐所列字段并通过脚本校验；
 }
 ```
 
-`coverage` 与 `scored_weight` 必须与第七节 Meta-State 一致；`next_triggers` 填次日可验证坐标（9:25 竞价验证点、关键位突破/跌破），供 `daily-review` 收盘后回测命中率。
+`coverage` 与 `scored_weight` 必须与第七节 Meta-State 一致；`next_triggers` 填次日可验证坐标（9:25 竞价验证点、关键位突破/跌破），供 `daily-review` 收盘后回测命中率。摘要同时落盘到 `~/.stock-prompt/state/handoff-<YYYYMMDD>-prediction.json`，保证跨会话可继承。
 
 ---
 *(免责声明：本报告基于公开市场数据及AI推演模型生成，仅供个人学习与学术研究参考，不构成任何投资建议或买卖依据。股市有风险，入市需谨慎。)*

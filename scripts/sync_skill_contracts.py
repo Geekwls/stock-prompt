@@ -3,15 +3,14 @@
 
 import argparse
 import difflib
+import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from project_registry import get_contract_sync_mappings
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCE = ROOT / "contracts" / "common-research-contract.md"
-TARGETS = tuple(
-    ROOT / ".agents" / "skills" / name / "references" / "common-research-contract.md"
-    for name in ("daily-review", "market-prediction", "sector-rotation", "stock-analysis")
-)
+SOURCE, TARGETS = get_contract_sync_mappings(root=ROOT)
 
 
 def expected_text():

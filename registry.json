@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "project": {
+    "name": "a-stock-research",
+    "version": "7.0.0",
+    "description": "A-Share Quantitative & Wyckoff Research Protocol for Autonomous Agents (Agent Plugins 1.0)",
+    "homepage": "https://github.com/Geekwls/stock-prompt"
+  },
+  "skills": [
+    {
+      "id": "daily-review",
+      "display_name": "A股每日主线与产业链共振复盘",
+      "source": ".agents/skills/daily-review",
+      "prompt_target": "prompts/daily-review/A股每日主线与产业链共振复盘.md",
+      "bundled_scripts": [
+        "generate_report_card.py",
+        "eval_tracker.py",
+        "handoff_store.py"
+      ]
+    },
+    {
+      "id": "market-prediction",
+      "display_name": "A股盘前全景研判与概率推演",
+      "source": ".agents/skills/market-prediction",
+      "prompt_target": "prompts/market-prediction/A股盘前全景研判与概率推演.md",
+      "bundled_scripts": [
+        "generate_report_card.py",
+        "eval_tracker.py",
+        "handoff_store.py"
+      ]
+    },
+    {
+      "id": "sector-rotation",
+      "display_name": "A股近5日板块轮动与节奏复盘",
+      "source": ".agents/skills/sector-rotation",
+      "prompt_target": "prompts/sector-rotation/A股近5日板块轮动与节奏复盘.md",
+      "bundled_scripts": [
+        "generate_report_card.py",
+        "handoff_store.py"
+      ]
+    },
+    {
+      "id": "stock-analysis",
+      "display_name": "A股个股完整诊断与威科夫结构研判",
+      "source": ".agents/skills/stock-analysis",
+      "prompt_target": "prompts/stock-analysis/A股个股完整诊断与威科夫结构研判.md",
+      "bundled_scripts": [
+        "generate_report_card.py",
+        "handoff_store.py"
+      ]
+    },
+    {
+      "id": "stock-research-router",
+      "display_name": "A股研究总控路由",
+      "source": ".agents/skills/stock-research-router",
+      "prompt_target": "prompts/stock-research-router/A股全流程研究总控路由.md",
+      "bundled_scripts": [
+        "handoff_store.py"
+      ]
+    }
+  ],
+  "schemas": {
+    "daily_ledger": "schemas/daily-ledger-v1.schema.json",
+    "handoff": "schemas/handoff-v1.schema.json",
+    "mcp_envelope": "schemas/mcp-envelope-v2.schema.json",
+    "prediction_ledger": "schemas/prediction-ledger-v1.schema.json",
+    "report_card_daily": "schemas/report-card-daily-v1.schema.json",
+    "report_card_prediction": "schemas/report-card-prediction-v1.schema.json",
+    "report_card_rotation": "schemas/report-card-rotation-v1.schema.json",
+    "report_card_stock": "schemas/report-card-stock-v1.schema.json"
+  },
+  "mcp": {
+    "name": "marketgraph-data",
+    "version": "1.7.0",
+    "entrypoint": "mcp/marketgraph-mcp/server.py",
+    "tools": [
+      "get_stock_quote",
+      "get_stock_kline",
+      "get_stock_timeline",
+      "get_index_kline",
+      "get_market_breadth",
+      "get_market_sentiment",
+      "get_limit_up_ladder",
+      "get_sector_fund_flow",
+      "get_sector_kline",
+      "get_basket_index",
+      "get_longhubang_detail",
+      "get_company_quality"
+    ]
+  },
+  "contracts": {
+    "common_source": "contracts/common-research-contract.md",
+    "target_name": "references/common-research-contract.md"
+  },
+  "script_sources": {
+    "generate_report_card.py": "scripts/generate_report_card.py",
+    "eval_tracker.py": "scripts/eval_tracker.py",
+    "handoff_store.py": "scripts/handoff_store.py"
+  }
+}

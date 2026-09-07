@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MarketGraph MCP response envelope v2",
+  "type": "object",
+  "required": ["api_version", "source", "data_status", "data", "errors", "warnings"],
+  "properties": {
+    "api_version": {"const": "2.0"},
+    "source": {"type": "string"},
+    "data_status": {"enum": ["ok", "partial", "unavailable"]},
+    "as_of": {"type": ["string", "null"]},
+    "data": {"type": "object"},
+    "errors": {"type": "array", "items": {"type": "string"}},
+    "warnings": {"type": "array", "items": {"type": "string"}},
+    "legacy_fields_retained": {"type": "boolean"}
+  },
+  "additionalProperties": true
+}

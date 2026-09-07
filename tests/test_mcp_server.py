@@ -11,6 +11,8 @@ SPEC = importlib.util.spec_from_file_location("marketgraph_server", MODULE_PATH)
 SERVER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(SERVER)
 
+import marketgraph_mcp.symbols as SYMBOLS
+
 
 class MarketGraphMCPServerTest(unittest.TestCase):
     def setUp(self):
@@ -35,7 +37,7 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         self.assertEqual(SERVER.normalize_symbol("600519.SH"), "sh600519")
         self.assertEqual(SERVER.normalize_symbol("830000"), "bj830000")
 
-    @patch.object(SERVER, "http_get")
+    @patch.object(SYMBOLS, "http_get")
     def test_resolve_symbol_by_name(self, mock_get):
         mock_get.return_value = 'v_hint="sh~600519~贵州茅台~gzmt~GP-A";\n'
         res = SERVER.normalize_symbol("贵州茅台")

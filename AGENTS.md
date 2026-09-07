@@ -10,12 +10,13 @@
 | 交易日 15:00–21:00，或用户提到“复盘 / 收盘” | `daily-review` | 收盘复盘；完成后执行评估台账 result / record-daily 落盘 |
 | 周五收盘 / 周末 / 月末，或用户提到“近5日 / 轮动” | `sector-rotation` | 5 日资金迁移、主线生命周期与衰竭指数 |
 | 任意时段输入股票代码 / 名称，或“诊断 XXXXXX” | `stock-analysis` | 八层个股诊断；继承已有交接摘要中的 L1/L2 证据 |
+| 横跨两个以上阶段，或要求继续已有研究流程 | `stock-research-router` | 只负责读取交接、选择专业 Skill 与检查闭环，不替代专业分析 |
 
 用户意图与多个 Skill 匹配时按上表选择或依次执行；不要在复盘 Skill 里生成盘前概率，也不要在盘前 Skill 里做收盘复盘（各 SKILL.md 的“不适用于”声明优先）。各 Skill 内置口语化意图映射，普通提问（如“帮我看一下这只票”“今天行情怎么样”）同样按上表路由。
 
 ## 二、跨 Skill 闭环协议
 
-1. **交接摘要 (Handoff JSON)**：每份报告末尾输出公共契约定义的交接摘要 JSON，并落盘到 `~/.stock-prompt/state/handoff-<YYYYMMDD>-<report_type>.json`；缺失字段用空数组或 `N/A`，不得补造。读取方（`market-prediction` / `stock-analysis`）优先使用最近 3 个交易日内最新的落盘交接文件，其次回退当前会话上下文。
+1. **交接摘要 (Handoff JSON)**：每份报告末尾输出公共契约定义的交接摘要 JSON，并通过 `python scripts/handoff_store.py write --stdin` 校验、原子落盘；读取方使用 `python scripts/handoff_store.py latest --within-trading-days 3`，不可执行脚本时才回退当前会话上下文。缺失字段用空数组或 `N/A`，不得补造。
 2. **板块 → 个股穿透**：daily-review 与 sector-rotation 报告中的标的可通过 `诊断 <代码或名称>` 穿透至 stock-analysis；穿透诊断继承前序报告的 Regime 与主线结论作为 L1/L2 证据，仅增量补采缺失部分。
 3. **评估台账**（固定路径，不随工作目录漂移）：
    - 盘前推演完成后：`python scripts/eval_tracker.py record ...`（三态概率 / Opportunity / 主线 Top3 / R1 / S1）。

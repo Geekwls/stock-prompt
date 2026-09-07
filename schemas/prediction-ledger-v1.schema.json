@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Prediction ledger record v1",
+  "type": "object",
+  "required": ["type", "date", "schema_version", "model_version", "formula_version", "created_at"],
+  "properties": {
+    "type": {"enum": ["prediction", "result"]},
+    "date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+    "schema_version": {"type": "string"},
+    "model_version": {"type": "string"},
+    "formula_version": {"type": "string"},
+    "source_snapshot": {"type": "string"},
+    "created_at": {"type": "string"},
+    "probs": {"type": "object"},
+    "actual_state": {"enum": ["up", "side", "down"]}
+  },
+  "additionalProperties": true
+}

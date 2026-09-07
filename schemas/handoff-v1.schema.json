@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Geekwls/stock-prompt/schemas/handoff-v1.schema.json",
+  "title": "stock-prompt Handoff Snapshot v1",
+  "type": "object",
+  "required": [
+    "report_type", "as_of", "source_count", "coverage", "scored_weight",
+    "confidence", "market_regime", "primary_sectors", "watchlist",
+    "risk_flags", "next_triggers"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "model_version": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "minLength": 10},
+    "trading_date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+    "report_type": {"enum": ["prediction", "daily", "rotation", "stock"]},
+    "as_of": {"type": "string", "minLength": 10},
+    "source_count": {"type": "integer", "minimum": 0},
+    "coverage": {"type": "string", "pattern": "^(N/A|[0-9]+(?:\\.[0-9]+)?%)$"},
+    "scored_weight": {"type": "string", "pattern": "^(N/A|[0-9]+(?:\\.[0-9]+)?%)$"},
+    "confidence": {"enum": ["高", "中", "低", "数据不足"]},
+    "market_regime": {"type": "string"},
+    "primary_sectors": {"type": "array"},
+    "watchlist": {"type": "array"},
+    "risk_flags": {"type": "array"},
+    "next_triggers": {"type": "array"},
+    "inherited_from": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": true
+}

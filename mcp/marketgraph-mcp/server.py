@@ -17,7 +17,25 @@ import urllib.request
 import urllib.error
 import urllib.parse
 from datetime import datetime, date
+from pathlib import Path
 from typing import Dict, Any, List, Optional
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from marketgraph_mcp.cache import (
+    CACHE_STORE, CACHE_TTL_SECONDS, HISTORICAL_CACHE_TTL_SECONDS,
+    get_cached, set_cached, ttl_for_history,
+)
+from marketgraph_mcp.symbols import (
+    INDEX_ALIASES, INDEX_NAME_TO_KEY, normalize_date_str, normalize_symbol,
+    resolve_index_keys, resolve_symbol_by_name,
+)
+from marketgraph_mcp.schemas import AVAILABLE_TOOLS
+from marketgraph_mcp.transport import (
+    ALLOWED_HTTP_HOSTS, BREAKER_COOLDOWN_SECONDS, BREAKER_FAILURE_THRESHOLD,
+    HOST_MIN_INTERVAL_SECONDS, MAX_HTTP_RESPONSE_BYTES, USER_AGENT,
+    _HOST_FAILURE_STATE, _HOST_LAST_REQUEST, _breaker_check,
+    _breaker_record_failure, _breaker_record_success, _throttle_host, http_get,
+)
 
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
@@ -27,208 +45,6 @@ if hasattr(sys.stderr, 'reconfigure'):
 # -----------------------------------------------------------------------------
 # 1. 基础配置与轻量内存缓存 (TTL Cache，防止频繁请求)
 # -----------------------------------------------------------------------------
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-CACHE_STORE: Dict[str, Dict[str, Any]] = {}
-CACHE_TTL_SECONDS = 180  # 盘中常规缓存 3 分钟
-HISTORICAL_CACHE_TTL_SECONDS = 86400  # 收盘后不可变的历史数据长缓存
-HOST_MIN_INTERVAL_SECONDS = 0.5  # 同一数据主机最小请求间隔 (全局频控)
-BREAKER_FAILURE_THRESHOLD = 3  # 同主机连续连接失败次数阈值, 达到后熔断
-BREAKER_COOLDOWN_SECONDS = 600  # 熔断冷却时长 (冷却结束半开探测)
-MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
-ALLOWED_HTTP_HOSTS = {
-    "smartbox.gtimg.cn", "qt.gtimg.cn", "web.ifzq.gtimg.cn",
-    "push2ex.eastmoney.com", "push2.eastmoney.com", "push2his.eastmoney.com",
-    "datacenter-web.eastmoney.com",
-}
-
-
-def get_cached(key: str) -> Optional[Any]:
-    record = CACHE_STORE.get(key)
-    if not record:
-        return None
-    if time.time() - record["time"] < record["ttl"]:
-        return record["data"]
-    del CACHE_STORE[key]
-    return None
-
-
-def set_cached(key: str, data: Any, ttl: int = CACHE_TTL_SECONDS):
-    CACHE_STORE[key] = {"data": data, "time": time.time(), "ttl": ttl}
-
-
-# 同主机频控与断路器状态 (stdio 单线程模型, 进程级状态天然安全)
-_HOST_LAST_REQUEST: Dict[str, float] = {}
-_HOST_FAILURE_STATE: Dict[str, Dict[str, Any]] = {}
-
-
-def _throttle_host(hostname: str):
-    """同一数据主机全局最小请求间隔, 避免突发请求触发上游 IP 级频控"""
-    last = _HOST_LAST_REQUEST.get(hostname, 0.0)
-    wait = HOST_MIN_INTERVAL_SECONDS - (time.time() - last)
-    if wait > 0:
-        time.sleep(wait)
-    _HOST_LAST_REQUEST[hostname] = time.time()
-
-
-def _breaker_check(hostname: str):
-    """熔断中直接快速失败 (不发起网络请求); 冷却结束放行半开探测"""
-    rec = _HOST_FAILURE_STATE.get(hostname)
-    if rec and rec.get("opened_at") is not None:
-        remaining = BREAKER_COOLDOWN_SECONDS - (time.time() - rec["opened_at"])
-        if remaining > 0:
-            raise ConnectionError(f"上游 {hostname} 连续失败已熔断, 约{int(remaining)}秒后恢复探测")
-        rec["opened_at"] = None
-
-
-def _breaker_record_success(hostname: str):
-    _HOST_FAILURE_STATE.pop(hostname, None)
-
-
-def _breaker_record_failure(hostname: str):
-    rec = _HOST_FAILURE_STATE.setdefault(hostname, {"count": 0, "opened_at": None})
-    if rec["opened_at"] is not None:
-        return  # 半开探测失败, 维持熔断
-    rec["count"] += 1
-    if rec["count"] >= BREAKER_FAILURE_THRESHOLD:
-        rec["opened_at"] = time.time()
-
-
-def ttl_for_history(latest_date_str: Optional[str]) -> int:
-    """数据最新日期早于今天 => 收盘定格不可变, 用长缓存; 含当日盘中 => 短缓存"""
-    try:
-        if latest_date_str and str(latest_date_str)[:10] < datetime.now().strftime("%Y-%m-%d"):
-            return HISTORICAL_CACHE_TTL_SECONDS
-    except Exception:
-        pass
-    return CACHE_TTL_SECONDS
-
-
-def http_get(url: str, timeout: int = 4, encoding: str = "utf-8") -> str:
-    parsed = urllib.parse.urlparse(url)
-    hostname = parsed.hostname
-    if parsed.scheme != "https" or hostname not in ALLOWED_HTTP_HOSTS:
-        raise ValueError("仅允许访问预设的 HTTPS 金融数据源")
-    _breaker_check(hostname)  # 熔断中直接抛 ConnectionError, 不发起请求
-    _throttle_host(hostname)
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    last_exc: Optional[Exception] = None
-    for attempt in range(2):  # 上游偶发掐断连接时单次退避重试
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                content = resp.read(MAX_HTTP_RESPONSE_BYTES + 1)
-            if len(content) > MAX_HTTP_RESPONSE_BYTES:
-                raise ValueError("上游响应超过大小限制")
-            _breaker_record_success(hostname)
-            try:
-                return content.decode(encoding)
-            except UnicodeDecodeError:
-                return content.decode("gbk", errors="ignore")
-        except urllib.error.HTTPError:
-            raise  # 4xx/5xx 属于确定性失败, 不重试也不计入熔断
-        except Exception as exc:
-            last_exc = exc
-            if attempt == 0:
-                time.sleep(0.8)
-    _breaker_record_failure(hostname)
-    raise last_exc
-
-
-def resolve_symbol_by_name(keyword: str) -> Optional[str]:
-    """通过智能证券联想网关，将纯中文股票名称解析为标准代码 (如 '贵州茅台' -> 'sh600519')"""
-    clean = keyword.strip()
-    cache_key = f"symbol_lookup_{clean}"
-    cached = get_cached(cache_key)
-    if cached:
-        return cached
-
-    url = f"https://smartbox.gtimg.cn/s3/?t=all&q={urllib.parse.quote(clean)}"
-    try:
-        raw = http_get(url, timeout=3, encoding="gbk")
-        if '="' in raw:
-            val = raw.split('="')[1].rstrip('";\n ')
-            items = val.split("^")
-            for item in items:
-                parts = item.split("~")
-                if len(parts) >= 3:
-                    mkt, code, name = parts[0], parts[1], parts[2]
-                    if mkt in ("sh", "sz", "bj"):
-                        res = f"{mkt}{code}"
-                        set_cached(cache_key, res, ttl=86400)
-                        return res
-    except Exception:
-        pass
-    return None
-
-
-def normalize_symbol(symbol: str) -> str:
-    """标准化证券代码为腾讯前缀格式: sh600519, sz300308, bj830000；支持纯中文名称自动解析"""
-    clean = symbol.strip().lower()
-    if clean.startswith(("sh", "sz", "bj")) and len(clean) >= 8 and clean[2:].isdigit():
-        return clean
-    if "." in clean:
-        parts = clean.split(".")
-        if len(parts) == 2:
-            if parts[1] in ("sh", "sz", "bj"):
-                return f"{parts[1]}{parts[0]}"
-            if parts[0] in ("sh", "sz", "bj"):
-                return f"{parts[0]}{parts[1]}"
-    code = clean.split(".")[0]
-    if code.isdigit():
-        if code.startswith(("6", "9", "5", "11")):
-            return f"sh{code}"
-        elif code.startswith(("0", "3", "12", "15", "16", "18")):
-            return f"sz{code}"
-        elif code.startswith(("4", "8")):
-            return f"bj{code}"
-    # 若非纯数字代码，尝试中文名称联想解析
-    resolved = resolve_symbol_by_name(symbol)
-    if resolved:
-        return resolved
-    return clean
-
-
-def normalize_date_str(date_str: Optional[str]) -> Optional[str]:
-    """将 YYYYMMDD / YYYY-MM-DD / YYYY/MM/DD 统一归一化为 YYYY-MM-DD；非法输入返回 None"""
-    if not date_str:
-        return None
-    clean = str(date_str).strip().replace("-", "").replace("/", "")
-    if len(clean) == 8 and clean.isdigit():
-        return f"{clean[:4]}-{clean[4:6]}-{clean[6:]}"
-    return None
-
-
-# 核心指数体系: 标准 key -> (腾讯代码, 中文名)
-INDEX_ALIASES = {
-    "SHCI": ("sh000001", "上证指数"),
-    "SZCI": ("sz399001", "深证成指"),
-    "CYB": ("sz399006", "创业板指"),
-    "CSIALL": ("sh000985", "中证全指"),
-    "HS300": ("sh000300", "沪深300"),
-}
-INDEX_NAME_TO_KEY = {
-    "上证指数": "SHCI", "上证": "SHCI", "沪指": "SHCI", "沪综指": "SHCI",
-    "深证成指": "SZCI", "深成指": "SZCI",
-    "创业板指": "CYB", "创业板": "CYB",
-    "中证全指": "CSIALL", "全指": "CSIALL",
-    "沪深300": "HS300", "沪深三百": "HS300",
-}
-
-
-def resolve_index_keys(indices: Optional[List[str]]) -> List[str]:
-    """把用户输入的指数列表 (标准key/中文别名) 解析为去重后的标准 key 列表；空输入返回默认四大指数"""
-    if not indices:
-        return ["SHCI", "SZCI", "CYB", "CSIALL"]
-    keys: List[str] = []
-    for raw in indices:
-        if not isinstance(raw, str) or not raw.strip():
-            continue
-        token = raw.strip()
-        key = token.upper() if token.upper() in INDEX_ALIASES else INDEX_NAME_TO_KEY.get(token)
-        if key and key not in keys:
-            keys.append(key)
-    return keys
-
-
 def safe_float(val: Any, default: Optional[float] = 0.0) -> Optional[float]:
     try:
         if val is None or str(val).strip() == "":
@@ -891,7 +707,8 @@ def fetch_market_sentiment(date_str: Optional[str] = None) -> Dict[str, Any]:
             for line in lines:
                 if "s_sh000001" in line:
                     p = line.split("~")
-                    sh_change = f"{float(p[5].strip('\\\"')):+.2f}%"
+                    sh_change_raw = p[5].strip('\\"')
+                    sh_change = f"{float(sh_change_raw):+.2f}%"
                     sh_amount = float(p[9].strip('\\\"')) / 10000.0  # 亿元
                 elif "s_sz399001" in line:
                     p = line.split("~")
@@ -2084,231 +1901,10 @@ def fetch_stock_timeline(symbol: str) -> Dict[str, Any]:
 # -----------------------------------------------------------------------------
 SERVER_INFO = {
     "name": "marketgraph-data",
-    "version": "1.6.0",
+    "version": "1.7.0",
 }
 
-AVAILABLE_TOOLS = [
-    {
-        "name": "get_stock_quote",
-        "description": "获取 A 股个股实时行情、PE(TTM)、PB、总市值、流通市值、换手率与五档盘口（支持代码或中文名，毫秒级直连）",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "symbol": {
-                    "type": "string",
-                    "description": "股票代码或简称，例如 '300308', '000938.SZ', 'sh600519', '贵州茅台'",
-                }
-            },
-            "required": ["symbol"],
-        },
-    },
-    {
-        "name": "get_stock_kline",
-        "description": "获取 A 股个股 750 日 (3年) 连续前复权日K线、全套均线矩阵 (MA20/50/120/250/500)、3年宏观时空坐标、内存无损周线共振与三层威科夫时空模型（宏观牛熊阶段+周线大势+微观60日交易区间与量价触发）（支持代码或中文名，完全满足行情硬门槛）",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "symbol": {
-                    "type": "string",
-                    "description": "股票代码或中文名，例如 '300308', '中际旭创'",
-                },
-                "count": {
-                    "type": "integer",
-                    "description": "K 线根数，默认 750 (整整3年宏观时空，含MA120/MA250/MA500两年线与周线共振)；支持 20 至 800 根自由调节",
-                    "default": 750,
-                    "minimum": 20,
-                    "maximum": 800,
-                },
-                "compact": {
-                    "type": "boolean",
-                    "description": "是否开启 Token 瘦身精简模式（默认 true，附最近30日K线、3年宏观时空坐标与周线共振指标，节省85% Token；传 false 则返回全量日线数组）",
-                    "default": True,
-                },
-            },
-            "required": ["symbol"],
-        },
-    },
-    {
-        "name": "get_stock_timeline",
-        "description": "获取 A 股个股当日分时全景、分时均价线 (VWAP)、盘中量能脉冲时刻与 9:25 集合竞价承接力（支持代码或中文名）",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "symbol": {
-                    "type": "string",
-                    "description": "股票代码或中文名，例如 '301489', '贵州茅台', '中际旭创'",
-                }
-            },
-            "required": ["symbol"],
-        },
-    },
-    {
-        "name": "get_index_kline",
-        "description": "获取核心指数（上证指数/深证成指/创业板指/中证全指/沪深300）最近 N 个交易日的收盘、逐日涨跌幅、ATR14、MA5/20/60 与 20 日高低点，确定性直连腾讯指数日K网关（ATR14 支撑盘前 Z_ATR 判档，均线与高低点支撑空间点位测算；直供5日轮动全窗口指数强弱与个股 L4 宽基基准）",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "indices": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "指数列表，支持 SHCI/SZCI/CYB/CSIALL/HS300 或中文别名（上证指数/深成指/创业板指/中证全指/沪深300），省略默认返回前四个",
-                },
-                "count": {
-                    "type": "integer",
-                    "description": "交易日数量，默认 5；最大 130 (覆盖 L4 的 120 日相对强度窗口；count>=15 时输出 ATR14)",
-                    "default": 5,
-                    "minimum": 2,
-                    "maximum": 130,
-                },
-            },
-        },
-    },
-    {
-        "name": "get_market_breadth",
-        "description": "获取全市场广度 N 个交易日序列：最新交易日为精确上涨/下跌/平盘家数与红盘率（东财涨跌分布快照），历史交易日以涨停/炸板/跌停池与沪指涨跌幅替代并通过 breadth_precision 显式标注精度（不估算）",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "days": {
-                    "type": "integer",
-                    "description": "交易日窗口，默认 5",
-                    "default": 5,
-                    "minimum": 2,
-                    "maximum": 10,
-                },
-            },
-        },
-    },
-    {
-        "name": "get_market_sentiment",
-        "description": "获取全市场情绪总分指标（两市成交总额、涨停家数、炸板家数、真实炸板率、最高连板高度）",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "date_str": {
-                    "type": "string",
-                    "description": "交易日期，格式 YYYYMMDD 或 YYYY-MM-DD，省略则为当天",
-                    "pattern": "^[0-9]{8}$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
-                }
-            },
-        },
-    },
-    {
-        "name": "get_limit_up_ladder",
-        "description": "获取今日或指定交易日的 A 股连板天梯分布（各连板高度数量、领航龙头标的与所属行业）",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "date_str": {
-                    "type": "string",
-                    "description": "交易日期，格式 YYYYMMDD 或 YYYY-MM-DD，省略则为当天",
-                    "pattern": "^[0-9]{8}$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
-                }
-            },
-        },
-    },
-    {
-        "name": "get_sector_fund_flow",
-        "description": "获取 A 股全行业板块主力资金净流入榜、流出榜、涨幅榜、跌幅榜及领涨龙头股票；days>1 时对流入/流出榜板块回补 N 日主力净流入历史与趋势定性（直供复盘与5日轮动资金迁移）",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "count": {
-                    "type": "integer",
-                    "description": "返回的行业板块数量，默认 20；days>1 时上限 12",
-                    "default": 20,
-                    "minimum": 1,
-                    "maximum": 100,
-                },
-                "days": {
-                    "type": "integer",
-                    "description": "主力资金流历史天数，默认 1（仅当日）；支持 2-10 日回补",
-                    "default": 1,
-                    "minimum": 1,
-                    "maximum": 10,
-                },
-            },
-        },
-    },
-    {
-        "name": "get_sector_kline",
-        "description": "获取东财行业板块指数日K序列（主源为完整OHLCV+成交额：板块 MA5/10/20/60、5/20/60日区间涨幅、20/60日高低点、最新/前一日成交额与量比 amount_ratio_1d；主源不可用自动兜底收盘序列+主力净额口径。支持板块代码 BK1036 或中文板块名，直供个股 L4 行业基准、daily-review 资金延续 V 项与板块强度证据）",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "sector": {
-                    "type": "string",
-                    "description": "板块代码 (如 BK1036) 或中文板块名 (如 半导体)；板块代码可先经 get_sector_fund_flow 查询",
-                },
-                "count": {
-                    "type": "integer",
-                    "description": "交易日数量，默认 130 (覆盖 L4 的 120 日相对强度窗口)",
-                    "default": 130,
-                    "minimum": 20,
-                    "maximum": 250,
-                },
-            },
-            "required": ["sector"],
-        },
-    },
-    {
-        "name": "get_basket_index",
-        "description": "以腾讯前复权日K构造等权篮子指数（日度再平衡口径，披露成分覆盖度与失败清单）：东财板块指数网关不可用时的合规代理序列（如保险 BK0735 仅6只成分股），也可用于主线篮子相对强度对照；构造序列只能用于方向性对照，不得用于精确评分阈值（使用边界见公共研究契约）",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "stocks": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "成分股列表（2-10 个，支持代码或中文名），如 ['601318','601628','601601','601366']",
-                },
-                "count": {
-                    "type": "integer",
-                    "description": "交易日数量，默认 20",
-                    "default": 20,
-                    "minimum": 5,
-                    "maximum": 60,
-                },
-            },
-            "required": ["stocks"],
-        },
-    },
-    {
-        "name": "get_longhubang_detail",
-        "description": "获取 A 股交易所公开龙虎榜席位明细（全市场当日上榜概览或指定个股前5大买卖席位穿透，支持代码或中文名）",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "symbol": {
-                    "type": "string",
-                    "description": "股票代码或中文名，例如 '301489', '思泉新材'，省略时返回全市场龙虎榜概览",
-                },
-                "date_str": {
-                    "type": "string",
-                    "description": "交易日期 YYYYMMDD 或 YYYY-MM-DD，省略则为最新交易日",
-                    "pattern": "^[0-9]{8}$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
-                },
-            },
-        },
-    },
-    {
-        "name": "get_company_quality",
-        "description": "获取 A 股个股基本面质量财务指标（营收/净利同比、ROE、毛利率、负债率）、商誉占比、限售解禁日与审计意见状态（支持代码或中文名）",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "symbol": {
-                    "type": "string",
-                    "description": "股票代码或中文名，例如 '301489', '思泉新材'",
-                }
-            },
-            "required": ["symbol"],
-        },
-    },
-]
-
-
-def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+def _dispatch_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(arguments, dict):
         return {"error": "arguments 必须是对象", "data_status": "unavailable"}
     if name in {"get_stock_quote", "get_stock_kline", "get_stock_timeline", "get_company_quality"}:
@@ -2365,6 +1961,34 @@ def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         return fetch_company_quality(arguments.get("symbol", ""))
     else:
         return {"error": f"未知工具: {name}"}
+
+
+def response_envelope(result: Dict[str, Any]) -> Dict[str, Any]:
+    """增加 v2 标准信封，同时保留旧顶层字段供已安装客户端兼容读取。"""
+    legacy = dict(result) if isinstance(result, dict) else {"value": result}
+    error = legacy.get("error")
+    warnings = legacy.get("warnings", [])
+    if isinstance(warnings, str):
+        warnings = [warnings]
+    status = legacy.get("data_status") or ("unavailable" if error else "ok")
+    source = str(legacy.get("source") or "marketgraph-data")
+    as_of = legacy.get("as_of") or legacy.get("timestamp") or legacy.get("latest_date") or legacy.get("date")
+    enriched = dict(legacy)
+    enriched.update({
+        "api_version": "2.0",
+        "source": source,
+        "data_status": status,
+        "as_of": as_of,
+        "data": legacy,
+        "errors": [str(error)] if error else [],
+        "warnings": list(warnings),
+        "legacy_fields_retained": True,
+    })
+    return enriched
+
+
+def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    return response_envelope(_dispatch_tool_call(name, arguments))
 
 
 def run_stdio_server():

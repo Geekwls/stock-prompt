@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Daily review report card input v1",
+  "type": "object",
+  "required": ["title", "date", "regime", "sentiment_score", "top_sector", "retention", "opportunity_score", "sentiment_breakdown", "sectors_daily", "stocks_pool", "scenarios", "risk_line"],
+  "properties": {
+    "title": {"type": "string"}, "date": {"type": "string"}, "regime": {"type": "string"},
+    "sentiment_score": {"type": "number"}, "retention": {"type": "number"}, "opportunity_score": {"type": "number"},
+    "sentiment_breakdown": {"type": "array"}, "sectors_daily": {"type": "array"}, "stocks_pool": {"type": "array"},
+    "scenarios": {"type": "array"}, "risk_line": {"type": "string"}
+  },
+  "additionalProperties": true
+}

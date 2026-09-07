@@ -14,6 +14,9 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from project_registry import load_registry, resolve_path
+
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -21,15 +24,22 @@ if hasattr(sys.stdout, "reconfigure"):
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE_ROOT = ROOT / ".agents" / "skills"
-SKILL_NAMES = ("daily-review", "market-prediction", "sector-rotation", "stock-analysis")
+REGISTRY = load_registry()
+SKILL_NAMES = tuple(item["id"] for item in REGISTRY["skills"])
 MANIFEST_NAME = ".stock-prompt-manifest.json"
-# 母本位于 scripts/ 下的公共脚本，按 skill 捆绑分发（安装后每个技能目录自带可用副本）。
+# 母本与分发目标均由 registry.json 声明。
 BUNDLED_SCRIPTS = {
-    "generate_report_card.py": (ROOT / "scripts" / "generate_report_card.py", SKILL_NAMES),
-    "eval_tracker.py": (ROOT / "scripts" / "eval_tracker.py", ("market-prediction", "daily-review")),
+    name: (
+        resolve_path(relative),
+        tuple(item["id"] for item in REGISTRY["skills"] if name in item["bundled_scripts"]),
+    )
+    for name, relative in REGISTRY["script_sources"].items()
 }
-MCP_SERVER = ROOT / "mcp" / "marketgraph-mcp" / "server.py"
+MCP_SERVER = resolve_path(REGISTRY["mcp"]["entrypoint"])
+MCP_ROOT = MCP_SERVER.parent
 MCP_BUNDLED_PATH = "marketgraph-mcp/server.py"
+RUNTIME_REGISTRY_PATH = ".stock-prompt-runtime.json"
+REPORT_CARD_PACKAGE = ROOT / "scripts" / "report_card"
 MCP_CONFIG_CANDIDATES = (
     Path.home() / ".gemini" / "antigravity" / "mcp_config.json",
     Path.home() / ".gemini" / "mcp_config.json",
@@ -76,9 +86,16 @@ def source_files():
             raise FileNotFoundError(f"捆绑脚本母本不存在: {source}")
         for skill in skills:
             files[f"{skill}/scripts/{name}"] = source
+    report_card_skills = BUNDLED_SCRIPTS.get("generate_report_card.py", (None, ()))[1]
+    for path in REPORT_CARD_PACKAGE.rglob("*.py"):
+        for skill in report_card_skills:
+            files[f"{skill}/scripts/report_card/{path.relative_to(REPORT_CARD_PACKAGE).as_posix()}"] = path
     if not MCP_SERVER.is_file():
         raise FileNotFoundError(f"MCP 服务端母本不存在: {MCP_SERVER}")
-    files[MCP_BUNDLED_PATH] = MCP_SERVER
+    for path in MCP_ROOT.rglob("*"):
+        if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc":
+            files[f"marketgraph-mcp/{path.relative_to(MCP_ROOT).as_posix()}"] = path
+    files[RUNTIME_REGISTRY_PATH] = ROOT / "registry.json"
     return files
 
 
@@ -87,6 +104,17 @@ def sync_workspace_scripts(dry_run=False):
     for name, (source, skills) in BUNDLED_SCRIPTS.items():
         for skill in skills:
             destination = SOURCE_ROOT / skill / "scripts" / name
+            if destination.exists() and file_hash(destination) == file_hash(source):
+                continue
+            changed += 1
+            print(f"[SYNC] {destination.relative_to(ROOT)}")
+            if not dry_run:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
+    report_card_skills = BUNDLED_SCRIPTS.get("generate_report_card.py", (None, ()))[1]
+    for source in REPORT_CARD_PACKAGE.rglob("*.py"):
+        for skill in report_card_skills:
+            destination = SOURCE_ROOT / skill / "scripts" / "report_card" / source.relative_to(REPORT_CARD_PACKAGE)
             if destination.exists() and file_hash(destination) == file_hash(source):
                 continue
             changed += 1

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Stock analysis report card input v1",
+  "type": "object",
+  "required": ["stock_name", "stock_code", "date", "price", "coverage", "logic_health", "structure_timing", "company_risk_status", "hard_gate_status", "technical_layers_scored", "composite_score_status", "coverage_breakdown", "audit_status", "confidence_level", "next_review_triggers"],
+  "properties": {
+    "stock_name": {"type": "string"}, "stock_code": {"type": "string"}, "date": {"type": "string"},
+    "coverage": {"type": "string"}, "hard_gate_status": {"enum": ["通过", "失败"]},
+    "technical_layers_scored": {"type": "boolean"}, "composite_score_status": {"enum": ["calculated", "not_applicable"]},
+    "coverage_breakdown": {"type": "array"}, "next_review_triggers": {"type": "array", "minItems": 2}
+  },
+  "additionalProperties": true
+}

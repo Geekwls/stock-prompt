@@ -6,20 +6,24 @@
 
 ---
 
-## 📂 项目结构（四大核心交易与研究场景）
+## 📂 项目结构（四个专业 Skill + 一个编排 Router）
 
 ```text
 stock-prompt/
+├── registry.json                     # 单一配置源：版本、Skill、脚本、Schema 与 MCP 工具清单
 ├── plugin.json                       # 🌟 核心入口：Agent Plugins 1.0 标准插件清单 (兼容 Cursor/Copilot/Gemini)
+├── data/                             # 📅 A 股交易日历（支持离线交易日窗口推算）
+│   └── a_share_trading_calendar.json
 │
 ├── mcp/                              # 🔌 A 股公开数据 MCP 服务端（本地 stdio、免 Token）
-│   └── marketgraph-mcp/              # 腾讯/东财公开网关（行情、750日K线与周线共振、指数日K、市场广度、资金流历史与公开财务筛查）
+│   └── marketgraph-mcp/              # 腾讯/东财公开网关（server.py 入口 + marketgraph_mcp/ 模块包）
 │
 ├── .agents/skills/                    # 🤖 Antigravity / Agent 专用 Skill 目录
 │   ├── market-prediction/             # 🌅 技能 1：A股盘前研判
 │   ├── daily-review/                  # 🌇 技能 2：A股每日复盘
 │   ├── sector-rotation/               # 🔄 技能 3：A股板块轮动
-│   └── stock-analysis/                # 🔍 技能 4：A股个股诊断
+│   ├── stock-analysis/                # 🔍 技能 4：A股个股诊断
+│   └── stock-research-router/         # 🧭 技能 5：跨阶段编排与交接
 │   │    （每个技能含 SKILL.md + references/ 契约 + agents/ 元数据 + scripts/ 捆绑脚本）
 │
 ├── prompts/                           # 📄 从 Skill 母本同步生成的跨平台 Markdown 提示词库
@@ -31,8 +35,9 @@ stock-prompt/
 │   │   └── A股近5日板块轮动与节奏复盘.md
 │   └── stock-analysis/                # 🔍 A股个股诊断
 │       └── A股个股完整诊断与威科夫结构研判.md
+│   └── stock-research-router/         # 🧭 跨阶段编排 Prompt
 │
-├── contracts/                         # 📐 四个 Skill 共用研究契约的项目级母本
+├── contracts/                         # 📐 五个 Skill 共用研究契约的项目级母本
 │   └── common-research-contract.md
 │
 ├── docs/                              # 📖 设计文档
@@ -40,7 +45,11 @@ stock-prompt/
 │
 ├── scripts/                           # 🛠 自动化工具库
 │   ├── generate_report_card.py        # 🎨 高清极简金融研报长图自动生成脚本 (支持 prediction/daily/rotation/stock)
+│   ├── report_card/                   # 🎨 长图渲染分模块包 (common/validation/4类研报排版)
 │   ├── eval_tracker.py                # 📊 盘前↔盘后评估台账 (Brier/校准/命中率闭环)
+│   ├── handoff_store.py               # 🔗 Handoff 校验、原子写入、读取与清理
+│   ├── project_registry.py            # 🧩 单一注册表加载与路径校验
+│   ├── check_version_parity.py        # 🧪 项目/插件/MCP/发布标签一致性检查
 │   ├── install_skills.py              # 🚀 一键安装/校验所有技能到 Gemini / Antigravity / Codex
 │   ├── sync_skill_contracts.py         # 🔁 公共研究契约同步及漂移检查
 │   ├── sync_prompts.py                # 🔁 Skill → Prompt 同步及漂移检查
@@ -48,6 +57,7 @@ stock-prompt/
 │   └── update.sh                      # 🔄 Linux/Mac 自动更新脚本
 │
 ├── tests/                             # ✅ 单元测试 (评估台账 / 安装器 / 报告卡校验 / Prompt 同步)
+├── schemas/                           # 🧾 Handoff、台账、报告卡与 MCP 信封 Schema
 │
 ├── .github/workflows/                 # ⚙️ CI 防漂移检查 (push/PR) + 自动发布流水线 (tag)
 ├── AGENTS.md                          # 🧭 Agent 时段路由与跨 Skill 闭环协议

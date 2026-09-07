@@ -7,20 +7,18 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from project_registry import load_registry, resolve_path
+
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
 
 ROOT = Path(__file__).resolve().parent.parent
+REGISTRY = load_registry()
 MAPPINGS = {
-    ROOT / ".agents/skills/daily-review/SKILL.md":
-        ROOT / "prompts/daily-review/A股每日主线与产业链共振复盘.md",
-    ROOT / ".agents/skills/market-prediction/SKILL.md":
-        ROOT / "prompts/market-prediction/A股盘前全景研判与概率推演.md",
-    ROOT / ".agents/skills/sector-rotation/SKILL.md":
-        ROOT / "prompts/sector-rotation/A股近5日板块轮动与节奏复盘.md",
-    ROOT / ".agents/skills/stock-analysis/SKILL.md":
-        ROOT / "prompts/stock-analysis/A股个股完整诊断与威科夫结构研判.md",
+    resolve_path(item["source"]) / "SKILL.md": resolve_path(item["prompt_target"])
+    for item in REGISTRY["skills"]
 }
 
 

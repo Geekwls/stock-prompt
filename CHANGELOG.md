@@ -1,5 +1,13 @@
 # CHANGELOG (更新日志)
 
+## [v7.0.0] - 2026-09-07
+### 🏗 架构注册表、程序化交接与版本化研究闭环
+- 新增 `registry.json` 单一配置源，统一驱动 Skill、Prompt、捆绑脚本、插件与 MCP 工具清单；新增版本一致性校验，修复插件版本和 MCP 工具数量漂移。
+- 新增 Handoff Schema 与 `handoff_store.py`，支持校验、原子写入、最近交接读取、损坏文件跳过和安全清理预览，并随五个 Skill 分发。
+- 评估台账新增 schema/model/formula 版本、按版本隔离统计和 legacy 备份迁移，避免跨公式样本混算。
+- 新增 `stock-research-router` 总控路由 Skill，负责模糊跨阶段请求、上下文继承和板块到个股的编排，不抢占四个专业 Skill 的明确意图。
+- 补充机器产物 Schema、模块化基础、Python 兼容矩阵、发布标签校验和架构路线图状态。
+
 ## [v6.9.0] - 2026-09-07
 ### 🔗 跨 Skill 交接闭环接线与 CI 防漂移 (Handoff Wiring & CI Gates)
 - **交接摘要进入输出模板**：四份 Skill 输出模板统一新增「交接摘要 (Handoff Snapshot)」JSON 节（与公共契约 `~/.stock-prompt/state/handoff-*` 落盘规范字段一致），契约要求的跨技能上下文交接不再悬空；`stock-analysis` 报告清单同步新增交接摘要条目与「继承的 L1/L2 是否标注来源」强制自检项。

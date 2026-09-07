@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的标签，例如 v7.0.0'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -18,24 +23,28 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate version.json
+      - name: Validate release parity
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: |
-          echo "🔍 检查 version.json 存在性与 JSON 格式合规性..."
-          python3 -c "import json; json.load(open('version.json'))"
-          echo "✅ version.json 格式正确。"
+          python3 scripts/check_version_parity.py --tag "$RELEASE_TAG"
 
       - name: Generate Automatic Release Notes
         id: release_notes
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: |
-          echo "📝 从 CHANGELOG.md 提取日志..."
-          head -n 30 CHANGELOG.md > RELEASE_NOTES.md || echo "最新版本发布" > RELEASE_NOTES.md
+          python3 scripts/extract_release_notes.py --version "$RELEASE_TAG" --output RELEASE_NOTES.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
           body_path: RELEASE_NOTES.md
           files: |
             version.json
+            registry.json
+            plugin.json
             CHANGELOG.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

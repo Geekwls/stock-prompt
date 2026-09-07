@@ -1,0 +1,4 @@
+interface:
+  display_name: "A股研究总控路由"
+  short_description: "编排盘前、收盘、轮动与个股诊断的跨阶段研究流程"
+  default_prompt: "使用 $stock-research-router 继续已有A股研究并选择下一步专业技能。"

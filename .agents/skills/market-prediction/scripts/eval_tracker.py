@@ -26,7 +26,9 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 from datetime import datetime
+from pathlib import Path
 
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
@@ -34,6 +36,36 @@ if hasattr(sys.stdout, 'reconfigure'):
 STATES = ["up", "side", "down"]
 STATE_CN = {"up": "涨", "side": "震", "down": "跌"}
 LEGACY_LEDGER = os.path.join("eval", "predictions.jsonl")
+LEDGER_SCHEMA_VERSION = "1.0"
+PREDICTION_FORMULA_VERSION = "prediction-v2"
+DAILY_FORMULA_VERSION = "daily-v2"
+
+
+def discover_model_version():
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        for name in ("version.json", "registry.json", ".stock-prompt-runtime.json"):
+            try:
+                data = json.loads((parent / name).read_text(encoding="utf-8"))
+                version = data.get("latest") or data.get("project", {}).get("version")
+                if version:
+                    return str(version)
+            except (OSError, ValueError, TypeError):
+                continue
+    return os.environ.get("STOCK_PROMPT_MODEL_VERSION", "unknown")
+
+
+def record_metadata(args, formula_default):
+    return {
+        "schema_version": LEDGER_SCHEMA_VERSION,
+        "model_version": getattr(args, "model_version", None) or discover_model_version(),
+        "formula_version": getattr(args, "formula_version", None) or formula_default,
+        **({"source_snapshot": args.source_snapshot} if getattr(args, "source_snapshot", None) else {}),
+    }
+
+
+def record_version(rec):
+    return str(rec.get("model_version") or "legacy")
 
 
 def default_ledger():
@@ -64,7 +96,7 @@ def zatr_to_state(z):
     return "side"
 
 
-def load_ledger(path):
+def load_ledger(path, model_version=None):
     """返回 (预测, 实际) 两个字典，同日期同类型后写覆盖（等价于更新）"""
     preds, results = {}, {}
     if os.path.exists(path):
@@ -76,6 +108,8 @@ def load_ledger(path):
                 try:
                     rec = json.loads(line)
                 except json.JSONDecodeError:
+                    continue
+                if model_version and record_version(rec) != model_version:
                     continue
                 if rec["type"] == "prediction":
                     preds[rec["date"]] = rec
@@ -127,6 +161,7 @@ def cmd_record(args):
         "top_sector": args.top_sector,
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
     }
+    rec.update(record_metadata(args, PREDICTION_FORMULA_VERSION))
     top_sectors = [s.strip() for s in (args.top_sectors or "").split(",") if s.strip()]
     if top_sectors:
         rec["top_sectors"] = top_sectors
@@ -147,6 +182,7 @@ def cmd_result(args):
         "top_sectors": [s.strip() for s in args.top_sectors.split(",") if s.strip()],
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
     }
+    rec.update(record_metadata(args, PREDICTION_FORMULA_VERSION))
     if args.close is not None:
         rec["close"] = args.close
     if args.high is not None:
@@ -173,7 +209,7 @@ DAILY_METRICS = [
 DAILY_EXTRA_METRICS = [("capital_continuity", "资金延续评分"), ("opportunity", "机会评分")]
 
 
-def load_daily_ledger(path):
+def load_daily_ledger(path, model_version=None):
     """每日评分台账：同日期后写覆盖，按日期排序返回"""
     daily = {}
     if os.path.exists(path):
@@ -187,6 +223,8 @@ def load_daily_ledger(path):
                 except json.JSONDecodeError:
                     continue
                 if rec.get("type") == "daily_review" and rec.get("date"):
+                    if model_version and record_version(rec) != model_version:
+                        continue
                     daily[rec["date"]] = rec
     return [daily[d] for d in sorted(daily)]
 
@@ -226,6 +264,7 @@ def cmd_record_daily(args):
         if metrics[key] is not None and not 0 <= metrics[key] <= 100:
             sys.exit(f"[ERR] --{key.replace('_', '-')} 必须位于 0-100")
     rec = {"type": "daily_review", "date": args.date, "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")}
+    rec.update(record_metadata(args, DAILY_FORMULA_VERSION))
     rec.update({k: round(v, 2) for k, v in metrics.items() if v is not None})
     if args.top_sector:
         rec["top_sector"] = args.top_sector
@@ -234,7 +273,17 @@ def cmd_record_daily(args):
 
 
 def cmd_report_daily(args):
-    records = load_daily_ledger(args.daily_ledger)
+    if getattr(args, "all_versions", False):
+        versions = ledger_versions(args.daily_ledger, {"daily_review"})
+        for version in versions:
+            print(f"\n--- model_version={version} ---")
+            child = argparse.Namespace(**vars(args))
+            child.all_versions = False
+            child.filter_version = version
+            cmd_report_daily(child)
+        return
+    selected_version = getattr(args, "filter_version", None) or getattr(args, "model_version", None)
+    records = load_daily_ledger(args.daily_ledger, selected_version)
     recent = records[-args.window:] if args.window and args.window > 0 else records
     print(f"=== daily-review 每日评分台账（最近 {len(recent)} 个交易日，累计 {len(records)} 日） ===")
     if not recent:
@@ -266,7 +315,17 @@ def brier_multiclass(probs, actual_state):
 
 
 def cmd_report(args):
-    preds, results = load_ledger(args.ledger)
+    if getattr(args, "all_versions", False):
+        versions = ledger_versions(args.ledger, {"prediction", "result"})
+        for version in versions:
+            print(f"\n--- model_version={version} ---")
+            child = argparse.Namespace(**vars(args))
+            child.all_versions = False
+            child.filter_version = version
+            cmd_report(child)
+        return
+    selected_version = getattr(args, "filter_version", None) or getattr(args, "model_version", None)
+    preds, results = load_ledger(args.ledger, selected_version)
     pairs = merge_pairs(preds, results)[-args.window:]
     pending = len(set(preds) - set(results))
 
@@ -331,6 +390,74 @@ def cmd_report(args):
         print(f"    {bucket:>7}: 预测均值 {p_sum / n:5.1f}% | 实际命中 {sum(hits) / n * 100:5.1f}% | 样本 {n} 日")
 
 
+def ledger_versions(path, allowed_types):
+    versions = set()
+    if not os.path.exists(path):
+        return []
+    with open(path, "r", encoding="utf-8") as stream:
+        for line in stream:
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if rec.get("type") in allowed_types:
+                versions.add(record_version(rec))
+    return sorted(versions)
+
+
+def migrate_ledger(path):
+    if not os.path.exists(path):
+        print(f"[SKIP] 台账不存在: {path}")
+        return 0
+    changed = 0
+    output = []
+    with open(path, "r", encoding="utf-8") as stream:
+        for raw in stream:
+            try:
+                rec = json.loads(raw)
+            except json.JSONDecodeError:
+                output.append(raw)
+                continue
+            if "schema_version" not in rec:
+                rec["schema_version"] = "legacy"
+                changed += 1
+            if "model_version" not in rec:
+                rec["model_version"] = "legacy"
+            if "formula_version" not in rec:
+                rec["formula_version"] = "legacy"
+            output.append(json.dumps(rec, ensure_ascii=False) + "\n")
+    if not changed:
+        print(f"[OK] 无需迁移: {path}")
+        return 0
+    backup = f"{path}.bak-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    print(f"[MIGRATE] {path}: {changed} 条遗留记录；备份 {backup}")
+    if getattr(migrate_ledger, "dry_run", False):
+        return changed
+    shutil.copy2(path, backup)
+    directory = os.path.dirname(os.path.abspath(path))
+    descriptor, temporary = tempfile.mkstemp(prefix=".ledger-migrate-", dir=directory)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.writelines(output)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    return changed
+
+
+def cmd_migrate(args):
+    migrate_ledger.dry_run = not args.apply
+    targets = []
+    if args.target in ("all", "prediction"):
+        targets.append(args.ledger)
+    if args.target in ("all", "daily"):
+        targets.append(args.daily_ledger)
+    return sum(migrate_ledger(path) for path in targets)
+
+
 def main():
     parser = argparse.ArgumentParser(description="评估台账：record / result / report / record-daily / report-daily")
     parser.add_argument("--ledger", default=None, help=f"台账文件路径 (默认 {default_ledger()}，固定不随目录漂移)")
@@ -348,6 +475,9 @@ def main():
     p_rec.add_argument("--top-sectors", default="", help="盘前推演主线 Top3，逗号分隔（用于 Top3 命中率评估）")
     p_rec.add_argument("--r1", type=float, default=None, help="上证 R1 压力位（用于点位有效率）")
     p_rec.add_argument("--s1", type=float, default=None, help="上证 S1 支撑位（用于点位有效率）")
+    p_rec.add_argument("--model-version", default=discover_model_version(), help="模型版本，默认读取当前项目版本")
+    p_rec.add_argument("--formula-version", default=PREDICTION_FORMULA_VERSION, help="预测公式版本")
+    p_rec.add_argument("--source-snapshot", help="关联的来源快照或 Handoff ID")
     p_rec.set_defaults(func=cmd_record)
 
     p_res = sub.add_parser("result", help="收盘后记录当日实际")
@@ -360,10 +490,16 @@ def main():
     p_res.add_argument("--close", type=float, default=None, help="上证收盘点位")
     p_res.add_argument("--high", type=float, default=None, help="上证最高点位（缺省用 close）")
     p_res.add_argument("--low", type=float, default=None, help="上证最低点位（缺省用 close）")
+    p_res.add_argument("--model-version", default=discover_model_version(), help="模型版本，须与对应预测一致")
+    p_res.add_argument("--formula-version", default=PREDICTION_FORMULA_VERSION, help="结果归并公式版本")
+    p_res.add_argument("--source-snapshot", help="关联的来源快照或 Handoff ID")
     p_res.set_defaults(func=cmd_result)
 
     p_rpt = sub.add_parser("report", help="输出滚动评估指标")
     p_rpt.add_argument("--window", type=int, default=20, help="滚动窗口天数 (默认 20)")
+    p_rpt.add_argument("--model-version", default=discover_model_version(), help="默认统计的当前模型版本")
+    p_rpt.add_argument("--filter-version", help="指定统计某个模型版本")
+    p_rpt.add_argument("--all-versions", action="store_true", help="按模型版本分组展示")
     p_rpt.set_defaults(func=cmd_report)
 
     p_drec = sub.add_parser("record-daily", help="收盘复盘后记录当日情绪/延续/机会评分")
@@ -377,11 +513,22 @@ def main():
     p_drec.add_argument("--capital-continuity", type=float, help="资金延续评分 0-100")
     p_drec.add_argument("--opportunity", type=float, help="机会评分 0-100")
     p_drec.add_argument("--top-sector", default="", help="第一主线板块名称")
+    p_drec.add_argument("--model-version", default=discover_model_version(), help="模型版本，默认读取当前项目版本")
+    p_drec.add_argument("--formula-version", default=DAILY_FORMULA_VERSION, help="每日评分公式版本")
+    p_drec.add_argument("--source-snapshot", help="关联的来源快照或 Handoff ID")
     p_drec.set_defaults(func=cmd_record_daily)
 
     p_drpt = sub.add_parser("report-daily", help="输出每日评分分布与固定阈值历史落位")
     p_drpt.add_argument("--window", type=int, default=60, help="滚动窗口交易日 (默认 60)")
+    p_drpt.add_argument("--model-version", default=discover_model_version(), help="默认统计的当前模型版本")
+    p_drpt.add_argument("--filter-version", help="指定统计某个模型版本")
+    p_drpt.add_argument("--all-versions", action="store_true", help="按模型版本分组展示")
     p_drpt.set_defaults(func=cmd_report_daily)
+
+    p_migrate = sub.add_parser("migrate", help="为遗留台账补充 legacy 版本元数据；默认只预览")
+    p_migrate.add_argument("--target", choices=("all", "prediction", "daily"), default="all")
+    p_migrate.add_argument("--apply", action="store_true", help="备份后执行迁移")
+    p_migrate.set_defaults(func=cmd_migrate)
 
     args = parser.parse_args()
     args.ledger = resolve_ledger(args.ledger)

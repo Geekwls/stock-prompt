@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Prediction report card input v1",
+  "type": "object",
+  "required": ["title", "date", "regime", "sentiment_score", "position", "opportunity_score", "top_sector", "evidence", "indices_full", "sectors_full", "watchlist_full", "risk_warning"],
+  "properties": {
+    "title": {"type": "string"}, "date": {"type": "string"}, "regime": {"type": "string"},
+    "sentiment_score": {"type": "number"}, "opportunity_score": {"type": "number"},
+    "evidence": {"type": "array"}, "indices_full": {"type": "array"}, "sectors_full": {"type": "array"},
+    "watchlist_full": {"type": "array"}, "risk_warning": {"type": "string"}
+  },
+  "additionalProperties": true
+}

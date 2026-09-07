@@ -2,6 +2,22 @@
 
 专为 `stock-prompt` 及 Agent Plugins 1.0 标准量身打造的 **A 股公开行情与研究辅助 MCP 服务端**。
 
+## 📦 目录结构
+
+```text
+marketgraph-mcp/
+├── server.py              # stdio JSON-RPC 入口、12 个工具实现与统一响应信封（保持单文件启动兼容）
+└── marketgraph_mcp/       # 可复用核心模块（随安装器整目录分发，禁止只拷贝 server.py）
+    ├── transport.py       #   HTTP 连接、全局频控与断路器熔断
+    ├── cache.py           #   内存 TTL 缓存与历史长缓存
+    ├── symbols.py         #   证券代码/指数别名/日期归一化解析
+    └── schemas.py         #   tools/list 的 JSON Schema 定义（版本一致性校验读取处）
+```
+
+工具实现（providers/tools 层）当前保留在 `server.py` 单模块内：测试套件通过
+`SERVER.http_get` 等模块属性打补丁，拆散会破坏该契约；如需进一步模块化，
+应先同步迁移 `tests/test_mcp_server.py` 的补丁目标。
+
 ## 🌟 核心特性
 - **零 Token、标准 stdio**：直连腾讯证券与东方财富公开网关，无需 API Key；首次使用仍需在宿主 MCP 配置中注册。
 - **纯原生 Python 实现**：基于 Python 3.8+ 标准库（`urllib`, `json`），零第三方外部依赖（无需安装 `akshare` 或 `pandas`），极速毫秒级启动。

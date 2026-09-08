@@ -83,6 +83,34 @@ def calendar_status():
         return {"available": False, "precision": "unavailable", "covered_years": [], "last_trading_day": None, "last_closed_date": None}
 
 
+def thesis_status(state_base):
+    root = state_base / "theses"
+    total = 0
+    pending = 0
+    due_soon = 0
+    if root.is_dir():
+        from datetime import date, timedelta
+
+        horizon = date.today() + timedelta(days=3)
+        for path in root.glob("*.json"):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError):
+                continue
+            total += 1
+            for trigger in payload.get("next_triggers", []):
+                if not isinstance(trigger, dict) or trigger.get("status") != "pending":
+                    continue
+                pending += 1
+                deadline = str(trigger.get("deadline") or "")[:10]
+                try:
+                    if deadline and date.fromisoformat(deadline) <= horizon:
+                        due_soon += 1
+                except ValueError:
+                    continue
+    return {"total": total, "pending_triggers": pending, "due_soon": due_soon}
+
+
 def collect_status():
     skills = {item["id"]: resolve_path(item["source"]).is_dir() for item in REGISTRY["skills"]}
     state_base = Path(os.environ.get("STOCK_PROMPT_STATE_HOME", Path.home() / ".stock-prompt"))
@@ -102,6 +130,7 @@ def collect_status():
         "dependencies": {
             "Pillow": importlib.util.find_spec("PIL") is not None,
         },
+        "theses": thesis_status(state_base),
         "state_permissions": {
             "state": permission_status(state_base / "state", 0o700),
             "eval": permission_status(state_base / "eval", 0o700),
@@ -130,6 +159,11 @@ def main():
         years = ",".join(str(year) for year in calendar.get("covered_years", [])) or "N/A"
         print(f"交易日历: {'可用' if calendar['available'] else '不可用'}，精度 {calendar['precision']}，覆盖年份 {years}")
         print(f"报告卡依赖 Pillow: {'可用' if status['dependencies']['Pillow'] else '缺失（运行 pip install -r requirements.txt）'}")
+        theses = status["theses"]
+        thesis_line = f"个股 Thesis: {theses['total']} 只，待核验触发器 {theses['pending_triggers']} 条"
+        if theses["due_soon"]:
+            thesis_line += f"（3 日内到期 {theses['due_soon']} 条，运行 thesis due 查看）"
+        print(thesis_line)
         insecure = [name for name, item in status["state_permissions"].items() if not item["secure"]]
         print(f"状态目录权限: {'安全' if not insecure else '需收紧 ' + ','.join(insecure)}")
     failed = not status["version_parity"]["ok"] or status["skills"]["ready"] != status["skills"]["total"]

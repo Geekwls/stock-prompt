@@ -164,6 +164,45 @@ def load_existing(root, stock_code):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def collect_due(root, today, within_days):
+    """扫描全部 Thesis，返回 reference ≤ today+within_days 的 pending 触发器。"""
+    from datetime import date, timedelta
+
+    try:
+        horizon = today + timedelta(days=within_days)
+    except TypeError:
+        return []
+    due = []
+    if not root.exists():
+        return due
+    for path in sorted(root.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            continue
+        for trigger in payload.get("next_triggers", []):
+            if not isinstance(trigger, dict) or trigger.get("status") != "pending":
+                continue
+            deadline = str(trigger.get("deadline") or "")[:10]
+            if not deadline:
+                continue
+            try:
+                limit = date.fromisoformat(deadline)
+            except ValueError:
+                continue
+            if limit <= horizon:
+                due.append({
+                    "stock_code": payload.get("stock_code"),
+                    "stock_name": payload.get("stock_name"),
+                    "trigger_id": trigger.get("id"),
+                    "condition": trigger.get("condition"),
+                    "deadline": deadline,
+                    "logic_health": payload.get("logic_health"),
+                    "path": str(path),
+                })
+    return sorted(due, key=lambda item: (item["deadline"], str(item["stock_code"])))
+
+
 def main():
     parser = argparse.ArgumentParser(description="个股长期 Thesis Ledger")
     parser.add_argument("--state-dir", help="覆盖默认 ~/.stock-prompt/theses")
@@ -180,6 +219,10 @@ def main():
 
     sub.add_parser("list", help="列出已有个股 Thesis 摘要")
 
+    due = sub.add_parser("due", help="列出未来 N 天内到期的待核验触发器")
+    due.add_argument("--within-days", type=int, default=3, help="提前提醒天数 (默认 3)")
+    due.add_argument("--today", help="参考日期 YYYY-MM-DD，默认今天")
+
     args = parser.parse_args()
     root = state_root(args.state_dir)
     if args.command == "write":
@@ -194,6 +237,15 @@ def main():
             print("N/A")
             return 1
         print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "due":
+        from datetime import date as date_type
+
+        today = date_type.fromisoformat(args.today) if args.today else date_type.today()
+        if args.within_days < 0:
+            parser.error("--within-days 不能为负")
+        items = collect_due(root, today, args.within_days)
+        print(json.dumps(items, ensure_ascii=False, indent=2))
         return 0
     summaries = []
     for path in sorted(root.glob("*.json")) if root.exists() else []:

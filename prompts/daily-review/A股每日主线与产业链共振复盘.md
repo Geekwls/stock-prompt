@@ -140,7 +140,7 @@ Scored Weight = 实际参与评分的原始权重
    - 每个核心数字注明数据日期、统计口径与来源链接；不同平台口径不一致时不得拼接计算。
    - “炸板率”默认指全市场炸板率；用于板块评分时必须改用“板块炸板率”并明确标注。
    - 输出 `Data Coverage`：可得权重 ÷ 计划总权重，并披露参与评分权重。覆盖率低于 70% 时只给观察性结论，不给精确评分或个性化风险暴露。
-   - 文中的固定阈值是缺少历史样本时的回退值。每日复盘必须将情绪五项分、资金延续与机会评分落盘（阈值校准闭环）：`python scripts/eval_tracker.py record-daily --date YYYY-MM-DD --up-ratio .. --premium .. --promotion .. --break-rate .. --volume-dev .. --sentiment-total .. --capital-continuity .. --opportunity .. --top-sector ..`（全局安装用户路径为 `<技能安装目录>/scripts/eval_tracker.py`，台账写入 `~/.stock-prompt/eval/daily_scores.jsonl`）。台账 ≥60 个交易日时运行 `python scripts/eval_tracker.py report-daily` 查看各固定阈值的历史分位落位，据此校准阈值并披露样本期，禁止事后挑选阈值。
+   - 文中的固定阈值是缺少历史样本时的回退值。每日复盘必须将情绪五项分、资金延续、机会评分与主线状态落盘（阈值校准闭环）：`python scripts/eval_tracker.py record-daily --date YYYY-MM-DD --up-ratio .. --premium .. --promotion .. --break-rate .. --volume-dev .. --sentiment-total .. --capital-continuity .. --opportunity .. --top-sector .. --mainline-sector 半导体 --mainline-state 强化 --sei 22`（全局安装用户路径为 `<技能安装目录>/scripts/eval_tracker.py`，台账写入 `~/.stock-prompt/eval/daily_scores.jsonl`）。台账 ≥60 个交易日时运行 `python scripts/eval_tracker.py report-daily` 查看各固定阈值的历史分位落位，据此校准阈值并披露样本期，禁止事后挑选阈值；`report-daily --extremes` 输出情绪极值后的市场表现，`report-mainline` 输出主线状态机的实际转移频率与停留时长（状态机从话术变统计模型的数据源，每日必落）。
 5. **数据缺失降级规则表**：
 
 | 数据项 | 缺失处理规则 |
@@ -333,7 +333,7 @@ $$\text{Opportunity Score} = \operatorname{Clamp}(0.3S + 0.4R + 0.3C - D, 0, 100
     1. **点位命中**：收盘价是否落在早盘预估区间 $[S_1, R_1]$ 之内。
     2. **主线命中**：早盘推演的前列主线是否进入实际全市场领涨 Top 10%。
     3. **方向偏差**：实际 $Z_{\text{ATR}}$ 对应三态与早盘最大概率方向是否一致。
-- **每日评分落盘（阈值校准闭环）**：本报告的情绪五项分、资金延续评分与机会评分必须执行 `record-daily` 落盘（命令见第二节第 4 条）；`report-daily` 输出各固定阈值的历史分位落位，台账满 60 日后优先按分位校准并披露样本期。
+- **每日评分落盘（阈值校准闭环）**：本报告的情绪五项分、资金延续评分、机会评分与主线状态（板块/状态机阶段/SEI）必须执行 `record-daily` 落盘（命令见第二节第 4 条）；`report-daily` 输出各固定阈值的历史分位落位，台账满 60 日后优先按分位校准并披露样本期，`report-mainline` 累计主线状态机转移统计。
 - **次日验证点**（只提供给 `market-prediction` 作为次日输入，不在收盘复盘中生成新的盘前概率）：
   * **情景 A (强势延续)**：触发条件为 [龙头高开 >3% 且开盘快速封板]
   * **情景 B (分歧转一致)**：触发条件为 [早盘小幅低开回踩分时均线获大单放量承接]
@@ -342,7 +342,19 @@ $$\text{Opportunity Score} = \operatorname{Clamp}(0.3S + 0.4R + 0.3C - D, 0, 100
 
 ---
 
-### 六、【可选交付】战报长图渲染 (Report Card)
+### 六、【复盘收尾】五问自审（强制，不得省略）
+
+本节每问必须引用机器产物 ID 或台账字段，不得以"已闭环""基本符合"等口头声明代替：
+
+1. **判断变了吗**：引用本次交接摘要的 `delta.conclusion_delta`；无变化则写"与上次一致"并引用 `delta.previous_snapshot_id`。
+2. **触发核验了吗**：逐条引用上一份交接的结构化触发器 `id` 与其 `status`（confirmed / failed / expired / unverifiable）；无法核验的写明 `unverifiable` 的原因。
+3. **错在哪**：早盘方向或主线未命中时，引用 `eval_tracker.py result --error-reasons` 的归因枚举（data_missing/.../overconfidence）；命中则写"方向命中，无归因"。
+4. **风险暴露变了吗**：对比上一次的风险暴露等级，说明变动驱动证据；未变化写"维持 <等级>，无新增风险证据"。
+5. **明日最关键一变量**：给出一条可观察、可证伪的核心变量，并写入本次交接摘要 `next_triggers`（结构化对象，含 `id`/`deadline`/`status=pending`）。
+
+---
+
+### 七、【可选交付】战报长图渲染 (Report Card)
 
 当用户需要图片版战报（或提到“生成卡片 / 长图 / 战报图”）时，将报告关键结论写入 JSON 后调用（仓库根目录运行；未指定 `--output` 时默认输出文件名自动带日期，避免覆盖旧战报）：
 
@@ -377,7 +389,7 @@ JSON 字段说明（正式报告必须填齐所列字段并通过脚本校验；
 
 ---
 
-### 七、【跨 Skill 交接】可复用交接摘要 (Handoff Snapshot)
+### 八、【跨 Skill 交接】可复用交接摘要 (Handoff Snapshot)
 
 报告末尾按公共契约输出交接摘要 JSON，供会话内 `market-prediction`（次日盘前）与 `stock-analysis`（个股穿透）直接继承；无对应内容的字段使用空数组或 `N/A`，不得补造：
 

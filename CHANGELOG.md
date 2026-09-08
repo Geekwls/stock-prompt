@@ -8,6 +8,7 @@
 - 公共契约增加连续复盘、证据独立性与隐私规则；修复昨日涨停溢价输出口径和固定 `MA5/-5%` 止损指令。
 - 新增 `doctor.py`、Schema/运行时字段一致性检查、显式 Pillow 依赖和 Python 3.10–3.12 CI 矩阵，安装 manifest 记录项目版本。
 - 新增统一命令入口 `stock_prompt.py`（handoff/thesis/eval/doctor/card/update 一键直达）；`handoff clean` 同步按保留周期清理 `.backups` 历史备份；新增夜间 MCP 公开网关观测流水线（非阻断）。
+- 复盘自证与洞察闭环：新增 `eval replay` 当日推演回放（盘前→竞价→收盘走势对比与修订评价）、`eval misses` 错案集复盘卡、`stock_prompt.py weekly` 周度复盘摘要、机会分有效性验证、主线状态机转移台账（`record-daily` / `report-mainline`）与复盘收尾五问强制节。
 
 ## [v7.0.0] - 2026-09-07
 ### 🏗 架构注册表、程序化交接与版本化研究闭环

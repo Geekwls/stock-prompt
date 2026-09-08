@@ -430,20 +430,26 @@ $$\text{Yesterday State} \xrightarrow{\text{Today Evidence + Capital Continuity}
 python scripts/eval_tracker.py record --date YYYY-MM-DD --market-phase preopen --regime S3 \
     --p-up 55 --p-side 30 --p-down 15 --opportunity 78 \
     --top-sector 半导体 --top-sectors 半导体,PCB,低空经济 --r1 3850 --s1 3800 \
-    --coverage-band high --volatility-band normal --data-status ok
+    --coverage-band high --volatility-band normal --data-status ok \
+    --e1 偏多 --e2 中性 --e3 强偏多 --e4 偏多
 
 # 9:25 后验作为独立阶段记录，不能覆盖盘前版本
 python scripts/eval_tracker.py record --date YYYY-MM-DD --market-phase auction --regime S3 \
     --p-up 62 --p-side 25 --p-down 13 --top-sector 半导体
 
-# 15:00 收盘后：记录实际结果（Z_ATR 五档自动归并三态）
+# 15:00 收盘后：记录实际结果（Z_ATR 五档自动归并三态；--top1-sector-change 供机会分有效性验证）
 python scripts/eval_tracker.py result --date YYYY-MM-DD --z-atr 0.62 \
-    --top-sectors 半导体,农业,化工 --close 3842 --high 3855 --low 3805
+    --top-sectors 半导体,农业,化工 --close 3842 --high 3855 --low 3805 --top1-sector-change 3.8
 
-# 任意时点：盘前与竞价后验分别评估
+# 任意时点：盘前与竞价后验分别评估；--validate-opportunity 输出机会分分层有效性
 python scripts/eval_tracker.py report --market-phase preopen
-python scripts/eval_tracker.py report --market-phase auction
+python scripts/eval_tracker.py report --market-phase auction --validate-opportunity
+
+# 复盘当日推演化：盘前 → 竞价后验 → 收盘实际 → 修订对错，一屏回放
+python scripts/eval_tracker.py replay --date YYYY-MM-DD
 ```
+
+`--e1`~`--e4` 为四大证据簇判档（取自第二节似然表档位：强偏多/偏多/中性/偏空/强偏空）；落盘后 `report` 会输出各簇"判多→实际涨 / 判空→实际跌"的判读力统计，用于定位最常带偏方向的证据簇。
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐

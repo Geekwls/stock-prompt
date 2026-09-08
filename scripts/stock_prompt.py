@@ -21,6 +21,7 @@ SUBCOMMANDS = {
     "handoff": "handoff_store.py",
     "thesis": "thesis_store.py",
     "eval": "eval_tracker.py",
+    "weekly": "weekly_digest.py",
     "doctor": "doctor.py",
     "card": "generate_report_card.py",
     "card-check": "check_schema_parity.py",
@@ -34,7 +35,8 @@ HELP = """stock-prompt 统一入口
 子命令:
   handoff        交接摘要校验/写入/读取/清理 (handoff_store.py)
   thesis         个股长期 Thesis Ledger (thesis_store.py)
-  eval           评估台账 record/result/report/migrate (eval_tracker.py)
+  eval           评估台账 record/result/replay/misses/report/report-mainline/migrate (eval_tracker.py)
+  weekly         周度复盘摘要：预测质量+评分+主线+触发器 (weekly_digest.py)
   doctor         安装/版本/MCP/日历健康检查 (doctor.py)
   card           战报长图渲染 (generate_report_card.py)
   card-check     Schema 与运行时字段一致性检查 (check_schema_parity.py)
@@ -44,6 +46,8 @@ HELP = """stock-prompt 统一入口
 
 示例:
   python scripts/stock_prompt.py handoff latest --within-trading-days 3
+  python scripts/stock_prompt.py eval replay --date 2026-09-08
+  python scripts/stock_prompt.py weekly --days 7
   python scripts/stock_prompt.py doctor
 """
 

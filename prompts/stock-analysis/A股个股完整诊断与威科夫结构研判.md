@@ -19,11 +19,12 @@
 - 报告必须给出 `as_of`，区分盘中快照、收盘数据、公告日期和财务报告期。过期数据可作背景，不得伪装成当前状态。
 - 不同来源、日期或统计口径的数据不得直接拼接计算；存在冲突时并列披露并降低置信度。
 
-## MCP 与确定性数据源协议
+## MCP 与结构化公开数据协议
 
 当宿主智能体环境已挂载 MCP 金融数据工具（如 `marketgraph-data`）时，执行以下优先路由协议：
 
 - **公开网关数据为 P3，可优先调用但不可自动升为 P1**：`marketgraph-data` 提供 `get_stock_quote`、`get_stock_kline`、`get_stock_timeline`、`get_index_kline`、`get_market_breadth`、`get_market_sentiment`、`get_limit_up_ladder`、`get_sector_fund_flow`、`get_sector_kline`、`get_basket_index`、`get_longhubang_detail` 与 `get_company_quality` 共 12 个工具。每次调用必须保留其 `source`、`data_status`、数据日期/`as_of`；`data_status != ok` 时不得参与计算或输出方向结论。工具支持代码与常见中文名称解析；`get_market_sentiment`、`get_limit_up_ladder` 与 `get_longhubang_detail` 支持历史 `date_str`（`YYYYMMDD` 或工具声明的格式）；`get_sector_fund_flow` 传 `days`（2-10）可回补板块主力资金 N 日历史；`get_index_kline` 提供核心指数 N 日逐日涨跌幅；`get_market_breadth` 最新交易日为精确涨跌家数与红盘率、历史交易日为情绪池替代口径（以 `breadth_precision` 区分，历史红盘率不得估算）。
+- **证据独立性**：同一底层网关、同一公告转载或同一数据供应链只能算一个独立证据族。证据表应同时记录 `source_family` 与 `independence_group`；来源数量和独立确认数量分别披露，禁止用多个转载链接抬高置信度。
 - **行情硬门槛仅验证序列完整性**：仅当 `get_stock_kline` 明确返回 `adjustment: qfq`、`data_status: ok` 且 `valid_bars >= 120` 时，才可通过“120 日复权 OHLCV”结构门槛；其来源仍按 P3 记录，涉及交易所公告、审计意见、监管和公司事件的关键事实仍须 P2/P1 原始来源核验。
 - **构造代理序列边界**：东财板块指数等网关不可用时，代理序列只能来自 `get_basket_index` 等权构造（须显式传入成分股、披露成分覆盖度与失败清单，`series_type=equal_weight_constructed`），不得由模型临时挑选成分股自行拼凑。代理序列属"构造数据"（非 P1–P3 网关原始输出）：只能用于方向性强弱对照（如板块相对强度、主线篮子走势），不得用于精确评分阈值、赔率计算或情绪得分，报告中必须标注"代理序列"并注明成分覆盖度（如"4/6 只成分股"）；等权口径与板块官方市值加权指数存在系统性差异，覆盖度不足（少于半数成分）时宁可保留 N/A。
 - **无感优雅回退**：若未检测到 MCP 工具，自动平滑回退至网络检索（P4）与公告核验（P2），并严格执行常规数据缺省审计。
@@ -51,6 +52,15 @@ Scored Weight = 实际参与评分的原始权重
 - 默认输出风险暴露等级：`积极观察 / 中性观察 / 防守观察 / 暂不评级`，不直接给账户仓位比例。
 - 只有用户提供当前仓位、成本、分析周期、最大可承受回撤和风险预算后，才允许给出条件化仓位情景。
 - 评分、概率和历史命中率都不代表收益承诺；不得输出确定性买卖指令。
+- 缺少用户风险参数时，不得给出固定百分比止损或统一均线止损；只提供结构确认位、结构失效位及其证据后果。
+
+## 连续复盘与判断审计
+
+存在前序交接时，报告必须先核验旧结论，而不是重新生成一份互不相干的快照。第一屏在核心结论后输出：较上次变化、此前假设的确认/失效状态、结论变化原因、仍未变化但重要的风险。没有前序快照时明确标记“首次基准”，不得虚构变化。
+
+交接中的 `review_delta` 使用 `previous_snapshot_id`、`changed_facts`、`conclusion_delta`、`confirmed_hypotheses`、`invalidated_hypotheses`、`unchanged_but_important` 六组字段。`next_triggers` 新生成时优先使用结构化对象，至少包含 `id`、`condition`、`status=pending`，可计算时补充 `metric`、`operator`、`threshold`、`deadline` 以及触发/失败后果。读取旧字符串触发器时保持兼容；下一份复盘必须将旧触发器更新为 `confirmed / failed / expired / unverifiable` 之一并回指证据。
+
+状态持久化默认不得保存账户、仓位和成本等敏感信息；确需保存必须取得用户明确授权。状态目录和文件分别使用仅用户可访问的权限。
 
 ## 跨 Skill 交接
 
@@ -64,20 +74,30 @@ Scored Weight = 实际参与评分的原始权重
   "coverage": "0%",
   "scored_weight": "0%",
   "confidence": "高 | 中 | 低 | 数据不足",
+  "regime_namespace": "market-s0-s6 | rotation-state-1-4 | stock-structure | not-applicable",
   "market_regime": "N/A",
   "primary_sectors": [],
   "watchlist": [],
   "risk_flags": [],
-  "next_triggers": []
+  "next_triggers": [],
+  "review_delta": {
+    "previous_snapshot_id": null,
+    "changed_facts": [],
+    "conclusion_delta": [],
+    "confirmed_hypotheses": [],
+    "invalidated_hypotheses": [],
+    "unchanged_but_important": []
+  }
 }
 ```
 
-- 交接摘要除在报告末尾输出外，必须通过 `python scripts/handoff_store.py write --stdin` 完成 Schema 校验与原子落盘；读取方优先执行 `python scripts/handoff_store.py latest --within-trading-days 3`，读取最近有效文件并检查返回的日历精度警告，不可执行脚本时才回退当前会话上下文。固定位置仍为 `~/.stock-prompt/state/handoff-<YYYYMMDD>-<report_type>.json`；缺失字段不得补造。
+- 交接摘要除在报告末尾输出外，必须通过当前 Skill 根目录的 `scripts/handoff_store.py write --stdin` 完成 Schema 校验与原子落盘；读取方优先执行同脚本的 `latest --within-trading-days 3`。市场类文件为 `handoff-<YYYYMMDD>-<report_type>.json`；个股文件必须提供 `subject={type: stock, id: 股票代码, name: 股票名称}`，保存为 `handoff-<YYYYMMDD>-stock-<代码>.json`，读取时使用 `--subject <代码>`，避免同日多股覆盖。
 - `market-prediction` 的预测台账统一写入 `~/.stock-prompt/eval/predictions.jsonl`（由 `scripts/eval_tracker.py` 固定，不随工作目录漂移）；`daily-review` 收盘回测读取同一份文件，禁止在其他位置另建台账。
 - `daily-review` 提供收盘市场状态、主线和次日验证变量。
 - `market-prediction` 读取最近收盘交接摘要，并根据隔夜与竞价证据更新。
 - `sector-rotation` 提供中期板块阶段、候选方向和衰竭风险。
 - `stock-analysis` 接收市场与板块状态作为 L1/L2 证据，并返回个股确认、失效和复核条件。
+- 个股需要跨越 3 个交易日持续跟踪时，另用当前 Skill 根目录的 `scripts/thesis_store.py` 维护按股票代码隔离的长期 Thesis Ledger；Handoff 负责短期跨 Skill 交接，Thesis 负责长期逻辑历史，两者不得混用。
 
 ## 一、不可违反的研究原则
 
@@ -108,7 +128,7 @@ Scored Weight = 实际参与评分的原始权重
 收到股票代码或名称后，按以下顺序执行：
 
 1. 识别证券代码、交易所、证券简称与研判时点；名称有歧义时先消歧。
-2. **上下文继承检查 (Context Inheritance)**：若前序会话中已存在当日 `daily-review` / `sector-rotation` 交接摘要（Handoff JSON）或复盘结论，或固定落盘位置 `~/.stock-prompt/state/handoff-*.json` 存在最近 3 个交易日内的交接文件，直接继承已确立的 L1（市场环境 Market Regime）与 L2（板块共振与角色定位）结论，并在覆盖率表中标记为【继承自前序复盘】，免去大盘重复检索，直接下钻 L3–L8。
+2. **上下文继承检查 (Context Inheritance)**：先用当前 Skill 根目录的 `scripts/handoff_store.py latest --within-trading-days 3 --report-type stock --subject <股票代码>` 查找该标的短期快照，再读取市场/板块交接；若存在当日 `daily-review` / `sector-rotation` 结论，只继承已确立的 L1（市场环境）与 L2（板块共振与角色定位），并标注来源与时点。需要跨越 3 个交易日持续跟踪时，再用当前 Skill 根目录的 `scripts/thesis_store.py get --stock-code <股票代码>` 读取长期逻辑历史。旧事实不得伪装成当前事实。
 3. 记录用户场景（新观察 / 已持仓 / 复盘 / 事件跟踪）、分析周期、成本价与仓位（如用户提供）；未提供时不得臆测。
 4. 建立数据清单、复权口径和覆盖率，执行硬数据门槛。
 5. 完成 L1–L8 八层证据采集，并为关键事实分配证据编号。
@@ -142,7 +162,7 @@ P5 模型推断，只能参与解释，不能生成事实或精确数值
 **MCP 优先路由**：宿主已挂载 `marketgraph-data` MCP 时，按下列路由优先取数，但公开网关输出按 P3 记录并保留 `source`、`data_status` 与时点；`data_status != ok` 的数据不得参与计算或输出方向结论。未挂载或调用失败时回退网络检索，并严格执行下述缺省审计。
 
 - **个股行情与结构**：`get_stock_kline`（默认 750 日前复权日 K + MA20/50/120/250/500 均线矩阵 + 3年分位 + 周线共振 + 量比/120日量能分位）仅当返回 `adjustment: qfq`、`data_status: ok` 且至少 120 根时，可通过行情结构门槛；`get_stock_quote` 与 `get_stock_timeline` 提供实时盘口与分时承接。
-- **L1 市场环境专用**：`get_index_kline`（宽基指数逐日涨跌幅，`count` 最大 130，覆盖 L4 的 120 日窗口）、`get_market_breadth`（红盘率与涨跌家数，最新交易日为精确口径，历史交易日为情绪池替代并以 `breadth_precision` 标注）、`get_market_sentiment`（两市成交额与涨停池）。三者均为确定性网关，优先于网页搜索，且不得以个股数据替代。
+- **L1 市场环境专用**：`get_index_kline`（宽基指数逐日涨跌幅，`count` 最大 130，覆盖 L4 的 120 日窗口）、`get_market_breadth`（红盘率与涨跌家数，最新交易日为精确口径，历史交易日为情绪池替代并以 `breadth_precision` 标注）、`get_market_sentiment`（两市成交额与涨停池）。三者均为 P3 结构化公开网关，优先于网页搜索，且不得以个股数据替代。
 - **L2 板块证据**：`get_sector_fund_flow`（当日全行业资金流榜；`days=2-10` 回补 N 日主力净流入历史、累计净额与趋势定性）、`get_sector_kline`（板块指数日K序列、MA5/10/20/60 与 5/20/60 日区间涨幅，兼作 L4 的行业基准）；东财板块源不可用时按公共契约改用 `get_basket_index` 传入板块主要成分股构造等权代理序列（标注"代理序列"与覆盖度，仅作方向性 RS 对照）。
 - **席位与公司质量**：`get_longhubang_detail`（龙虎榜席位穿透，含机构专用逐席位净额明细 `org_seat_net_details`）；`get_company_quality`（财务、商誉、解禁与排雷筛查）。
 - **服务端预计算标签的边界**：`get_stock_kline` 返回的 `wyckoff_multi_timeframe`、`weekly_alignment`、`macro_wyckoff_phase` 等结构标签按 P3 线索记录，只能用于宏观定调与交叉核对；L5 的威科夫主假设、竞争假设及 `Confirmed/Probable` 分级必须由模型基于 OHLCV 独立完成，不得直接照抄服务端标签充当结构确认——服务端标签与模型独立结论冲突时，必须并列披露并解释分歧。
@@ -209,7 +229,7 @@ P5 模型推断，只能参与解释，不能生成事实或精确数值
 
 评估指数趋势、全市场流动性、涨跌家数、风险偏好和当前 Market Regime。成交额阈值必须使用分位数或滚动均值校准，不得永久使用固定的“1.5万亿/2万亿”边界。
 
-宿主已挂载 `marketgraph-data` MCP 时，L1 优先使用 `get_index_kline`（宽基指数逐日涨跌幅，确定性网关）、`get_market_breadth`（红盘率与涨跌家数，历史交易日为情绪池替代口径）与 `get_market_sentiment`（两市成交额与涨停池）取数，优先于网页搜索；禁止用个股数据或搜索摘要替代市场环境数据。
+宿主已挂载 `marketgraph-data` MCP 时，L1 优先使用 `get_index_kline`（宽基指数逐日涨跌幅，P3 结构化公开网关）、`get_market_breadth`（红盘率与涨跌家数，历史交易日为情绪池替代口径）与 `get_market_sentiment`（两市成交额与涨停池）取数，优先于网页搜索；禁止用个股数据或搜索摘要替代市场环境数据。
 
 L1 不得使用个股跌幅、换手率、龙虎榜或52周区间代替市场环境数据；市场数据缺失时记为 `N/A`。
 
@@ -232,7 +252,7 @@ L1 不得使用个股跌幅、换手率、龙虎榜或52周区间代替市场环
 
 同时计算相对宽基指数和所属行业指数的 5日、20日超额收益。全市场 RS 分位必须来自同一交易日、同一股票池；无法取得横截面数据时标记 `N/A`，不得估计排名。
 
-双基准优先用 MCP 确定性数据：宽基基准用 `get_index_kline`（`count>=120` 覆盖相对强度窗口），行业基准用 `get_sector_kline`（板块日K收盘序列的 5/20 日区间涨幅）；两者须在同一截止日窗口内计算超额收益。
+双基准优先用 MCP 结构化公开数据：宽基基准用 `get_index_kline`（`count>=120` 覆盖相对强度窗口），行业基准用 `get_sector_kline`（板块日K收盘序列的 5/20 日区间涨幅）；两者须在同一截止日窗口内计算超额收益。
 
 缺少120日复权行情或任一同期基准时，L4 必须为 `N/A`，不得用个股区间跌幅替代相对强度。
 
@@ -441,26 +461,38 @@ L1 不得使用个股跌幅、换手率、龙虎榜或52周区间代替市场环
 6. 公司质量与重大事件风险清单。
 7. 综合评分区间、硬风险检查和裁决理由。
 8. 结构确认位、假设失效位、时间条件和情景目标。
-9. 后续跟踪变量与下一次复核触发条件。
-10. 跨 Skill 交接摘要：按下述结构输出 JSON 供会话内其他技能继承（无对应内容用空数组或 `N/A`，不得补造），`next_triggers` 复用第 9 项复核触发条件，并落盘到 `~/.stock-prompt/state/handoff-<YYYYMMDD>-stock.json`：
+9. 后续跟踪变量与下一次复核触发条件；存在旧快照时逐项裁定旧触发器为 confirmed / failed / expired / unverifiable。
+10. 跨 Skill 交接摘要：按下述结构输出 JSON 供会话内其他技能继承（无对应内容用空数组或 `N/A`，不得补造），并落盘到 `~/.stock-prompt/state/handoff-<YYYYMMDD>-stock-<代码>.json`：
 
 ```json
 {
   "report_type": "stock",
+  "subject": {"type": "stock", "id": "股票代码", "name": "股票名称"},
   "as_of": "YYYY-MM-DD HH:mm + 时点口径",
   "source_count": 0,
   "coverage": "0%",
   "scored_weight": "0%",
   "confidence": "高 | 中 | 低 | 数据不足",
-  "market_regime": "N/A",
+  "regime_namespace": "stock-structure",
+  "market_regime": "继承的 S0-S6 或 N/A",
   "primary_sectors": ["所属行业/主线"],
   "watchlist": ["标的代码"],
   "risk_flags": ["公司风险等级", "硬门槛状态"],
-  "next_triggers": ["结构确认位/失效位触发条件"]
+  "next_triggers": [{"id": "TRG-日期-01", "condition": "结构确认位/失效位触发条件", "status": "pending"}],
+  "review_delta": {
+    "previous_snapshot_id": null,
+    "changed_facts": [],
+    "conclusion_delta": [],
+    "confirmed_hypotheses": [],
+    "invalidated_hypotheses": [],
+    "unchanged_but_important": []
+  }
 }
 ```
 
-11. 明确声明：仅供研究参考，不构成投资建议。
+11. 若用户要求持续跟踪，或本次已读取长期 Thesis，使用 `scripts/thesis_store.py write --stdin` 更新 `~/.stock-prompt/theses/<代码>.json`。至少保存股票代码/名称、`as_of`、核心逻辑、逻辑健康度、催化、风险和结构化复核触发器；默认不得保存仓位、成本或账户信息。旧版本由脚本自动进入 `history`。
+
+12. 明确声明：仅供研究参考，不构成投资建议。
 
 ### 术语白话化规则（强制）
 

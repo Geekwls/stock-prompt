@@ -74,6 +74,7 @@ if defined PY_CMD (
     %PY_CMD% scripts\install_skills.py --check
     if errorlevel 1 goto install_failed
     echo ✅ 全局技能副本已同步并通过一致性校验。
+    %PY_CMD% scripts\doctor.py
     goto done
 ) else (
     echo [WARN] 未检测到 Python，跳过全局同步（仓库内技能已是最新）。

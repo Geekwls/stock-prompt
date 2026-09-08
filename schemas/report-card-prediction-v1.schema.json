@@ -2,10 +2,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Prediction report card input v1",
   "type": "object",
-  "required": ["title", "date", "regime", "sentiment_score", "position", "opportunity_score", "top_sector", "evidence", "indices_full", "sectors_full", "watchlist_full", "risk_warning"],
+  "required": ["title", "date", "regime", "sentiment_score", "position", "opportunity_score", "top_sector", "evidence", "indices_full", "sectors_full", "chain_lines", "seat_lines", "trade_lines", "watchlist_full", "eval_summary", "risk_warning"],
   "properties": {
     "title": {"type": "string"}, "date": {"type": "string"}, "regime": {"type": "string"},
-    "sentiment_score": {"type": "number"}, "opportunity_score": {"type": "number"},
+    "sentiment_score": {"type": "number"}, "position": {"type": "string"}, "opportunity_score": {"type": "number"}, "top_sector": {"type": "string"},
     "evidence": {"type": "array"}, "indices_full": {"type": "array"}, "sectors_full": {"type": "array"},
     "watchlist_full": {"type": "array"}, "risk_warning": {"type": "string"}
   },

@@ -66,7 +66,7 @@ def collect_errors(tag=None):
 
 def main():
     parser = argparse.ArgumentParser(description="校验 stock-prompt 版本与注册表一致性")
-    parser.add_argument("--tag", help="可选发布标签，例如 v7.0.0")
+    parser.add_argument("--tag", help="可选发布标签，例如 v7.1.0")
     args = parser.parse_args()
     errors = collect_errors(args.tag)
     for error in errors:

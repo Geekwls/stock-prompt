@@ -40,7 +40,7 @@ description: >-
    - `"[T日日期] 近5日 领涨板块 领跌板块 板块轮动"`
    - `"[T日日期] 龙虎榜 机构席位 游资席位 净买入"`
 3. **MCP 历史回补优先**：宿主已挂载 `marketgraph-data` MCP 时，优先按以下路由补数，补不齐的部分才走上述搜索与降级规则，禁止在有 MCP 可用的情况下直接判定“历史数据缺失”：
-   - **指数逐日涨跌幅（全 5 日）**：`get_index_kline`（确定性指数日K网关，沪指/深成指/创业板指/中证全指/沪深300，一次返回 N 日逐日涨跌幅，替代不稳定的网页搜索）。
+   - **指数逐日涨跌幅（全 5 日）**：`get_index_kline`（P3 结构化指数日K网关，沪指/深成指/创业板指/中证全指/沪深300，一次返回 N 日逐日涨跌幅，替代不稳定的网页搜索）。
    - **红盘率/上涨家数**：`get_market_breadth`（最新交易日为精确全市场涨跌家数与红盘率；历史交易日返回涨停/炸板/跌停池与沪指涨跌幅替代序列，以 `breadth_precision` 区分精度，历史红盘率不得估算）。
    - **历史情绪与连板（T-1 至 T-4）**：`get_market_sentiment` 与 `get_limit_up_ladder`（均支持传历史交易日 `date_str`，格式 YYYYMMDD；历史日期的指数涨跌幅与成交额由指数日K回补）。
    - **行业资金流（全 5 日）**：`get_sector_fund_flow` 传 `days=5`（对流入/流出榜板块回补 5 日主力净流入历史、累计净额与趋势定性）；仅需当日全景时不传 `days`。
@@ -230,11 +230,12 @@ JSON 字段说明（正式报告必须填齐所列字段并通过脚本校验；
   "coverage": "0%",
   "scored_weight": "0%",
   "confidence": "高 | 中 | 低 | 数据不足",
+  "regime_namespace": "rotation-state-1-4",
   "market_regime": "State 1-4 轮动状态",
   "primary_sectors": ["高低切候选主线", "老主线"],
   "watchlist": ["候选板块先锋标的代码", "中军锚点代码"],
   "risk_flags": ["主线衰竭 SEI 等级", "退潮预警"],
-  "next_triggers": ["次日 9:25 竞价验证关注点"]
+  "next_triggers": [{"id": "TRG-日期-925", "condition": "次日 9:25 竞价验证关注点", "status": "pending"}]
 }
 ```
 

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "project": {
     "name": "a-stock-research",
-    "version": "7.0.0",
+    "version": "7.1.0",
     "description": "A-Share Quantitative & Wyckoff Research Protocol for Autonomous Agents (Agent Plugins 1.0)",
     "homepage": "https://github.com/Geekwls/stock-prompt"
   },
@@ -46,7 +46,8 @@
       "prompt_target": "prompts/stock-analysis/A股个股完整诊断与威科夫结构研判.md",
       "bundled_scripts": [
         "generate_report_card.py",
-        "handoff_store.py"
+        "handoff_store.py",
+        "thesis_store.py"
       ]
     },
     {
@@ -55,7 +56,8 @@
       "source": ".agents/skills/stock-research-router",
       "prompt_target": "prompts/stock-research-router/A股全流程研究总控路由.md",
       "bundled_scripts": [
-        "handoff_store.py"
+        "handoff_store.py",
+        "thesis_store.py"
       ]
     }
   ],
@@ -67,7 +69,8 @@
     "report_card_daily": "schemas/report-card-daily-v1.schema.json",
     "report_card_prediction": "schemas/report-card-prediction-v1.schema.json",
     "report_card_rotation": "schemas/report-card-rotation-v1.schema.json",
-    "report_card_stock": "schemas/report-card-stock-v1.schema.json"
+    "report_card_stock": "schemas/report-card-stock-v1.schema.json",
+    "thesis": "schemas/thesis-v1.schema.json"
   },
   "mcp": {
     "name": "marketgraph-data",
@@ -95,6 +98,7 @@
   "script_sources": {
     "generate_report_card.py": "scripts/generate_report_card.py",
     "eval_tracker.py": "scripts/eval_tracker.py",
-    "handoff_store.py": "scripts/handoff_store.py"
+    "handoff_store.py": "scripts/handoff_store.py",
+    "thesis_store.py": "scripts/thesis_store.py"
   }
 }

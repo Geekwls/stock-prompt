@@ -16,15 +16,71 @@
     "report_type": {"enum": ["prediction", "daily", "rotation", "stock"]},
     "as_of": {"type": "string", "minLength": 10},
     "source_count": {"type": "integer", "minimum": 0},
+    "independent_source_count": {"type": "integer", "minimum": 0},
+    "evidence_refs": {"type": "array", "items": {"type": "string"}},
     "coverage": {"type": "string", "pattern": "^(N/A|[0-9]+(?:\\.[0-9]+)?%)$"},
     "scored_weight": {"type": "string", "pattern": "^(N/A|[0-9]+(?:\\.[0-9]+)?%)$"},
     "confidence": {"enum": ["高", "中", "低", "数据不足"]},
     "market_regime": {"type": "string"},
+    "regime_namespace": {"enum": ["market-s0-s6", "rotation-state-1-4", "stock-structure", "not-applicable"]},
     "primary_sectors": {"type": "array"},
     "watchlist": {"type": "array"},
     "risk_flags": {"type": "array"},
-    "next_triggers": {"type": "array"},
+    "next_triggers": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {"type": "string"},
+          {
+            "type": "object",
+            "required": ["id", "condition", "status"],
+            "properties": {
+              "id": {"type": "string", "minLength": 1},
+              "condition": {"type": "string", "minLength": 1},
+              "metric": {"type": "string"},
+              "operator": {"type": "string"},
+              "threshold": {},
+              "deadline": {"type": ["string", "null"]},
+              "status": {"enum": ["pending", "confirmed", "failed", "expired", "unverifiable"]},
+              "observed_value": {},
+              "consequence_if_met": {"type": "string"},
+              "consequence_if_failed": {"type": "string"}
+            },
+            "additionalProperties": true
+          }
+        ]
+      }
+    },
+    "snapshot_id": {"type": "string", "minLength": 1},
+    "subject": {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": {"enum": ["market", "sector", "stock"]},
+        "id": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$"},
+        "name": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "review_delta": {
+      "type": "object",
+      "properties": {
+        "previous_snapshot_id": {"type": ["string", "null"]},
+        "changed_facts": {"type": "array"},
+        "conclusion_delta": {"type": "array"},
+        "confirmed_hypotheses": {"type": "array"},
+        "invalidated_hypotheses": {"type": "array"},
+        "unchanged_but_important": {"type": "array"}
+      },
+      "additionalProperties": true
+    },
     "inherited_from": {"type": "array", "items": {"type": "string"}}
   },
+  "allOf": [
+    {
+      "if": {"properties": {"report_type": {"const": "stock"}}, "required": ["report_type"]},
+      "then": {"required": ["subject"]}
+    }
+  ],
   "additionalProperties": true
 }

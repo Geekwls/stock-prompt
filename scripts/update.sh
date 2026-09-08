@@ -52,6 +52,7 @@ fi
 if [ -n "$PY_BIN" ]; then
     if "$PY_BIN" scripts/install_skills.py && "$PY_BIN" scripts/install_skills.py --check; then
         echo "✅ 全局技能副本已同步并通过一致性校验。"
+        "$PY_BIN" scripts/doctor.py
     else
         echo "[WARN] 全局同步未完全成功，可稍后手动运行: python3 scripts/install_skills.py"
     fi

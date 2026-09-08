@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Prediction ledger record v1",
   "type": "object",
-  "required": ["type", "date", "schema_version", "model_version", "formula_version", "created_at"],
+  "required": ["type", "date", "schema_version", "model_version", "formula_version", "created_at", "snapshot_id", "revision"],
   "properties": {
     "type": {"enum": ["prediction", "result"]},
     "date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
@@ -11,6 +11,19 @@
     "formula_version": {"type": "string"},
     "source_snapshot": {"type": "string"},
     "created_at": {"type": "string"},
+    "recorded_at": {"type": "string"},
+    "snapshot_id": {"type": "string", "minLength": 1},
+    "revision": {"type": "integer", "minimum": 1},
+    "supersedes": {"type": ["string", "null"]},
+    "revision_reason": {"type": "string"},
+    "market_phase": {"enum": ["preopen", "auction"]},
+    "coverage_band": {"enum": ["high", "medium", "low", "insufficient", null]},
+    "volatility_band": {"enum": ["low", "normal", "high", null]},
+    "data_status": {"enum": ["ok", "partial", "degraded", null]},
+    "error_reasons": {
+      "type": "array",
+      "items": {"enum": ["data_missing", "source_delay", "event_shock", "regime_misread", "sector_mapping", "threshold_issue", "evidence_conflict", "overconfidence"]}
+    },
     "probs": {"type": "object"},
     "actual_state": {"enum": ["up", "side", "down"]}
   },

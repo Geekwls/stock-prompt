@@ -15,6 +15,8 @@ from pathlib import Path
 SCHEMA_VERSION = "1.0"
 REPORT_TYPES = {"prediction", "daily", "rotation", "stock"}
 CONFIDENCE_LEVELS = {"高", "中", "低", "数据不足"}
+TRIGGER_STATUSES = {"pending", "confirmed", "failed", "expired", "unverifiable"}
+REGIME_NAMESPACES = {"market-s0-s6", "rotation-state-1-4", "stock-structure", "not-applicable"}
 REQUIRED_FIELDS = (
     "report_type", "as_of", "source_count", "coverage", "scored_weight",
     "confidence", "market_regime", "primary_sectors", "watchlist",
@@ -22,6 +24,7 @@ REQUIRED_FIELDS = (
 )
 PERCENT_RE = re.compile(r"^(?:N/A|[0-9]+(?:\.[0-9]+)?%)$")
 DATE_RE = re.compile(r"^([0-9]{4})-?([0-9]{2})-?([0-9]{2})")
+SUBJECT_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
 
 def state_root(explicit=None):
@@ -78,9 +81,36 @@ def validate_handoff(payload):
         errors.append("confidence 必须是 高/中/低/数据不足")
     if not isinstance(payload["market_regime"], str):
         errors.append("market_regime 必须是字符串")
+    if "regime_namespace" in payload and payload["regime_namespace"] not in REGIME_NAMESPACES:
+        errors.append("regime_namespace 不在允许枚举内")
     for field in ("primary_sectors", "watchlist", "risk_flags", "next_triggers"):
         if not isinstance(payload[field], list):
             errors.append(f"{field} 必须是数组")
+    subject = payload.get("subject")
+    if payload.get("report_type") == "stock" and not isinstance(subject, dict):
+        errors.append("stock 交接必须提供 subject 对象")
+    if subject is not None:
+        if not isinstance(subject, dict):
+            errors.append("subject 必须是对象")
+        else:
+            subject_id = str(subject.get("id", ""))
+            if not SUBJECT_ID_RE.fullmatch(subject_id):
+                errors.append("subject.id 必须是 1-64 位字母、数字、点、下划线或连字符")
+            if subject.get("type") not in {"market", "sector", "stock"}:
+                errors.append("subject.type 必须是 market/sector/stock")
+    for index, trigger in enumerate(payload.get("next_triggers", [])):
+        if isinstance(trigger, str):
+            continue
+        if not isinstance(trigger, dict):
+            errors.append(f"next_triggers[{index}] 必须是字符串或对象")
+            continue
+        for field in ("id", "condition", "status"):
+            if not isinstance(trigger.get(field), str) or not trigger[field].strip():
+                errors.append(f"next_triggers[{index}].{field} 必须是非空字符串")
+        if trigger.get("status") not in TRIGGER_STATUSES:
+            errors.append(f"next_triggers[{index}].status 不在允许枚举内")
+    if "review_delta" in payload and not isinstance(payload["review_delta"], dict):
+        errors.append("review_delta 必须是对象")
     if "inherited_from" in payload and not isinstance(payload["inherited_from"], list):
         errors.append("inherited_from 必须是数组")
     return errors
@@ -101,6 +131,12 @@ def prepare_handoff(payload, model_version=None):
     prepared.setdefault("model_version", model_version or discover_model_version())
     prepared.setdefault("created_at", datetime.now().astimezone().isoformat(timespec="seconds"))
     prepared["trading_date"] = trading_date.isoformat()
+    subject = prepared.get("subject") or {}
+    subject_token = str(subject.get("id") or "market")
+    prepared.setdefault(
+        "snapshot_id",
+        f"{trading_date.isoformat()}-{prepared.get('report_type', 'unknown')}-{subject_token}-{datetime.now().strftime('%H%M%S%f')}",
+    )
     errors = validate_handoff(prepared)
     if errors:
         raise ValueError("；".join(errors))
@@ -109,8 +145,15 @@ def prepare_handoff(payload, model_version=None):
 
 def atomic_write(payload, root):
     root.mkdir(parents=True, exist_ok=True)
+    try:
+        root.chmod(0o700)
+    except OSError:
+        pass
     compact_date = payload["trading_date"].replace("-", "")
-    destination = root / f"handoff-{compact_date}-{payload['report_type']}.json"
+    suffix = ""
+    if payload["report_type"] == "stock":
+        suffix = f"-{payload['subject']['id']}"
+    destination = root / f"handoff-{compact_date}-{payload['report_type']}{suffix}.json"
     if destination.exists():
         backup_root = root / ".backups"
         backup_root.mkdir(exist_ok=True)
@@ -124,6 +167,10 @@ def atomic_write(payload, root):
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, destination)
+        try:
+            destination.chmod(0o600)
+        except OSError:
+            pass
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
@@ -173,13 +220,13 @@ def find_calendar(explicit=None):
 
 
 def load_calendar(path):
-    """返回 (trading_days, closed_days)；trading_days 为 None 表示日历未提供完整交易日序列。"""
+    """返回 (trading_days, closed_days, covered_years)。"""
     if not path:
-        return None, set()
+        return None, set(), set()
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
-        return None, set()
+        return None, set(), set()
 
     def to_dates(values):
         result = set()
@@ -192,7 +239,18 @@ def load_calendar(path):
 
     trading = to_dates(data.get("trading_days"))
     closed = to_dates(data.get("closed_dates"))
-    return (trading or None), closed
+    covered_years = {int(value) for value in data.get("covered_years", []) if str(value).isdigit()}
+    return (trading or None), closed, covered_years
+
+
+def recent_trading_days(reference, count, closed_days):
+    result = []
+    cursor = reference
+    while len(result) < count:
+        if cursor.weekday() < 5 and cursor not in closed_days:
+            result.append(cursor)
+        cursor -= timedelta(days=1)
+    return set(result)
 
 
 def calendar_window(reference, count, trading_days):
@@ -214,21 +272,23 @@ def file_date_window(records, reference, count):
     }
 
 
-def select_latest(root, within_trading_days=3, report_type=None, reference=None, calendar_path=None):
+def select_latest(root, within_trading_days=3, report_type=None, reference=None, calendar_path=None, subject=None):
     reference = reference or date.today()
     records = valid_records(root)
     if report_type:
         records = [item for item in records if item[2]["report_type"] == report_type]
+    if subject:
+        records = [item for item in records if str(item[2].get("subject", {}).get("id", "")) == str(subject)]
 
-    trading_days, closed_days = load_calendar(find_calendar(calendar_path))
+    trading_days, closed_days, covered_years = load_calendar(find_calendar(calendar_path))
     window = calendar_window(reference, within_trading_days, trading_days)
     if window is not None:
         precision, accepted, warning = "calendar", set(window), None
+    elif reference.year in covered_years:
+        accepted = recent_trading_days(reference, within_trading_days, closed_days)
+        precision, warning = "holiday_calendar", None
     else:
-        weekdays = {
-            day for day in recent_weekdays(reference, within_trading_days)
-            if day not in closed_days
-        }
+        weekdays = recent_trading_days(reference, within_trading_days, closed_days)
         accepted = weekdays | file_date_window(records, reference, within_trading_days)
         precision = "weekday_fallback"
         warning = "交易日历未覆盖目标日期，当前按工作日近似"
@@ -262,6 +322,7 @@ def main():
     latest = sub.add_parser("latest", help="读取最近有效 Handoff")
     latest.add_argument("--within-trading-days", type=int, default=3)
     latest.add_argument("--report-type", choices=sorted(REPORT_TYPES))
+    latest.add_argument("--subject", help="研究对象 ID；个股使用股票代码")
     latest.add_argument("--as-of", help="参考日期 YYYY-MM-DD，默认今天")
     latest.add_argument("--calendar", help="A 股交易日历 JSON（含 trading_days / closed_dates）")
 
@@ -282,7 +343,9 @@ def main():
         if args.within_trading_days < 1:
             parser.error("--within-trading-days 必须大于 0")
         reference = parse_trading_date(args.as_of) if args.as_of else date.today()
-        selected = select_latest(root, args.within_trading_days, args.report_type, reference, args.calendar)
+        selected = select_latest(
+            root, args.within_trading_days, args.report_type, reference, args.calendar, args.subject,
+        )
         if not selected:
             print("N/A")
             return 1
@@ -305,6 +368,18 @@ def main():
         print(f"[{'DELETE' if args.apply else 'WOULD DELETE'}] {path}")
         if args.apply:
             path.unlink()
+    # 同步按保留周期清理 .backups 下的历史备份，避免无限累积
+    backup_root = root / ".backups"
+    if backup_root.is_dir():
+        for backup in sorted(backup_root.glob("*.json")):
+            try:
+                modified = datetime.fromtimestamp(backup.stat().st_mtime).date()
+            except OSError:
+                continue
+            if modified < cutoff:
+                print(f"[{'DELETE' if args.apply else 'WOULD DELETE'}] {backup}")
+                if args.apply:
+                    backup.unlink()
     return 0
 
 

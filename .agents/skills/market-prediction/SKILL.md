@@ -170,7 +170,7 @@ $$P(\text{State} | E_1, E_2, E_3, E_4) \propto P(\text{Regime Prior}) \times \pr
 - **空间指标**：
   * 上方剩余空间：$\text{Space}_{\text{Up}} = \frac{R_1 - \text{现价}}{\text{现价}} \times 100\%$
   * 下方安全垫：$\text{Space}_{\text{Down}} = \frac{\text{现价} - S_1}{\text{现价}} \times 100\%$
-- **点位候补取数**：`get_index_kline` 返回的 MA5/MA20/MA60、20 日高低点与 ATR14 可直接充当 MA 候补、前高/前低与 ATR 波动率上下沿（$\pm 0.8/\pm 1.5$ ATR 以现价与 ATR14 计算）；期权墙与筹码 POC 无公开确定性数据源时保留 `N/A` 并降级为价格结构候补，不得虚构。
+- **点位候补取数**：`get_index_kline` 返回的 MA5/MA20/MA60、20 日高低点与 ATR14 可直接充当 MA 候补、前高/前低与 ATR 波动率上下沿（$\pm 0.8/\pm 1.5$ ATR 以现价与 ATR14 计算）；期权墙与筹码 POC 无可核验公开数据时保留 `N/A` 并降级为价格结构候补，不得虚构。
 
 ---
 
@@ -334,22 +334,28 @@ $$\text{Yesterday State} \xrightarrow{\text{Today Evidence + Capital Continuity}
 ---
 
 ### 八、【闭环自检】多维模型量化评估体系 (Evaluation Engine)
-*（预测与实际结果必须落盘到台账文件，滚动指标由脚本计算，禁止口头估算。台账固定写入 `~/.stock-prompt/eval/predictions.jsonl`，不随工作目录漂移，`daily-review` 收盘回测读取同一份。）*
+*（预测与实际结果必须落盘到台账文件，滚动指标由脚本计算，禁止口头估算。预测采用不可变修订：同日同阶段重复写入必须显式 `--revise --revision-reason`，已有收盘结果后禁止补写预测。台账固定写入 `~/.stock-prompt/eval/predictions.jsonl`，不随工作目录漂移。）*
 
 以下命令均在**仓库根目录**执行（全局安装用户请把路径替换为 `<技能安装目录>/scripts/eval_tracker.py`；Windows 用 `python`，Linux/macOS 可用 `python3`）：
 
 ```bash
 # 盘前 8:30-9:15：记录当日预测（写入 ~/.stock-prompt/eval/predictions.jsonl）
-python scripts/eval_tracker.py record --date YYYY-MM-DD --regime S3 \
+python scripts/eval_tracker.py record --date YYYY-MM-DD --market-phase preopen --regime S3 \
     --p-up 55 --p-side 30 --p-down 15 --opportunity 78 \
-    --top-sector 半导体 --top-sectors 半导体,PCB,低空经济 --r1 3850 --s1 3800
+    --top-sector 半导体 --top-sectors 半导体,PCB,低空经济 --r1 3850 --s1 3800 \
+    --coverage-band high --volatility-band normal --data-status ok
+
+# 9:25 后验作为独立阶段记录，不能覆盖盘前版本
+python scripts/eval_tracker.py record --date YYYY-MM-DD --market-phase auction --regime S3 \
+    --p-up 62 --p-side 25 --p-down 13 --top-sector 半导体
 
 # 15:00 收盘后：记录实际结果（Z_ATR 五档自动归并三态）
 python scripts/eval_tracker.py result --date YYYY-MM-DD --z-atr 0.62 \
     --top-sectors 半导体,农业,化工 --close 3842 --high 3855 --low 3805
 
-# 任意时点：输出 20 日滚动评估
-python scripts/eval_tracker.py report
+# 任意时点：盘前与竞价后验分别评估
+python scripts/eval_tracker.py report --market-phase preopen
+python scripts/eval_tracker.py report --market-phase auction
 ```
 
 ```text
@@ -397,7 +403,7 @@ JSON 字段说明（正式报告必须填齐所列字段并通过脚本校验；
   "sectors_full": [["半导体/算力硬件", "[强化期]", "92/100", "88%", "45 (健康)", "88 分 [极高]", "寒武纪", "中际旭创", "优先核心中军，等分歧放量承接"]],
   "chain_lines": ["• 上游 (...): ... -> ...", "• 中游 (...): ... -> ...", "• 下游 (...): ... -> ..."],
   "seat_lines": ["机构加仓: ...", "游资连板: ...", "风险预警: ..."],
-  "trade_lines": ["优先标的: ...", "等待条件: ...", "止损纪律: ..."],
+  "trade_lines": ["优先标的: ...", "等待条件: ...", "结构失效纪律: ..."],
   "watchlist_full": [["高低切潜力主线", "板块", "标的 (代码)", "竞价量能/价格特征", "[强确认做多]", "开盘分歧放量承接时逢低介入"]],
   "eval_summary": [["模型置信度", "88 / 100", "完整度极高"]],
   "risk_warning": "[失效风险预警] ..."
@@ -419,11 +425,15 @@ JSON 字段说明（正式报告必须填齐所列字段并通过脚本校验；
   "coverage": "0%",
   "scored_weight": "0%",
   "confidence": "高 | 中 | 低 | 数据不足",
+  "regime_namespace": "market-s0-s6",
   "market_regime": "S0-S6",
   "primary_sectors": ["第一主线", "第二主线", "第三主线"],
   "watchlist": ["高低切候选标的代码", "竞价验证标的代码"],
   "risk_flags": ["证伪触发点", "拥挤度或失效预警"],
-  "next_triggers": ["9:25 竞价量比验证点", "S1 跌破放量收回观察"]
+  "next_triggers": [
+    {"id": "TRG-日期-925", "condition": "9:25 竞价量比验证点", "status": "pending"},
+    {"id": "TRG-日期-S1", "condition": "S1 跌破放量收回观察", "status": "pending"}
+  ]
 }
 ```
 

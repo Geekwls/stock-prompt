@@ -16,7 +16,8 @@ daily_scores.jsonl。首次运行若检测到旧版相对路径台账 ./eval/pre
 会自动复制迁移到新位置（原文件保留）。
 优先级：--ledger 参数 > STOCK_PROMPT_LEDGER 环境变量 > 默认固定路径；
 每日台账同理（--daily-ledger > STOCK_PROMPT_DAILY_LEDGER > 预测台账同目录）。
-同一日期重复写入视为更新（后写覆盖）。
+预测与结果均采用追加式不可变修订：同一日期/阶段重复写入必须显式传入
+--revise，并保留 revision / supersedes；已有收盘结果后禁止补写或修改盘前预测。
 """
 
 import argparse
@@ -39,6 +40,10 @@ LEGACY_LEDGER = os.path.join("eval", "predictions.jsonl")
 LEDGER_SCHEMA_VERSION = "1.0"
 PREDICTION_FORMULA_VERSION = "prediction-v2"
 DAILY_FORMULA_VERSION = "daily-v2"
+ERROR_REASONS = {
+    "data_missing", "source_delay", "event_shock", "regime_misread",
+    "sector_mapping", "threshold_issue", "evidence_conflict", "overconfidence",
+}
 
 
 def discover_model_version():
@@ -61,6 +66,40 @@ def record_metadata(args, formula_default):
         "model_version": getattr(args, "model_version", None) or discover_model_version(),
         "formula_version": getattr(args, "formula_version", None) or formula_default,
         **({"source_snapshot": args.source_snapshot} if getattr(args, "source_snapshot", None) else {}),
+    }
+
+
+def read_records(path):
+    records = []
+    if not os.path.exists(path):
+        return records
+    with open(path, "r", encoding="utf-8") as stream:
+        for line in stream:
+            try:
+                records.append(json.loads(line))
+            except (json.JSONDecodeError, TypeError):
+                continue
+    return records
+
+
+def matching_records(path, record_type, date, phase=None):
+    matches = []
+    for record in read_records(path):
+        if record.get("type") != record_type or record.get("date") != date:
+            continue
+        if phase is not None and record.get("market_phase", "preopen") != phase:
+            continue
+        matches.append(record)
+    return matches
+
+
+def revision_metadata(previous, prefix):
+    latest = max(previous, key=lambda item: int(item.get("revision", 1))) if previous else None
+    revision = int(latest.get("revision", 1)) + 1 if latest else 1
+    return {
+        "revision": revision,
+        **({"supersedes": latest.get("snapshot_id")} if latest else {}),
+        "snapshot_id": f"{prefix}-r{revision}-{datetime.now().strftime('%H%M%S%f')}",
     }
 
 
@@ -96,8 +135,8 @@ def zatr_to_state(z):
     return "side"
 
 
-def load_ledger(path, model_version=None):
-    """返回 (预测, 实际) 两个字典，同日期同类型后写覆盖（等价于更新）"""
+def load_ledger(path, model_version=None, market_phase="preopen"):
+    """返回指定市场阶段的预测与实际；显式修订按 revision 选择，原记录始终保留。"""
     preds, results = {}, {}
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
@@ -112,16 +151,31 @@ def load_ledger(path, model_version=None):
                 if model_version and record_version(rec) != model_version:
                     continue
                 if rec["type"] == "prediction":
-                    preds[rec["date"]] = rec
-                else:
-                    results[rec["date"]] = rec
+                    if rec.get("market_phase", "preopen") != market_phase:
+                        continue
+                    current = preds.get(rec["date"])
+                    if current is None or int(rec.get("revision", 1)) >= int(current.get("revision", 1)):
+                        preds[rec["date"]] = rec
+                elif rec["type"] == "result":
+                    current = results.get(rec["date"])
+                    if current is None or int(rec.get("revision", 1)) >= int(current.get("revision", 1)):
+                        results[rec["date"]] = rec
     return preds, results
 
 
 def append_record(path, rec):
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    directory = os.path.dirname(os.path.abspath(path))
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    try:
+        os.chmod(directory, 0o700)
+    except OSError:
+        pass
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
 
 
 def sector_match(predicted, actual_list):
@@ -152,15 +206,31 @@ def cmd_record(args):
     regime_token = args.regime.strip().split(" ")[0] if args.regime.strip() else ""
     if not re.fullmatch(r"S[0-6]", regime_token):
         print(f"[WARN] regime '{args.regime}' 不符合 S0-S6 约定，仍按原样记录")
+    phase = getattr(args, "market_phase", "preopen")
+    previous = matching_records(args.ledger, "prediction", args.date, phase)
+    if matching_records(args.ledger, "result", args.date):
+        sys.exit("[ERR] 当日收盘结果已存在，禁止事后补写或修改盘前预测")
+    if previous and not getattr(args, "revise", False):
+        sys.exit("[ERR] 同日同阶段预测已存在；如确需修订，请使用 --revise 并填写 --revision-reason")
+    if previous and not str(getattr(args, "revision_reason", "") or "").strip():
+        sys.exit("[ERR] --revise 必须同时填写 --revision-reason")
     rec = {
         "type": "prediction",
         "date": args.date,
+        "market_phase": phase,
         "regime": args.regime,
         "probs": parse_probs(args),
         "opportunity": args.opportunity,
         "top_sector": args.top_sector,
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "recorded_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "coverage_band": getattr(args, "coverage_band", None),
+        "data_status": getattr(args, "data_status", None),
+        "volatility_band": getattr(args, "volatility_band", None),
     }
+    rec.update(revision_metadata(previous, f"{args.date}-{phase}-prediction"))
+    if previous:
+        rec["revision_reason"] = args.revision_reason
     rec.update(record_metadata(args, PREDICTION_FORMULA_VERSION))
     top_sectors = [s.strip() for s in (args.top_sectors or "").split(",") if s.strip()]
     if top_sectors:
@@ -174,14 +244,22 @@ def cmd_record(args):
 
 
 def cmd_result(args):
+    previous = matching_records(args.ledger, "result", args.date)
+    if previous and not getattr(args, "revise", False):
+        sys.exit("[ERR] 同日收盘结果已存在；如需纠错，请使用 --revise 并填写 --revision-reason")
+    if previous and not str(getattr(args, "revision_reason", "") or "").strip():
+        sys.exit("[ERR] --revise 必须同时填写 --revision-reason")
     rec = {
         "type": "result",
         "date": args.date,
         "z_atr": args.z_atr,
         "actual_state": zatr_to_state(args.z_atr),
         "top_sectors": [s.strip() for s in args.top_sectors.split(",") if s.strip()],
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
     }
+    rec.update(revision_metadata(previous, f"{args.date}-result"))
+    if previous:
+        rec["revision_reason"] = args.revision_reason
     rec.update(record_metadata(args, PREDICTION_FORMULA_VERSION))
     if args.close is not None:
         rec["close"] = args.close
@@ -189,6 +267,12 @@ def cmd_result(args):
         rec["high"] = args.high
     if args.low is not None:
         rec["low"] = args.low
+    reasons = [item.strip() for item in str(getattr(args, "error_reasons", "") or "").split(",") if item.strip()]
+    invalid_reasons = sorted(set(reasons) - ERROR_REASONS)
+    if invalid_reasons:
+        sys.exit("[ERR] 未知错误归因: " + ", ".join(invalid_reasons))
+    if reasons:
+        rec["error_reasons"] = reasons
     append_record(args.ledger, rec)
     print(f"[OK] 已记录 {args.date} 收盘实际 (Z_ATR={args.z_atr} -> {STATE_CN[rec['actual_state']]}) -> {args.ledger}")
 
@@ -325,11 +409,12 @@ def cmd_report(args):
             cmd_report(child)
         return
     selected_version = getattr(args, "filter_version", None) or getattr(args, "model_version", None)
-    preds, results = load_ledger(args.ledger, selected_version)
+    phase = getattr(args, "market_phase", "preopen")
+    preds, results = load_ledger(args.ledger, selected_version, phase)
     pairs = merge_pairs(preds, results)[-args.window:]
     pending = len(set(preds) - set(results))
 
-    print(f"=== market-prediction 滚动评估（最近 {len(pairs)} 个已完成日，窗口 {args.window}，待收盘 {pending} 日） ===")
+    print(f"=== market-prediction 滚动评估（阶段 {phase}，最近 {len(pairs)} 个已完成日，窗口 {args.window}，待收盘 {pending} 日） ===")
     if not pairs:
         print("台账中暂无配对完成的记录。先 record 盘前预测，再 result 收盘实际。")
         return
@@ -388,6 +473,27 @@ def cmd_report(args):
         p_sum, hits = cal_buckets[bucket]
         n = len(hits)
         print(f"    {bucket:>7}: 预测均值 {p_sum / n:5.1f}% | 实际命中 {sum(hits) / n * 100:5.1f}% | 样本 {n} 日")
+
+    print("• 分环境方向命中率:")
+    for field, label in (("regime", "Regime"), ("coverage_band", "覆盖率"), ("volatility_band", "波动率"), ("data_status", "数据状态")):
+        groups = {}
+        for _, pred, result in pairs:
+            value = pred.get(field)
+            if not value:
+                continue
+            predicted = max(STATES, key=lambda state: pred["probs"][state])
+            groups.setdefault(str(value), []).append(predicted == result["actual_state"])
+        for value, hits in sorted(groups.items()):
+            print(f"    {label}={value}: {sum(hits)}/{len(hits)} = {sum(hits) / len(hits) * 100:.1f}%")
+    reason_counts = {}
+    for _, pred, result in pairs:
+        predicted = max(STATES, key=lambda state: pred["probs"][state])
+        if predicted == result["actual_state"]:
+            continue
+        for reason in result.get("error_reasons", ["unclassified"]):
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
+    if reason_counts:
+        print("• 未命中归因: " + " | ".join(f"{key}={value}" for key, value in sorted(reason_counts.items())))
 
 
 def ledger_versions(path, allowed_types):
@@ -478,6 +584,12 @@ def main():
     p_rec.add_argument("--model-version", default=discover_model_version(), help="模型版本，默认读取当前项目版本")
     p_rec.add_argument("--formula-version", default=PREDICTION_FORMULA_VERSION, help="预测公式版本")
     p_rec.add_argument("--source-snapshot", help="关联的来源快照或 Handoff ID")
+    p_rec.add_argument("--market-phase", choices=("preopen", "auction"), default="preopen", help="预测阶段")
+    p_rec.add_argument("--coverage-band", choices=("high", "medium", "low", "insufficient"), help="证据覆盖率分组")
+    p_rec.add_argument("--volatility-band", choices=("low", "normal", "high"), help="波动率分组")
+    p_rec.add_argument("--data-status", choices=("ok", "partial", "degraded"), help="数据状态分组")
+    p_rec.add_argument("--revise", action="store_true", help="显式追加修订，不覆盖原预测")
+    p_rec.add_argument("--revision-reason", help="修订原因；--revise 时必填")
     p_rec.set_defaults(func=cmd_record)
 
     p_res = sub.add_parser("result", help="收盘后记录当日实际")
@@ -493,6 +605,9 @@ def main():
     p_res.add_argument("--model-version", default=discover_model_version(), help="模型版本，须与对应预测一致")
     p_res.add_argument("--formula-version", default=PREDICTION_FORMULA_VERSION, help="结果归并公式版本")
     p_res.add_argument("--source-snapshot", help="关联的来源快照或 Handoff ID")
+    p_res.add_argument("--error-reasons", help="未命中归因，逗号分隔：data_missing/source_delay/event_shock/regime_misread/sector_mapping/threshold_issue/evidence_conflict/overconfidence")
+    p_res.add_argument("--revise", action="store_true", help="显式追加结果纠错，不覆盖原记录")
+    p_res.add_argument("--revision-reason", help="结果修订原因；--revise 时必填")
     p_res.set_defaults(func=cmd_result)
 
     p_rpt = sub.add_parser("report", help="输出滚动评估指标")
@@ -500,6 +615,7 @@ def main():
     p_rpt.add_argument("--model-version", default=discover_model_version(), help="默认统计的当前模型版本")
     p_rpt.add_argument("--filter-version", help="指定统计某个模型版本")
     p_rpt.add_argument("--all-versions", action="store_true", help="按模型版本分组展示")
+    p_rpt.add_argument("--market-phase", choices=("preopen", "auction"), default="preopen", help="分别评估盘前或竞价后验")
     p_rpt.set_defaults(func=cmd_report)
 
     p_drec = sub.add_parser("record-daily", help="收盘复盘后记录当日情绪/延续/机会评分")

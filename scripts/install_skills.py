@@ -144,6 +144,8 @@ def write_manifest(root, files):
     payload = {
         "format": 1,
         "project": "stock-prompt",
+        "project_version": REGISTRY["project"]["version"],
+        "installed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "managed_files": sorted(files),
         "hashes": {relative: file_hash(source) for relative, source in sorted(files.items())},
     }
@@ -255,7 +257,7 @@ def mcp_registered():
 def print_post_install_guide(target):
     print()
     print("=" * 62)
-    print("🚀 stock-prompt 四大技能已就绪 —— 30 秒快速上手")
+    print("🚀 stock-prompt 五大技能已就绪 —— 30 秒快速上手")
     print("=" * 62)
     print("🗣 直接用自然语言提问，Agent 会自动激活对应技能：")
     print('   盘前 8:30-9:15 : "做一份今天的盘前全景预测"')
@@ -265,6 +267,7 @@ def print_post_install_guide(target):
     print("🎨 战报长图（仓库根目录运行）:")
     print("   python scripts/generate_report_card.py --demo --type stock")
     print("🔄 日常更新: bash scripts/update.sh （Windows: scripts\\update.bat）")
+    print("🩺 环境诊断: python scripts/doctor.py")
     print()
     if MCP_SERVER.is_file() and not mcp_registered():
         print("🔌 [建议] 尚未检测到 MarketGraph MCP 数据网关注册。")

@@ -179,7 +179,7 @@ $$\text{Opportunity Score} = \operatorname{Clamp}(0.3S + 0.4R + 0.3C - D, 0, 100
 ### 一、市场情绪与资金总量定调
 - **量能走势**：两市全天成交额 [XXXX] 亿元（较 5 日均量【放量 / 平量 / 缩量】XX%）。
 - **市场广度**：上涨 [XXXX] 家 / 下跌 [XXXX] 家（涨跌比 [X:X]）；涨停 [XX] 家 / 跌停 [XX] 家；炸板率 [XX]%。
-- **昨日涨停溢价**：昨日涨停个股今日平均红盘率 [XX]%，连板晋级率 [XX]%。
+- **昨日涨停溢价**：昨日涨停股今日平均涨幅 [XX]%，相对全市场平均涨幅的超额为 [XX]%；连板晋级率 [XX]%。
 - **Market Regime 定调**：【S0-S6 状态名称】（*如：处于 S2 存量震荡向 S3 趋势启动的过渡阶段*）。
 
 ---
@@ -242,7 +242,7 @@ $$\text{Opportunity Score} = \operatorname{Clamp}(0.3S + 0.4R + 0.3C - D, 0, 100
 ```
 
 - **早盘预测自动校准回测（Prediction Calibration 闭环）**：
-  * 若早盘执行过 `market-prediction`（存在固定台账 `~/.stock-prompt/eval/predictions.jsonl` 或会话预测快照），收盘后自动比对并执行落盘（`python scripts/eval_tracker.py result ...`，仓库根目录运行；该脚本已随技能捆绑，全局安装用户路径为 `<技能安装目录>/scripts/eval_tracker.py`）：
+  * 若早盘执行过 `market-prediction`（存在固定台账 `~/.stock-prompt/eval/predictions.jsonl` 或会话预测快照），收盘后自动比对并执行落盘（当前 Skill 根目录的 `scripts/eval_tracker.py result ...`）；盘前与 9:25 竞价后验使用 `report --market-phase preopen|auction` 分别评价，不得混成一个命中率：
     1. **点位命中**：收盘价是否落在早盘预估区间 $[S_1, R_1]$ 之内。
     2. **主线命中**：早盘推演的前列主线是否进入实际全市场领涨 Top 10%。
     3. **方向偏差**：实际 $Z_{\text{ATR}}$ 对应三态与早盘最大概率方向是否一致。
@@ -251,7 +251,7 @@ $$\text{Opportunity Score} = \operatorname{Clamp}(0.3S + 0.4R + 0.3C - D, 0, 100
   * **情景 A (强势延续)**：触发条件为 [龙头高开 >3% 且开盘快速封板]
   * **情景 B (分歧转一致)**：触发条件为 [早盘小幅低开回踩分时均线获大单放量承接]
   * **情景 C (退潮冲高回落)**：触发条件为 [后排大面积炸板、核心中军大额抛单砸盘]
-- **风控纪律**：单票止损位严格锚定 MA5 或 -5%，绝不违规追高一致性高潮日。
+- **风控纪律**：只给有证据的结构确认位与结构失效位；缺少用户成本、周期、最大回撤和风险预算时，不生成固定百分比或统一均线止损指令。
 
 ---
 
@@ -302,11 +302,16 @@ JSON 字段说明（正式报告必须填齐所列字段并通过脚本校验；
   "coverage": "0%",
   "scored_weight": "0%",
   "confidence": "高 | 中 | 低 | 数据不足",
+  "regime_namespace": "market-s0-s6",
   "market_regime": "S0-S6 + 情绪分",
   "primary_sectors": ["第一主线", "强轮动板块"],
   "watchlist": ["领航龙头代码", "容量中军代码"],
   "risk_flags": ["退潮/分歧预警", "一日游刹车命中项"],
-  "next_triggers": ["情景A触发条件", "情景B触发条件", "情景C触发条件"]
+  "next_triggers": [
+    {"id": "TRG-日期-A", "condition": "情景A触发条件", "status": "pending"},
+    {"id": "TRG-日期-B", "condition": "情景B触发条件", "status": "pending"},
+    {"id": "TRG-日期-C", "condition": "情景C触发条件", "status": "pending"}
+  ]
 }
 ```
 

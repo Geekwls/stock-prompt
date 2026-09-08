@@ -1,6 +1,6 @@
 # stock-prompt Agent 工作指引
 
-本仓库是 A 股四大研究 Skill（盘前推演 / 每日复盘 / 5 日轮动 / 个股诊断）的母本仓库，内置 MarketGraph MCP 确定性数据服务。Agent 在此仓库内工作或被唤醒技能时，遵循以下时段路由与闭环协议；各 Skill 自身规则以 `.agents/skills/*/SKILL.md` 与公共契约为准，本文件只做总路由，不重复其内容。
+本仓库是 A 股四大研究 Skill（盘前推演 / 每日复盘 / 5 日轮动 / 个股诊断）的母本仓库，内置 MarketGraph MCP 结构化公开数据服务。Agent 在此仓库内工作或被唤醒技能时，遵循以下时段路由与闭环协议；各 Skill 自身规则以 `.agents/skills/*/SKILL.md` 与公共契约为准，本文件只做总路由，不重复其内容。
 
 ## 一、时段感知路由 (Master Router)
 
@@ -16,13 +16,13 @@
 
 ## 二、跨 Skill 闭环协议
 
-1. **交接摘要 (Handoff JSON)**：每份报告末尾输出公共契约定义的交接摘要 JSON，并通过 `python scripts/handoff_store.py write --stdin` 校验、原子落盘；读取方使用 `python scripts/handoff_store.py latest --within-trading-days 3`，不可执行脚本时才回退当前会话上下文。缺失字段用空数组或 `N/A`，不得补造。
+1. **交接摘要 (Handoff JSON)**：每份报告末尾输出公共契约定义的交接摘要 JSON，并通过当前 Skill 根目录的 `scripts/handoff_store.py` 校验、原子落盘；个股交接必须携带 `subject` 并按代码隔离。读取方使用 `latest --within-trading-days 3`，个股另传 `--subject`。缺失字段用空数组或 `N/A`，不得补造。
 2. **板块 → 个股穿透**：daily-review 与 sector-rotation 报告中的标的可通过 `诊断 <代码或名称>` 穿透至 stock-analysis；穿透诊断继承前序报告的 Regime 与主线结论作为 L1/L2 证据，仅增量补采缺失部分。
 3. **评估台账**（固定路径，不随工作目录漂移）：
    - 盘前推演完成后：`python scripts/eval_tracker.py record ...`（三态概率 / Opportunity / 主线 Top3 / R1 / S1）。
    - 收盘复盘完成后：`python scripts/eval_tracker.py result ...`（Z_ATR / 实际主线 Top3 / 收盘高低点）与 `record-daily ...`（情绪五项分 / 资金延续 / 机会评分），随后 `report` / `report-daily` 输出滚动指标与阈值分位落位。
    - 台账固定为 `~/.stock-prompt/eval/predictions.jsonl` 与同目录 `daily_scores.jsonl`，盘前与收盘写入同一文件；全局安装用户路径为 `<技能安装目录>/scripts/eval_tracker.py`。
-4. **数据获取优先级**：已注册 MarketGraph MCP 时优先使用其确定性工具（K线/广度/资金流/龙虎榜等，按 P3 记录），MCP 不可用才走网络搜索与降级规则。
+4. **数据获取优先级**：已注册 MarketGraph MCP 时优先使用其结构化公开数据工具（K线/广度/资金流/龙虎榜等，按 P3 记录），MCP 不可用才走网络搜索与降级规则。
 
 ## 三、修改本仓库时的纪律
 

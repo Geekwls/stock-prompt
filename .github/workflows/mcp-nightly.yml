@@ -1,0 +1,47 @@
+name: MCP Nightly Integration
+
+# 夜间真实网关集成检查：验证 MarketGraph MCP 公开网关链路与工具解析仍可用。
+# 公开网关存在频控与抖动，因此所有步骤均为非阻断（continue-on-error），
+# 仅作维护性观测，不作为合入门禁。
+
+on:
+  schedule:
+    - cron: '30 19 * * 1-5'  # UTC 19:30 = 北京时间 03:30，避开交易时段
+  workflow_dispatch:
+
+jobs:
+  gateway-smoke:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: get_stock_quote 贵州茅台
+        continue-on-error: true
+        run: python3 mcp/marketgraph-mcp/server.py --test get_stock_quote 贵州茅台
+
+      - name: get_stock_kline 300308
+        continue-on-error: true
+        run: python3 mcp/marketgraph-mcp/server.py --test get_stock_kline 300308
+
+      - name: get_index_kline
+        continue-on-error: true
+        run: python3 mcp/marketgraph-mcp/server.py --test get_index_kline
+
+      - name: get_market_sentiment
+        continue-on-error: true
+        run: python3 mcp/marketgraph-mcp/server.py --test get_market_sentiment
+
+      - name: get_limit_up_ladder
+        continue-on-error: true
+        run: python3 mcp/marketgraph-mcp/server.py --test get_limit_up_ladder
+
+      - name: get_sector_fund_flow
+        continue-on-error: true
+        run: python3 mcp/marketgraph-mcp/server.py --test get_sector_fund_flow

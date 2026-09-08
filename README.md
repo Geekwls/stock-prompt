@@ -1,25 +1,25 @@
 # 📈 A股量化分析 AI 提示词与 Skill 体系库 (`stock-prompt`)
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Release-v7.0.0-blue.svg" alt="Release v7.0.0" />
-  <img src="https://img.shields.io/badge/Tests-97%20Passing-brightgreen.svg" alt="Tests Passing" />
+  <img src="https://img.shields.io/badge/Release-v7.1.0-blue.svg" alt="Release v7.1.0" />
+  <img src="https://img.shields.io/badge/Tests-109%20Passing-brightgreen.svg" alt="Tests Passing" />
   <img src="https://img.shields.io/badge/Architecture-5%20Skills%20%2B%2012%20MCP%20Tools-orange.svg" alt="Architecture" />
   <img src="https://img.shields.io/badge/Zero--Config-Built--in%20MarketGraph%20MCP-success.svg" alt="Zero-Config MCP" />
   <img src="https://img.shields.io/badge/Platform-Antigravity%20%7C%20Cursor%20%7C%20Claude%20%7C%20Gemini%20%7C%20Codex-purple.svg" alt="Platform" />
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License MIT" />
 </p>
 
-本项目是一套专为 **A 股市场** 打造的深度 AI 交易策略、板块分析与日内研判框架。结合大语言模型（如 DeepSeek, Gemini, ChatGPT, Claude）的强推理能力与内置的 **MarketGraph MCP 确定性金融数据服务**，帮助交易者实现“零幻觉、有证据、全闭环”的市场数据分析与交易决策支持。
+本项目是一套专为 **A 股市场** 打造的深度 AI 交易策略、板块分析与日内研判框架。结合大语言模型（如 DeepSeek, Gemini, ChatGPT, Claude）的推理能力与内置的 **MarketGraph MCP 结构化公开数据服务**，通过来源分级、缺失降级和判断审计降低行情字段编造风险，提供可验证、可证伪的研究支持。
 
 项目具备极强的**跨平台兼容性**，原生支持在 **Antigravity**、**Cursor**、**Windsurf**、**Workbuddy**、**Dify/Coze**、**ChatGPT Custom GPTs**、**Claude Projects** 及各类 Web 网页版 AI 中即插即用。
 
 ---
 
-## ⚡ v7.0.0 核心亮点
+## ⚡ v7.1.0 核心亮点
 
-1. **🔌 内置 12 大确定性金融 MCP 网关 (`marketgraph-mcp`)**
-   - 零注册、免 Token、零外部第三方库依赖（纯原生 Python 3.8+ 标准库实现）。
-   - 直连腾讯证券与东方财富开放网络节点，涵盖 750 日宏观 K 线（MA500 两年牛熊线）、周线共振、当日分时全景/均线偏离度、交易所龙虎榜前 5 大席位穿透、行业主力资金流及等权篮子对冲容灾，**彻底消灭 AI 编造行情的幻觉隐患**。
+1. **🔌 内置 12 大结构化公开数据 MCP 工具 (`marketgraph-mcp`)**
+   - 零注册、免 Token；MCP 核心使用 Python 3.10+ 标准库实现，报告卡依赖 Pillow。
+   - 直连腾讯证券与东方财富公开网络节点，涵盖 750 日 K 线、周线共振、当日分时、龙虎榜席位、行业资金流及等权篮子容灾；所有输出仍按 P3 公开网关证据记录，显著降低而不能宣称彻底消除幻觉风险。
 2. **🔤 纯中文股票名秒级智能联想解析**
    - 无论输入数字代码（`301489`）、带前后缀代码（`sz301489`, `600519.SH`）还是**纯中文股票名称**（如“贵州茅台”、“中际旭创”），底层毫秒级自动解析标准化，彻底告别繁琐代码查找。
 3. **💬 散户友好：首屏「30 秒大白话速览」与术语强制通俗注释**
@@ -31,7 +31,7 @@
 5. **📊 盘前 ↔ 盘后自校准评估台账 (Brier Loop)**
    - 盘前推演概率与收盘实际表现自动落盘至 `~/.stock-prompt/eval/predictions.jsonl`，滚动统计方向命中率、Brier Score、主线 Top3 命中率与空间有效率；情绪五项分自动落盘并支持历史滚动 P 分位自校准。
 6. **🛡️ 军工级防漂移测试套件**
-   - 内置 **97 项自动化单元测试**，严密覆盖行情门槛、数据降级审计、Schema 合规性、版本防漂移与断路器容灾机制。
+   - 内置 **115 项自动化单元测试**，覆盖行情门槛、数据降级审计、Schema 合规性、状态隔离、版本防漂移与断路器容灾机制。
 
 ---
 
@@ -44,7 +44,7 @@ stock-prompt/
 ├── data/                             # 📅 A 股交易日历（支持离线交易日窗口推算）
 │   └── a_share_trading_calendar.json
 │
-├── mcp/                              # 🔌 A 股确定性数据 MCP 服务端（本地 stdio、免 Token、零外部依赖）
+├── mcp/                              # 🔌 A 股结构化公开数据 MCP 服务端（本地 stdio、免 Token、零外部依赖）
 │   └── marketgraph-mcp/              # 腾讯/东财公开网关（server.py 入口 + marketgraph_mcp/ 核心模块）
 │
 ├── .agents/skills/                    # 🤖 Agent 专用 5 大 Skill 目录
@@ -73,18 +73,22 @@ stock-prompt/
 │   ├── report_card/                   # 🎨 长图渲染分模块包 (common/validation/4类研报排版)
 │   ├── eval_tracker.py                # 📊 盘前↔盘后评估台账 (Brier/校准/Top3命中率闭环)
 │   ├── handoff_store.py               # 🔗 Handoff 校验、原子写入、读取与清理工具
+│   ├── thesis_store.py                # 🧠 个股长期逻辑、风险与复核触发器历史
+│   ├── doctor.py                      # 🩺 版本、安装、MCP、日历与权限只读诊断
+│   ├── check_schema_parity.py         # 🧪 Schema/运行时/正式示例防漂移
 │   ├── project_registry.py            # 🧩 架构注册表加载与路径校验
 │   ├── check_version_parity.py        # 🧪 项目/插件/MCP/发布标签版本一致性检查
 │   ├── install_skills.py              # 🚀 一键安装/校验所有技能到 Gemini / Antigravity / Codex
 │   ├── sync_skill_contracts.py        # 🔁 公共研究契约同步及漂移检查
 │   ├── sync_prompts.py                # 🔁 Skill → Prompt 同步及漂移检查
 │   ├── update.bat                     # 🔄 Windows 自动更新脚本
-│   └── update.sh                      # 🔄 Linux/Mac 自动更新脚本
+│   ├── update.sh                      # 🔄 Linux/Mac 自动更新脚本
+│   └── stock_prompt.py                # 🧰 统一命令入口 (handoff/thesis/eval/doctor/card/update)
 │
-├── tests/                             # ✅ 97 项自动化单元测试 (全链路防幻觉与契约防漂移)
+├── tests/                             # ✅ 115 项自动化单元测试 (全链路防幻觉与契约防漂移)
 ├── schemas/                           # 🧾 Handoff、台账、报告卡与 MCP 信封 JSON Schemas
 │
-├── .github/workflows/                 # ⚙️ CI 自动化测试流水线 (push/PR)
+├── .github/workflows/                 # ⚙️ CI 防漂移流水线 (push/PR) + 夜间 MCP 网关观测 + 自动发布
 ├── AGENTS.md                          # 🧭 Agent 时段感知路由与跨 Skill 闭环协议
 ├── CHANGELOG.md                       # 📝 项目全量更新日志
 ├── README.md                          # 📖 项目说明文档
@@ -93,7 +97,7 @@ stock-prompt/
 
 ---
 
-## 🔌 MarketGraph MCP 12 大确定性金融网关全览
+## 🔌 MarketGraph MCP 12 大结构化公开数据工具
 
 服务端基于标准 JSON-RPC 2.0 stdio 协议运行，内置 3 分钟盘中轻量缓存与历史数据 24 小时长缓存，内置请求频控与断路器熔断机制：
 
@@ -142,9 +146,9 @@ python scripts/generate_report_card.py --demo --type stock --theme dark
 ## 🌐 跨平台多场景使用指南
 
 > **先看能力分层**：本项目的数据可靠性取决于宿主能否运行本地 MCP 服务。
-> - **完整模式**（推荐）：Antigravity、Gemini CLI、Claude Code、Cursor 等**本地 Agent 宿主**——注册 `marketgraph-data` MCP 后获得 12 大确定性数据网关（750日K线、指数ATR、板块资金流历史等），断网搜索仅在 MCP 覆盖外字段（隔夜外盘、宏观汇率等）作补充。
+> - **完整模式**（推荐）：Antigravity、Gemini CLI、Claude Code、Cursor 等**本地 Agent 宿主**——注册 `marketgraph-data` MCP 后获得 12 个结构化公开数据工具（750日K线、指数ATR、板块资金流历史等），联网搜索仅在 MCP 覆盖外字段（隔夜外盘、宏观汇率等）作补充。
 > - **降级模式**：Dify/Coze 工作流平台、ChatGPT GPTs、网页版 LLM——**无法运行本地 stdio MCP**，只能绑定联网搜索插件获取行情（公共契约 P4 线索），数据缺失时按各 Skill 降级规则输出 N/A，不伪造。
-> 两种模式下 Skill 的分析纪律完全相同，差别只在数据来源的确定性。
+> 两种模式下 Skill 的分析纪律完全相同，差别在数据结构化程度、可追溯性和覆盖率。
 
 ### 方式一：在 Antigravity / Agent 客户端中使用（⭐️⭐️⭐️⭐️⭐️ 最推荐，零配置）
 如果你使用 **Antigravity** 或支持标准 Agent Skill 的 IDE：
@@ -186,7 +190,7 @@ Agent 客户端会自动读取根目录 [AGENTS.md](AGENTS.md)，按交易时段
 1. **System Prompt**：新建 Bot/Workflow 节点，将 `prompts/` 目录或 `SKILL.md` 中主 Prompt 文件的文本粘贴到 **系统提示词 (System Prompt)** 中。
 2. **工具集成**：为 Bot 绑定**联网搜索插件**（如 Tavily, Serper 或财经资讯 API），让 Bot 具备获取当日实时行情数据的能力。
 
-> ⚠️ **能力边界**：这类平台无法运行本地 stdio MCP 服务，因此只能工作在**降级模式**——行情数据依赖联网搜索（P4 线索），无法获得 12 大确定性网关。Skill 的防幻觉规则会保证数据不足时明确输出 N/A 而非编造，但评分覆盖率和结论置信度会显著低于本地宿主。若 Bot 只需"大盘情绪 + 板块轮动"级别的粗粒度结论，降级模式可用；个股八层诊断建议在本地宿主中运行。
+> ⚠️ **能力边界**：这类平台无法运行本地 stdio MCP 服务，因此只能工作在**降级模式**——行情数据依赖联网搜索（P4 线索），无法使用 12 个结构化公开数据工具。Skill 的防幻觉规则会要求数据不足时明确输出 N/A，但评分覆盖率和结论置信度会显著低于本地宿主。若 Bot 只需“大盘情绪 + 板块轮动”级别的粗粒度结论，降级模式可用；个股八层诊断建议在本地宿主中运行。
 
 ---
 
@@ -206,7 +210,7 @@ Agent 客户端会自动读取根目录 [AGENTS.md](AGENTS.md)，按交易时段
 4. **个股完整诊断**：打开 `prompts/stock-analysis/A股个股完整诊断与威科夫结构研判.md`
 5. **全流程总控**：打开 `prompts/stock-research-router/A股全流程研究总控路由.md`
 6. 复制完整 Markdown 内容粘贴给大模型。如果模型没有联网功能，请手动附上当天行情数据。
-7. **此方式属降级模式**（无 MCP 确定性数据）；数据缺失时报告会按防幻觉规则输出 `N/A` 与待补清单，属预期行为而非故障。
+7. **此方式属降级模式**（无 MCP 结构化数据工具）；数据缺失时报告会按防幻觉规则输出 `N/A` 与待补清单，属预期行为而非故障。
 
 ---
 
@@ -222,11 +226,11 @@ Agent 客户端会自动读取根目录 [AGENTS.md](AGENTS.md)，按交易时段
 
 ## 🔁 盘前 ↔ 盘后评估闭环 (Evaluation Loop)
 
-盘前预测与收盘实际统一落盘到评估台账，滚动输出 Brier Score、校准度与命中率，让模型推演可验证、可证伪：
+盘前预测与收盘实际统一落盘到评估台账，盘前基准与 9:25 竞价后验分阶段评价。预测采用追加式不可变修订；已有收盘结果后禁止补写预测，避免事后信息污染回测：
 
 ```bash
 # 盘前 8:30-9:15：落盘当日预测（三态概率 / 机会分 / 主线 Top3 / R1 / S1）
-python scripts/eval_tracker.py record --date 2026-09-07 --regime S3 \
+python scripts/eval_tracker.py record --date 2026-09-07 --market-phase preopen --regime S3 \
     --p-up 55 --p-side 30 --p-down 15 --opportunity 78 \
     --top-sector 半导体 --top-sectors 半导体,PCB,低空经济 --r1 3850 --s1 3800
 
@@ -235,16 +239,33 @@ python scripts/eval_tracker.py result --date 2026-09-07 --z-atr 0.62 \
     --top-sectors 半导体,农业,化工 --close 3842 --high 3855 --low 3805
 
 # 任意时点：输出 20 日滚动评估（Brier / 方向命中 / 校准 / 主线 Top1与Top3 / 点位有效率）
-python scripts/eval_tracker.py report
+python scripts/eval_tracker.py report --market-phase preopen
 ```
 
 > Linux/macOS 环境请将 `python` 替换为 `python3`。台账固定写入 `~/.stock-prompt/eval/predictions.jsonl`（不随工作目录漂移；旧 `./eval/` 台账首次运行自动迁移，`--ledger` 参数与 `STOCK_PROMPT_LEDGER` 环境变量可覆盖）。收盘复盘后另可执行 `record-daily` 将情绪五项分落盘至同目录 `daily_scores.jsonl`，`report-daily` 输出固定阈值的历史分位落位（阈值自校准依据）。`market-prediction` 与 `daily-review` 的 SKILL.md 已内置对应步骤。
+
+## 🧠 连续复盘与个股长期记忆
+
+每次报告优先回答“较上次变了什么、此前假设是否确认、什么证据改变了结论、下一次看什么”。短期跨 Skill 状态写入 Handoff；同日多只股票按代码隔离：
+
+```bash
+python scripts/handoff_store.py latest --report-type stock --subject 300308
+```
+
+跨越多个交易日持续跟踪同一只股票时，使用 Thesis Ledger 保存核心逻辑、催化、风险、复核触发器和历史版本：
+
+```bash
+python scripts/thesis_store.py get --stock-code 300308
+python scripts/thesis_store.py write --input thesis.json
+```
+
+Thesis 默认拒绝保存仓位、成本和账户字段；确有需要时必须由用户明确授权并显式使用 `--allow-sensitive`。本地状态目录和文件分别收紧为仅当前用户可访问。
 
 ---
 
 ## 🚀 首次安装与一键更新
 
-四份跨平台 Prompt 以 `.agents/skills/*/SKILL.md` 为唯一母本。修改 Skill 后运行：
+五份跨平台 Prompt 以 `.agents/skills/*/SKILL.md` 为唯一母本。修改 Skill 后运行：
 
 ```bash
 python3 scripts/sync_skill_contracts.py
@@ -281,12 +302,28 @@ scripts\update.bat
 
 安装成功后会自动打印 **30 秒快速上手速查表**，并检测 MarketGraph MCP 数据网关的注册状态——未注册时会给出配置片段与自测命令（手动配置见 [mcp/marketgraph-mcp/README.md](mcp/marketgraph-mcp/README.md)）。
 
+任何时候都可以运行只读诊断，查看当前版本、全局安装版本、Skill 数量、MCP 注册、交易日历覆盖和状态目录权限：
+
+```bash
+python scripts/doctor.py
+```
+
+也可以使用统一命令入口直达常用工具（参数原样转发）：
+
+```bash
+python scripts/stock_prompt.py handoff latest --within-trading-days 3
+python scripts/stock_prompt.py thesis get --stock-code 300308
+python scripts/stock_prompt.py eval report
+python scripts/stock_prompt.py doctor
+python scripts/stock_prompt.py update
+```
+
 ---
 
 ## 🗺️ 未来演进路线 (Roadmap)
 
 项目正持续从“独立的单点技能”演进为“全天候跨 Skill 交易闭环协同流水线”：
-- **已落地**：公共契约交接摘要（各报告模板内置）、程序化交接存储（`handoff_store.py`）、板块→个股穿透与 L1/L2 继承、盘前↔盘后评估台账自校准闭环、AGENTS.md 时段路由与总控路由 Skill、12 大确定性金融 MCP 网关。
+- **已落地**：公共契约交接摘要（各报告模板内置）、程序化交接存储（`handoff_store.py`）、板块→个股穿透与 L1/L2 继承、盘前↔盘后评估台账自校准闭环、AGENTS.md 时段路由与总控路由 Skill、12 个结构化公开数据 MCP 工具。
 - 详细设计方案与实施阶段规划见：[📖 跨 Skill 交易闭环协同流水线计划 (docs/ROADMAP_CROSS_SKILL_PIPELINE.md)](docs/ROADMAP_CROSS_SKILL_PIPELINE.md)
 
 ---
@@ -296,5 +333,5 @@ scripts\update.bat
 欢迎提交 PR 或 Issue 共同完善 A 股 AI 策略提示词库！
 
 - 修改 `SKILL.md` 或公共契约后，请先运行 `python3 scripts/sync_prompts.py` 与 `python3 scripts/sync_skill_contracts.py` 再提交；仓库纪律详见 [AGENTS.md](AGENTS.md)。
-- PR 会自动触发 CI：运行全部 **97 项单元测试**（本地可用 `python3 -m unittest discover -s tests`）与契约、Prompt、捆绑脚本三项防漂移检查。
+- PR 会自动触发 CI：运行全部 **115 项单元测试**（本地可用 `python3 -m unittest discover -s tests`）与版本、Schema、契约、Prompt、捆绑脚本防漂移检查。另设夜间 MCP 公开网关观测流水线（非阻断），跟踪真实网关链路可用性。
 - 当前版本受 `version.json` 控制，每次更新记录见 [CHANGELOG.md](CHANGELOG.md)。

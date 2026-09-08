@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Stock analysis report card input v1",
   "type": "object",
-  "required": ["stock_name", "stock_code", "date", "price", "coverage", "logic_health", "structure_timing", "company_risk_status", "hard_gate_status", "technical_layers_scored", "composite_score_status", "coverage_breakdown", "audit_status", "confidence_level", "next_review_triggers"],
+  "required": ["stock_name", "stock_code", "date", "price", "coverage", "market_wind", "sector_role", "catalyst_level", "rs_rank", "wyckoff_phase", "position_status", "risk_reward_ratio", "logic_health", "structure_timing", "company_risk_status", "company_details", "hard_gate_status", "technical_layers_scored", "composite_score_status", "coverage_breakdown", "audit_status", "pledge_details", "dilution_status", "confidence_level", "research_status", "core_logic", "market_details", "sector_details", "catalyst_details", "rs_details", "wyckoff_details", "position_table", "rr_details", "evidence_map", "fusion_scores", "trade_strategy", "exit_plan", "falsification_rule", "next_review_triggers", "evidence_freshness"],
   "properties": {
     "stock_name": {"type": "string"}, "stock_code": {"type": "string"}, "date": {"type": "string"},
     "coverage": {"type": "string"}, "hard_gate_status": {"enum": ["通过", "失败"]},

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Sector rotation report card input v1",
   "type": "object",
-  "required": ["title", "date_range", "summary", "volume_5d", "fund_flow", "sei_breakdown", "sentiment_5d", "watchlist"],
+  "required": ["title", "date_range", "summary", "volume_5d", "fund_flow", "institution_lines", "hotmoney_lines", "sei_breakdown", "chain_lines", "sentiment_5d", "zhongjun_anchor", "longtou_anchor", "watchlist"],
   "properties": {
     "title": {"type": "string"}, "date_range": {"type": "string"}, "summary": {"type": "array"},
     "volume_5d": {"type": "array"}, "fund_flow": {"type": "array"}, "sei_breakdown": {"type": "array"},

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Stock research thesis ledger v1",
+  "type": "object",
+  "required": ["schema_version", "snapshot_id", "stock_code", "stock_name", "as_of", "thesis", "logic_health", "catalysts", "risk_flags", "next_triggers", "updated_at", "history"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "snapshot_id": {"type": "string", "minLength": 1},
+    "stock_code": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$"},
+    "stock_name": {"type": "string", "minLength": 1},
+    "as_of": {"type": "string", "minLength": 10},
+    "thesis": {"type": "string", "minLength": 1},
+    "logic_health": {"enum": ["强化", "稳定", "弱化", "证伪", "暂不评级"]},
+    "catalysts": {"type": "array"},
+    "risk_flags": {"type": "array"},
+    "next_triggers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "condition", "status"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "condition": {"type": "string", "minLength": 1},
+          "status": {"enum": ["pending", "confirmed", "failed", "expired", "unverifiable"]}
+        },
+        "additionalProperties": true
+      }
+    },
+    "review_delta": {"type": "object"},
+    "updated_at": {"type": "string"},
+    "history": {"type": "array", "maxItems": 100}
+  },
+  "additionalProperties": true
+}

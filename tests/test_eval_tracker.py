@@ -97,6 +97,8 @@ class LedgerRoundtripTest(unittest.TestCase):
                 lines = [json.loads(line) for line in stream if line.strip()]
             self.assertEqual(len(lines), 2)
             self.assertEqual(lines[0]["type"], "prediction")
+            self.assertEqual(lines[0]["revision"], 1)
+            self.assertEqual(lines[0]["market_phase"], "preopen")
             self.assertEqual(lines[0]["top_sectors"], ["半导体", "低空经济"])
             self.assertEqual(lines[1]["actual_state"], "up")
 
@@ -190,6 +192,48 @@ class LedgerEdgeCasesTest(unittest.TestCase):
                 stream.write(json.dumps({"type": "prediction", "date": "2026-09-02", "probs": {}}) + "\n")
             preds, _ = TRACKER.load_ledger(ledger)
             self.assertEqual(list(preds), ["2026-09-02"])
+
+    def test_duplicate_prediction_requires_explicit_revision(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            ledger = str(Path(temporary) / "predictions.jsonl")
+            args = argparse.Namespace(
+                date="2026-09-08", regime="S2", p_up=30, p_side=50, p_down=20,
+                opportunity=50, top_sector="半导体", top_sectors="", r1=None, s1=None,
+                ledger=ledger, market_phase="preopen", revise=False,
+            )
+            TRACKER.cmd_record(args)
+            with self.assertRaises(SystemExit):
+                TRACKER.cmd_record(args)
+            args.revise = True
+            args.revision_reason = "竞价前证据修正"
+            TRACKER.cmd_record(args)
+            rows = [json.loads(line) for line in Path(ledger).read_text(encoding="utf-8").splitlines()]
+            self.assertEqual([row["revision"] for row in rows], [1, 2])
+            self.assertEqual(rows[1]["supersedes"], rows[0]["snapshot_id"])
+
+    def test_prediction_cannot_be_written_after_result(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            ledger = str(Path(temporary) / "predictions.jsonl")
+            Path(ledger).write_text(json.dumps({"type": "result", "date": "2026-09-08"}) + "\n", encoding="utf-8")
+            args = argparse.Namespace(
+                date="2026-09-08", regime="S2", p_up=30, p_side=50, p_down=20,
+                opportunity=50, top_sector="", top_sectors="", r1=None, s1=None,
+                ledger=ledger,
+            )
+            with self.assertRaises(SystemExit):
+                TRACKER.cmd_record(args)
+
+    def test_market_phases_are_evaluated_separately(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            ledger = str(Path(temporary) / "predictions.jsonl")
+            self.write_ledger(ledger, [
+                {"type": "prediction", "date": "2026-09-08", "market_phase": "preopen", "probs": {"up": 30}},
+                {"type": "prediction", "date": "2026-09-08", "market_phase": "auction", "probs": {"up": 60}},
+            ])
+            preopen, _ = TRACKER.load_ledger(ledger, market_phase="preopen")
+            auction, _ = TRACKER.load_ledger(ledger, market_phase="auction")
+            self.assertEqual(preopen["2026-09-08"]["probs"]["up"], 30)
+            self.assertEqual(auction["2026-09-08"]["probs"]["up"], 60)
 
 
 class ReportOutputTest(unittest.TestCase):

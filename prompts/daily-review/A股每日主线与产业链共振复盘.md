@@ -19,11 +19,12 @@
 - 报告必须给出 `as_of`，区分盘中快照、收盘数据、公告日期和财务报告期。过期数据可作背景，不得伪装成当前状态。
 - 不同来源、日期或统计口径的数据不得直接拼接计算；存在冲突时并列披露并降低置信度。
 
-## MCP 与确定性数据源协议
+## MCP 与结构化公开数据协议
 
 当宿主智能体环境已挂载 MCP 金融数据工具（如 `marketgraph-data`）时，执行以下优先路由协议：
 
 - **公开网关数据为 P3，可优先调用但不可自动升为 P1**：`marketgraph-data` 提供 `get_stock_quote`、`get_stock_kline`、`get_stock_timeline`、`get_index_kline`、`get_market_breadth`、`get_market_sentiment`、`get_limit_up_ladder`、`get_sector_fund_flow`、`get_sector_kline`、`get_basket_index`、`get_longhubang_detail` 与 `get_company_quality` 共 12 个工具。每次调用必须保留其 `source`、`data_status`、数据日期/`as_of`；`data_status != ok` 时不得参与计算或输出方向结论。工具支持代码与常见中文名称解析；`get_market_sentiment`、`get_limit_up_ladder` 与 `get_longhubang_detail` 支持历史 `date_str`（`YYYYMMDD` 或工具声明的格式）；`get_sector_fund_flow` 传 `days`（2-10）可回补板块主力资金 N 日历史；`get_index_kline` 提供核心指数 N 日逐日涨跌幅；`get_market_breadth` 最新交易日为精确涨跌家数与红盘率、历史交易日为情绪池替代口径（以 `breadth_precision` 区分，历史红盘率不得估算）。
+- **证据独立性**：同一底层网关、同一公告转载或同一数据供应链只能算一个独立证据族。证据表应同时记录 `source_family` 与 `independence_group`；来源数量和独立确认数量分别披露，禁止用多个转载链接抬高置信度。
 - **行情硬门槛仅验证序列完整性**：仅当 `get_stock_kline` 明确返回 `adjustment: qfq`、`data_status: ok` 且 `valid_bars >= 120` 时，才可通过“120 日复权 OHLCV”结构门槛；其来源仍按 P3 记录，涉及交易所公告、审计意见、监管和公司事件的关键事实仍须 P2/P1 原始来源核验。
 - **构造代理序列边界**：东财板块指数等网关不可用时，代理序列只能来自 `get_basket_index` 等权构造（须显式传入成分股、披露成分覆盖度与失败清单，`series_type=equal_weight_constructed`），不得由模型临时挑选成分股自行拼凑。代理序列属"构造数据"（非 P1–P3 网关原始输出）：只能用于方向性强弱对照（如板块相对强度、主线篮子走势），不得用于精确评分阈值、赔率计算或情绪得分，报告中必须标注"代理序列"并注明成分覆盖度（如"4/6 只成分股"）；等权口径与板块官方市值加权指数存在系统性差异，覆盖度不足（少于半数成分）时宁可保留 N/A。
 - **无感优雅回退**：若未检测到 MCP 工具，自动平滑回退至网络检索（P4）与公告核验（P2），并严格执行常规数据缺省审计。
@@ -51,6 +52,15 @@ Scored Weight = 实际参与评分的原始权重
 - 默认输出风险暴露等级：`积极观察 / 中性观察 / 防守观察 / 暂不评级`，不直接给账户仓位比例。
 - 只有用户提供当前仓位、成本、分析周期、最大可承受回撤和风险预算后，才允许给出条件化仓位情景。
 - 评分、概率和历史命中率都不代表收益承诺；不得输出确定性买卖指令。
+- 缺少用户风险参数时，不得给出固定百分比止损或统一均线止损；只提供结构确认位、结构失效位及其证据后果。
+
+## 连续复盘与判断审计
+
+存在前序交接时，报告必须先核验旧结论，而不是重新生成一份互不相干的快照。第一屏在核心结论后输出：较上次变化、此前假设的确认/失效状态、结论变化原因、仍未变化但重要的风险。没有前序快照时明确标记“首次基准”，不得虚构变化。
+
+交接中的 `review_delta` 使用 `previous_snapshot_id`、`changed_facts`、`conclusion_delta`、`confirmed_hypotheses`、`invalidated_hypotheses`、`unchanged_but_important` 六组字段。`next_triggers` 新生成时优先使用结构化对象，至少包含 `id`、`condition`、`status=pending`，可计算时补充 `metric`、`operator`、`threshold`、`deadline` 以及触发/失败后果。读取旧字符串触发器时保持兼容；下一份复盘必须将旧触发器更新为 `confirmed / failed / expired / unverifiable` 之一并回指证据。
+
+状态持久化默认不得保存账户、仓位和成本等敏感信息；确需保存必须取得用户明确授权。状态目录和文件分别使用仅用户可访问的权限。
 
 ## 跨 Skill 交接
 
@@ -64,20 +74,30 @@ Scored Weight = 实际参与评分的原始权重
   "coverage": "0%",
   "scored_weight": "0%",
   "confidence": "高 | 中 | 低 | 数据不足",
+  "regime_namespace": "market-s0-s6 | rotation-state-1-4 | stock-structure | not-applicable",
   "market_regime": "N/A",
   "primary_sectors": [],
   "watchlist": [],
   "risk_flags": [],
-  "next_triggers": []
+  "next_triggers": [],
+  "review_delta": {
+    "previous_snapshot_id": null,
+    "changed_facts": [],
+    "conclusion_delta": [],
+    "confirmed_hypotheses": [],
+    "invalidated_hypotheses": [],
+    "unchanged_but_important": []
+  }
 }
 ```
 
-- 交接摘要除在报告末尾输出外，必须通过 `python scripts/handoff_store.py write --stdin` 完成 Schema 校验与原子落盘；读取方优先执行 `python scripts/handoff_store.py latest --within-trading-days 3`，读取最近有效文件并检查返回的日历精度警告，不可执行脚本时才回退当前会话上下文。固定位置仍为 `~/.stock-prompt/state/handoff-<YYYYMMDD>-<report_type>.json`；缺失字段不得补造。
+- 交接摘要除在报告末尾输出外，必须通过当前 Skill 根目录的 `scripts/handoff_store.py write --stdin` 完成 Schema 校验与原子落盘；读取方优先执行同脚本的 `latest --within-trading-days 3`。市场类文件为 `handoff-<YYYYMMDD>-<report_type>.json`；个股文件必须提供 `subject={type: stock, id: 股票代码, name: 股票名称}`，保存为 `handoff-<YYYYMMDD>-stock-<代码>.json`，读取时使用 `--subject <代码>`，避免同日多股覆盖。
 - `market-prediction` 的预测台账统一写入 `~/.stock-prompt/eval/predictions.jsonl`（由 `scripts/eval_tracker.py` 固定，不随工作目录漂移）；`daily-review` 收盘回测读取同一份文件，禁止在其他位置另建台账。
 - `daily-review` 提供收盘市场状态、主线和次日验证变量。
 - `market-prediction` 读取最近收盘交接摘要，并根据隔夜与竞价证据更新。
 - `sector-rotation` 提供中期板块阶段、候选方向和衰竭风险。
 - `stock-analysis` 接收市场与板块状态作为 L1/L2 证据，并返回个股确认、失效和复核条件。
+- 个股需要跨越 3 个交易日持续跟踪时，另用当前 Skill 根目录的 `scripts/thesis_store.py` 维护按股票代码隔离的长期 Thesis Ledger；Handoff 负责短期跨 Skill 交接，Thesis 负责长期逻辑历史，两者不得混用。
 
 ---
 
@@ -246,7 +266,7 @@ $$\text{Opportunity Score} = \operatorname{Clamp}(0.3S + 0.4R + 0.3C - D, 0, 100
 ### 一、市场情绪与资金总量定调
 - **量能走势**：两市全天成交额 [XXXX] 亿元（较 5 日均量【放量 / 平量 / 缩量】XX%）。
 - **市场广度**：上涨 [XXXX] 家 / 下跌 [XXXX] 家（涨跌比 [X:X]）；涨停 [XX] 家 / 跌停 [XX] 家；炸板率 [XX]%。
-- **昨日涨停溢价**：昨日涨停个股今日平均红盘率 [XX]%，连板晋级率 [XX]%。
+- **昨日涨停溢价**：昨日涨停股今日平均涨幅 [XX]%，相对全市场平均涨幅的超额为 [XX]%；连板晋级率 [XX]%。
 - **Market Regime 定调**：【S0-S6 状态名称】（*如：处于 S2 存量震荡向 S3 趋势启动的过渡阶段*）。
 
 ---
@@ -309,7 +329,7 @@ $$\text{Opportunity Score} = \operatorname{Clamp}(0.3S + 0.4R + 0.3C - D, 0, 100
 ```
 
 - **早盘预测自动校准回测（Prediction Calibration 闭环）**：
-  * 若早盘执行过 `market-prediction`（存在固定台账 `~/.stock-prompt/eval/predictions.jsonl` 或会话预测快照），收盘后自动比对并执行落盘（`python scripts/eval_tracker.py result ...`，仓库根目录运行；该脚本已随技能捆绑，全局安装用户路径为 `<技能安装目录>/scripts/eval_tracker.py`）：
+  * 若早盘执行过 `market-prediction`（存在固定台账 `~/.stock-prompt/eval/predictions.jsonl` 或会话预测快照），收盘后自动比对并执行落盘（当前 Skill 根目录的 `scripts/eval_tracker.py result ...`）；盘前与 9:25 竞价后验使用 `report --market-phase preopen|auction` 分别评价，不得混成一个命中率：
     1. **点位命中**：收盘价是否落在早盘预估区间 $[S_1, R_1]$ 之内。
     2. **主线命中**：早盘推演的前列主线是否进入实际全市场领涨 Top 10%。
     3. **方向偏差**：实际 $Z_{\text{ATR}}$ 对应三态与早盘最大概率方向是否一致。
@@ -318,7 +338,7 @@ $$\text{Opportunity Score} = \operatorname{Clamp}(0.3S + 0.4R + 0.3C - D, 0, 100
   * **情景 A (强势延续)**：触发条件为 [龙头高开 >3% 且开盘快速封板]
   * **情景 B (分歧转一致)**：触发条件为 [早盘小幅低开回踩分时均线获大单放量承接]
   * **情景 C (退潮冲高回落)**：触发条件为 [后排大面积炸板、核心中军大额抛单砸盘]
-- **风控纪律**：单票止损位严格锚定 MA5 或 -5%，绝不违规追高一致性高潮日。
+- **风控纪律**：只给有证据的结构确认位与结构失效位；缺少用户成本、周期、最大回撤和风险预算时，不生成固定百分比或统一均线止损指令。
 
 ---
 
@@ -369,11 +389,16 @@ JSON 字段说明（正式报告必须填齐所列字段并通过脚本校验；
   "coverage": "0%",
   "scored_weight": "0%",
   "confidence": "高 | 中 | 低 | 数据不足",
+  "regime_namespace": "market-s0-s6",
   "market_regime": "S0-S6 + 情绪分",
   "primary_sectors": ["第一主线", "强轮动板块"],
   "watchlist": ["领航龙头代码", "容量中军代码"],
   "risk_flags": ["退潮/分歧预警", "一日游刹车命中项"],
-  "next_triggers": ["情景A触发条件", "情景B触发条件", "情景C触发条件"]
+  "next_triggers": [
+    {"id": "TRG-日期-A", "condition": "情景A触发条件", "status": "pending"},
+    {"id": "TRG-日期-B", "condition": "情景B触发条件", "status": "pending"},
+    {"id": "TRG-日期-C", "condition": "情景C触发条件", "status": "pending"}
+  ]
 }
 ```
 

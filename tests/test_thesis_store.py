@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -38,7 +39,9 @@ class ThesisStoreTest(unittest.TestCase):
             self.assertEqual(saved["logic_health"], "强化")
             self.assertEqual(len(saved["history"]), 1)
             self.assertEqual(saved["history"][0]["logic_health"], "稳定")
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            # Windows 不模拟 POSIX 权限位（只区分只读），读写文件 stat 恒为 0o666
+            if os.name == "posix":
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
     def test_sensitive_fields_require_opt_in(self):
         item = payload()

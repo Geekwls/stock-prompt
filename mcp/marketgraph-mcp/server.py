@@ -18,7 +18,7 @@ import urllib.error
 import urllib.parse
 from datetime import datetime, date
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from marketgraph_mcp.cache import (
@@ -863,6 +863,151 @@ def fetch_limit_up_ladder(date_str: Optional[str] = None) -> Dict[str, Any]:
         return {"error": f"获取连板天梯失败: {str(e)}"}
 
 
+def fetch_topic_pool(pool_path: str, compact_date: str, sort_field: str) -> List[Dict[str, Any]]:
+    """东财涨停/炸板/跌停池通用拉取 (push2ex, 支持历史 date 回补)"""
+    url = (f"https://push2ex.eastmoney.com/{pool_path}?ut={EM_UT}&dpt={EM_DPT}"
+           f"&Pageindex=0&pagesize=500&sort={sort_field}&date={compact_date}")
+    return json.loads(http_get(url, timeout=4)).get("data", {}).get("pool", []) or []
+
+
+def fetch_industry_board_list() -> List[Dict[str, str]]:
+    """东财全量行业板块表 (代码+名称, 日级缓存); 兼作 hybk 缩写前缀歧义判定基准"""
+    cached = get_cached("industry_board_list")
+    if cached:
+        return cached
+    url = (
+        "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1"
+        "&fltt=2&invt=2&fid=f3&fs=m:90+t:2+f:!50&fields=f12,f14"
+    )
+    rows = json.loads(http_get(url, timeout=5)).get("data", {}).get("diff", []) or []
+    boards = [{"code": str(r.get("f12", "")), "name": str(r.get("f14", "")).strip()}
+              for r in rows if str(r.get("f12", "")).startswith("BK")]
+    if not boards:
+        raise ValueError("行业板块表为空")
+    set_cached("industry_board_list", boards, ttl=86400)
+    return boards
+
+
+def industry_hybk_matches(hybk: str, board_name: str) -> bool:
+    """涨停/炸板池 hybk 为 <=4 字行业缩写 (如"农产品加工"->"农产品加"), 全称相等或缩写为全称前缀才算同板块"""
+    short = (hybk or "").strip()
+    full = (board_name or "").strip()
+    if not short or not full:
+        return False
+    return full == short or full.startswith(short)
+
+
+def fetch_sector_limit_quality(sector: str, date_str: Optional[str] = None) -> Dict[str, Any]:
+    """
+    板块级触板/炸板结构与板块炸板率 (直供 Q=(1-板块炸板率)×100 的确定性输入)
+    涨停池/炸板池 hybk 为 <=4 字行业缩写, 此处按前缀规则匹配并对全板块表做歧义校验,
+    杜绝"按板块全称精确匹配漏票"导致的板块炸板率失真; 触板 <3 家时 Q 记 null (小样本不稳定)
+    """
+    if not isinstance(sector, str) or not sector.strip():
+        return {"error": "sector 必须是非空字符串", "data_status": "unavailable"}
+    norm_date = normalize_date_str(date_str) if date_str else None
+    if date_str and not norm_date:
+        return {"error": "date_str 必须为 YYYYMMDD 或 YYYY-MM-DD", "data_status": "unavailable"}
+    compact_date = norm_date.replace("-", "") if norm_date else datetime.now().strftime("%Y%m%d")
+    is_today = compact_date == datetime.now().strftime("%Y%m%d")
+
+    clean = sector.strip()
+    upper = clean.upper().replace("90.", "")
+    sector_code = upper if upper.startswith("BK") and upper[2:].isdigit() else resolve_sector_code(clean)
+    if not sector_code:
+        return {"error": f"无法解析板块: {clean}", "data_status": "unavailable"}
+
+    try:
+        boards = fetch_industry_board_list()
+    except Exception as exc:
+        return {"error": f"行业板块表不可用: {type(exc).__name__}", "data_status": "unavailable"}
+    target = next((b for b in boards if b["code"] == sector_code), None)
+    if not target:
+        return {"error": f"{sector_code} 不在东财行业板块表内 (仅支持行业板块, 概念板块无 hybk 归属)", "data_status": "unavailable"}
+
+    cache_key = f"sector_limit_quality_{sector_code}_{compact_date}"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+
+    unavailable_sources: List[str] = []
+    try:
+        zt_pool = fetch_topic_pool("getTopicZTPool", compact_date, "fbt:asc")
+    except Exception:
+        zt_pool = []
+        unavailable_sources.append(f"涨停池@{compact_date}")
+    try:
+        zb_pool = fetch_topic_pool("getTopicZBPool", compact_date, "fbt:asc")
+    except Exception:
+        zb_pool = []
+        unavailable_sources.append(f"炸板池@{compact_date}")
+    if not zt_pool and not zb_pool:
+        res = {"error": f"{compact_date} 涨停池与炸板池均为空 (可能为非交易日或数据源未覆盖)",
+               "data_status": "unavailable"}
+        return res
+
+    def attribute(pool: List[Dict[str, Any]], extra_fields) -> Tuple[List, List]:
+        """按 hybk 归属目标板块: 精确同名唯一归属; 否则前缀匹配, 与多个板块前缀冲突的缩写剔除并返回歧义清单"""
+        matched, ambiguous = [], []
+        for item in pool:
+            hybk = str(item.get("hybk", "") or "").strip()
+            exact = next((b for b in boards if b["name"] == hybk), None)
+            entry = {"code": item.get("c"), "name": item.get("n"), "industry_raw": hybk or "N/A"}
+            entry.update(extra_fields(item))
+            if exact is not None:
+                if exact["code"] == target["code"]:
+                    matched.append(entry)
+                continue
+            if not industry_hybk_matches(hybk, target["name"]):
+                continue
+            collisions = [b["name"] for b in boards
+                          if b["code"] != target["code"] and industry_hybk_matches(hybk, b["name"])]
+            if collisions:
+                entry["ambiguous_with"] = collisions
+                ambiguous.append(entry)
+            else:
+                matched.append(entry)
+        return matched, ambiguous
+
+    sealed, ambiguous_zt = attribute(zt_pool, lambda it: {"lbc": int(it.get("lbc", 1) or 1), "first_time": it.get("fbt")})
+    broken, ambiguous_zb = attribute(zb_pool, lambda it: {"break_count": int(it.get("zbc", 1) or 1)})
+
+    sealed_count, broken_count = len(sealed), len(broken)
+    touched = sealed_count + broken_count
+    rate = round(broken_count / touched * 100.0, 2) if touched else 0.0
+    q_value = round((1 - broken_count / touched) * 100.0, 1) if touched >= 3 else None
+    if touched >= 3:
+        q_note = "Q=(1-板块炸板率)×100; 供评分层直接使用"
+    elif touched > 0:
+        q_note = "触板不足 3 家, Q 记 null (小样本炸板率不稳定), 评分层对可得权重归一化, 不得借用全市场炸板率"
+    else:
+        q_note = "本板块当日无触板个股, Q 记 null"
+
+    ambiguous = ambiguous_zt + ambiguous_zb
+    res = {
+        "source": "P3_Eastmoney_Sector_Limit_Quality",
+        "data_status": "partial" if unavailable_sources else "ok",
+        "sector": target["name"],
+        "sector_code": target["code"],
+        "date": compact_date,
+        "sealed_count": sealed_count,
+        "broken_count": broken_count,
+        "touched_count": touched,
+        "sector_break_rate": f"{rate:.2f}%",
+        "seal_quality_q": q_value,
+        "q_note": q_note,
+        "industry_match_rule": "hybk 与板块全称精确相等时唯一归属; 否则 hybk(<=4字缩写)按前缀匹配全称, 与多个板块前缀冲突的缩写剔除并披露",
+        "limit_up_stocks": sealed,
+        "broken_stocks": broken,
+    }
+    if ambiguous:
+        res["ambiguous_industry_stocks"] = ambiguous
+    if unavailable_sources:
+        res["unavailable_sources"] = unavailable_sources
+    set_cached(cache_key, res, ttl=CACHE_TTL_SECONDS if is_today else HISTORICAL_CACHE_TTL_SECONDS)
+    return res
+
+
 def fetch_market_breadth(days: int = 5) -> Dict[str, Any]:
     """
     获取全市场广度 N 个交易日序列:
@@ -912,9 +1057,7 @@ def fetch_market_breadth(days: int = 5) -> Dict[str, Any]:
 
     # 3. 逐交易日组装: 指数涨跌幅 + 情绪池 (东财池支持历史 date 回补)
     def pool_json(pool_path: str, d_compact: str, sort_field: str) -> List[Dict[str, Any]]:
-        url = (f"https://push2ex.eastmoney.com/{pool_path}?ut={EM_UT}&dpt={EM_DPT}"
-               f"&Pageindex=0&pagesize=500&sort={sort_field}&date={d_compact}")
-        return json.loads(http_get(url, timeout=4)).get("data", {}).get("pool", []) or []
+        return fetch_topic_pool(pool_path, d_compact, sort_field)
 
     day_rows: List[Dict[str, Any]] = []
     for i in range(max(1, len(sh_bars) - days), len(sh_bars)):
@@ -1901,7 +2044,7 @@ def fetch_stock_timeline(symbol: str) -> Dict[str, Any]:
 # -----------------------------------------------------------------------------
 SERVER_INFO = {
     "name": "marketgraph-data",
-    "version": "1.7.0",
+    "version": "1.8.0",
 }
 
 def _dispatch_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -1915,6 +2058,9 @@ def _dispatch_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
             return {"error": "sector 必须是非空字符串", "data_status": "unavailable"}
         if arguments.get("count", 130) is not None and (not isinstance(arguments.get("count", 130), int) or not 20 <= arguments.get("count", 130) <= 250):
             return {"error": "count 必须是 20 至 250 的整数", "data_status": "unavailable"}
+    if name == "get_sector_limit_quality":
+        if not isinstance(arguments.get("sector"), str) or not arguments["sector"].strip():
+            return {"error": "sector 必须是非空字符串", "data_status": "unavailable"}
     if name == "get_basket_index":
         stocks = arguments.get("stocks")
         if not isinstance(stocks, list) or len(stocks) < 2 or len(stocks) > 10 or not all(isinstance(s, str) and s.strip() for s in stocks):
@@ -1945,6 +2091,8 @@ def _dispatch_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         return fetch_market_sentiment(arguments.get("date_str"))
     elif name == "get_limit_up_ladder":
         return fetch_limit_up_ladder(arguments.get("date_str"))
+    elif name == "get_sector_limit_quality":
+        return fetch_sector_limit_quality(arguments.get("sector", ""), arguments.get("date_str"))
     elif name == "get_index_kline":
         return fetch_index_kline(arguments.get("indices"), arguments.get("count", 5))
     elif name == "get_market_breadth":
@@ -2117,6 +2265,9 @@ if __name__ == "__main__":
             out = fetch_market_sentiment()
         elif tool_name == "get_limit_up_ladder":
             out = fetch_limit_up_ladder()
+        elif tool_name == "get_sector_limit_quality":
+            # --test 默认标的是个股代码, 板块工具需独立默认板块名
+            out = fetch_sector_limit_quality(sys.argv[3] if len(sys.argv) > 3 else "半导体")
         elif tool_name == "get_index_kline":
             out = fetch_index_kline()
         elif tool_name == "get_market_breadth":

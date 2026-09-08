@@ -52,6 +52,7 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         self.assertIn("get_stock_timeline", tool_names)
         self.assertIn("get_market_sentiment", tool_names)
         self.assertIn("get_limit_up_ladder", tool_names)
+        self.assertIn("get_sector_limit_quality", tool_names)
         self.assertIn("get_index_kline", tool_names)
         self.assertIn("get_market_breadth", tool_names)
         self.assertIn("get_sector_fund_flow", tool_names)
@@ -638,6 +639,155 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         # days>1 时 count 上限收紧
         res2 = SERVER.fetch_sector_fund_flow(count=20, days=5)
         self.assertIn("error", res2)
+
+    def _mock_sector_quality_gateways(self, boards, zt_items, zb_items):
+        """行业板块表 + 涨停池/炸板池 的统一 mock (按 URL 分流)"""
+        def fake_get(url, timeout=4, encoding="utf-8"):
+            if "clist/get" in url:
+                return json.dumps({"data": {"diff": boards}})
+            if "getTopicZTPool" in url:
+                return json.dumps({"data": {"pool": zt_items}})
+            if "getTopicZBPool" in url:
+                return json.dumps({"data": {"pool": zb_items}})
+            raise AssertionError("unexpected url: " + url)
+        return fake_get
+
+    @patch.object(SERVER, "http_get")
+    def test_sector_limit_quality_hybk_prefix_matching(self, mock_get):
+        """hybk 为 <=4 字缩写: "农产品加工"板块必须匹配 hybk="农产品加" 的涨停, 全称精确匹配会漏 4 家"""
+        boards = [
+            {"f12": "BK1054", "f14": "农产品加工"},
+            {"f12": "BK0475", "f14": "银行"},
+        ]
+        zt_items = [
+            {"c": "000001", "n": "粮农甲", "hybk": "农产品加", "lbc": 1, "fbt": 92500},
+            {"c": "000002", "n": "粮农乙", "hybk": "农产品加", "lbc": 2, "fbt": 93112},
+            {"c": "000003", "n": "粮农丙", "hybk": "农产品加", "lbc": 1, "fbt": 100223},
+            {"c": "000004", "n": "粮农丁", "hybk": "农产品加", "lbc": 1, "fbt": 142301},
+            {"c": "000005", "n": "银行戊", "hybk": "银行", "lbc": 1, "fbt": 92501},
+        ]
+        zb_items = [{"c": "000009", "n": "粮农己", "hybk": "农产品加", "zbc": 1}]
+        mock_get.side_effect = self._mock_sector_quality_gateways(boards, zt_items, zb_items)
+
+        res = SERVER.fetch_sector_limit_quality("农产品加工", "20260904")
+        self.assertEqual(res.get("data_status"), "ok", res)
+        self.assertEqual(res["sector"], "农产品加工")
+        self.assertEqual(res["sector_code"], "BK1054")
+        self.assertEqual(res["sealed_count"], 4)   # 缩写前缀匹配不漏票
+        self.assertEqual(res["broken_count"], 1)
+        self.assertEqual(res["touched_count"], 5)
+        self.assertEqual(res["sector_break_rate"], "20.00%")  # 1/5, 而非漏票后的 1/1
+        self.assertEqual(res["seal_quality_q"], 80.0)
+        self.assertEqual(len(res["limit_up_stocks"]), 4)
+        self.assertEqual(res["limit_up_stocks"][0]["industry_raw"], "农产品加")
+
+    @patch.object(SERVER, "http_get")
+    def test_sector_limit_quality_exact_short_name_and_bk_code(self, mock_get):
+        """hybk 恰为全称(<=4字板块)精确命中; BK 代码直查等价中文名"""
+        boards = [{"f12": "BK0475", "f14": "银行"}]
+        zt_items = [
+            {"c": "601398", "n": "工商银行", "hybk": "银行", "lbc": 1, "fbt": 92500},
+            {"c": "601939", "n": "建设银行", "hybk": "银行", "lbc": 1, "fbt": 93000},
+            {"c": "601288", "n": "农业银行", "hybk": "银行", "lbc": 1, "fbt": 94000},
+        ]
+        mock_get.side_effect = self._mock_sector_quality_gateways(boards, zt_items, [])
+
+        res = SERVER.fetch_sector_limit_quality("BK0475", "2026-09-04")  # 紧凑日期也要归一
+        self.assertEqual(res.get("data_status"), "ok", res)
+        self.assertEqual(res["date"], "20260904")
+        self.assertEqual(res["sealed_count"], 3)
+        self.assertEqual(res["broken_count"], 0)
+        self.assertEqual(res["sector_break_rate"], "0.00%")
+        self.assertEqual(res["seal_quality_q"], 100.0)
+
+    @patch.object(SERVER, "http_get")
+    def test_sector_limit_quality_ambiguous_prefix_excluded(self, mock_get):
+        """缩写同时是多个板块前缀时无法归属: 剔除计数并披露, 不硬塞给目标板块"""
+        boards = [
+            {"f12": "BK1054", "f14": "农产品加工"},
+            {"f12": "BK1099", "f14": "农产品加工服务"},
+        ]
+        zt_items = [
+            {"c": "000001", "n": "歧义甲", "hybk": "农产品加", "lbc": 1, "fbt": 92500},
+            {"c": "000002", "n": "明确乙", "hybk": "农产品加工", "lbc": 1, "fbt": 92600},
+        ]
+        mock_get.side_effect = self._mock_sector_quality_gateways(boards, zt_items, [])
+
+        res = SERVER.fetch_sector_limit_quality("农产品加工", "20260904")
+        self.assertEqual(res.get("data_status"), "ok", res)
+        self.assertEqual(res["sealed_count"], 1)  # 仅全称精确命中的 1 家
+        self.assertEqual(len(res["ambiguous_industry_stocks"]), 1)
+        self.assertEqual(res["ambiguous_industry_stocks"][0]["ambiguous_with"], ["农产品加工服务"])
+
+    @patch.object(SERVER, "http_get")
+    def test_sector_limit_quality_small_sample_q_null(self, mock_get):
+        """触板 <3 家: Q 记 null 并说明, 不得借用全市场炸板率"""
+        boards = [{"f12": "BK0475", "f14": "银行"}]
+        zt_items = [
+            {"c": "601398", "n": "工商银行", "hybk": "银行", "lbc": 1, "fbt": 92500},
+            {"c": "601939", "n": "建设银行", "hybk": "银行", "lbc": 1, "fbt": 93000},
+        ]
+        zb_items = [{"c": "601288", "n": "农业银行", "hybk": "银行", "zbc": 2}]
+        mock_get.side_effect = self._mock_sector_quality_gateways(boards, zt_items, zb_items)
+
+        res = SERVER.fetch_sector_limit_quality("银行", "20260904")
+        self.assertEqual(res.get("data_status"), "ok", res)
+        self.assertEqual(res["touched_count"], 3)  # 恰好 3 家 => 有 Q
+        self.assertEqual(res["seal_quality_q"], 66.7)
+
+        SERVER.CACHE_STORE.clear()
+        zb_items.append({"c": "601658", "n": "邮储银行", "hybk": "银行", "zbc": 1})
+        # touched 4 仍然 >=3; 构造 <3: 只留 1 涨停 1 炸板
+        zt_items_small = zt_items[:1]
+        zb_items_small = zb_items[:1]
+        mock_get.side_effect = self._mock_sector_quality_gateways(boards, zt_items_small, zb_items_small)
+        res2 = SERVER.fetch_sector_limit_quality("银行", "20260904")
+        self.assertEqual(res2["touched_count"], 2)
+        self.assertIsNone(res2["seal_quality_q"])
+        self.assertIn("触板不足", res2["q_note"])
+
+    @patch.object(SERVER, "http_get")
+    def test_sector_limit_quality_rejects_unknown_and_concept(self, mock_get):
+        boards = [{"f12": "BK0475", "f14": "银行"}]
+        mock_get.side_effect = self._mock_sector_quality_gateways(boards, [], [])
+
+        res = SERVER.fetch_sector_limit_quality("不存在的板块XYZ", "20260904")
+        self.assertEqual(res["data_status"], "unavailable")
+        self.assertIn("无法解析板块", res["error"])
+
+        res2 = SERVER.fetch_sector_limit_quality("BK9999", "20260904")  # 概念/未知代码
+        self.assertEqual(res2["data_status"], "unavailable")
+        self.assertIn("行业板块表内", res2["error"])
+
+        res3 = SERVER.fetch_sector_limit_quality("农产品加工", "2026-9-4")  # 非法日期
+        self.assertEqual(res3["data_status"], "unavailable")
+
+    @patch.object(SERVER, "http_get")
+    def test_sector_limit_quality_marks_partial_on_pool_failure(self, mock_get):
+        """单侧池失败 => partial 且披露; 双侧皆空(疑似非交易日) => unavailable"""
+        boards = [{"f12": "BK0475", "f14": "银行"}]
+
+        def fake_get(url, timeout=4, encoding="utf-8"):
+            if "clist/get" in url:
+                return json.dumps({"data": {"diff": boards}})
+            if "getTopicZTPool" in url:
+                return json.dumps({"data": {"pool": [{"c": "601398", "n": "工商银行", "hybk": "银行", "lbc": 1}]}})
+            raise OSError("zb pool down")
+        mock_get.side_effect = fake_get
+        res = SERVER.fetch_sector_limit_quality("银行", "20260904")
+        self.assertEqual(res["data_status"], "partial")
+        self.assertEqual(res["sealed_count"], 1)
+        self.assertTrue(any("炸板池" in s for s in res["unavailable_sources"]))
+
+        SERVER.CACHE_STORE.clear()
+        def fake_get_empty(url, timeout=4, encoding="utf-8"):
+            if "clist/get" in url:
+                return json.dumps({"data": {"diff": boards}})
+            return json.dumps({"data": {"pool": []}})
+        mock_get.side_effect = fake_get_empty
+        res2 = SERVER.fetch_sector_limit_quality("银行", "20260101")
+        self.assertEqual(res2["data_status"], "unavailable")
+        self.assertIn("非交易日", res2["error"])
 
     def test_lhb_market_summary_normalizes_compact_date(self):
         """全市场概览传 YYYYMMDD 紧凑日期必须归一化为横杠格式, 否则上游必然查空"""

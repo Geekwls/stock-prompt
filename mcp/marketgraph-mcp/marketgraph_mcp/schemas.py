@@ -1,4 +1,4 @@
-"""12 个 MCP 工具的 JSON Schema 定义（供 tools/list 声明）。"""
+"""13 个 MCP 工具的 JSON Schema 定义（供 tools/list 声明）。"""
 
 AVAILABLE_TOOLS = [
     {
@@ -118,6 +118,25 @@ AVAILABLE_TOOLS = [
                     "pattern": "^[0-9]{8}$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
                 }
             },
+        },
+    },
+    {
+        "name": "get_sector_limit_quality",
+        "description": "获取行业板块当日或指定交易日的触板结构：涨停/炸板清单、板块炸板率与封板质量 Q=(1-板块炸板率)×100（触板<3家记 null）。涨停池/炸板池 hybk 行业字段为 ≤4 字缩写（如\"农产品加工\"→\"农产品加\"），本工具在确定性层完成前缀安全匹配与多板块歧义剔除，杜绝按板块全称精确匹配漏票导致的板块炸板率失真",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "sector": {
+                    "type": "string",
+                    "description": "行业板块 BK 代码或中文名，例如 'BK1036', '半导体', '农产品加工'（概念板块无 hybk 归属，不支持）",
+                },
+                "date_str": {
+                    "type": "string",
+                    "description": "交易日期，格式 YYYYMMDD 或 YYYY-MM-DD，省略则为当天",
+                    "pattern": "^[0-9]{8}$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+                }
+            },
+            "required": ["sector"],
         },
     },
     {

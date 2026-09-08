@@ -74,7 +74,7 @@
   },
   "mcp": {
     "name": "marketgraph-data",
-    "version": "1.7.0",
+    "version": "1.8.0",
     "entrypoint": "mcp/marketgraph-mcp/server.py",
     "tools": [
       "get_stock_quote",
@@ -84,6 +84,7 @@
       "get_market_breadth",
       "get_market_sentiment",
       "get_limit_up_ladder",
+      "get_sector_limit_quality",
       "get_sector_fund_flow",
       "get_sector_kline",
       "get_basket_index",

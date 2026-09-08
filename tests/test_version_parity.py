@@ -98,8 +98,13 @@ class VersionParityTest(unittest.TestCase):
     def test_mcp_version_drift_is_reported(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = build_repo_snapshot(temporary)
+            registry_version = json.loads(
+                (root / "registry.json").read_text(encoding="utf-8")
+            )["mcp"]["version"]
             server = root / "mcp" / "marketgraph-mcp" / "server.py"
-            text = server.read_text(encoding="utf-8").replace('"version": "1.7.0"', '"version": "9.9.9"', 1)
+            text = server.read_text(encoding="utf-8")
+            self.assertIn(f'"version": "{registry_version}"', text)  # 快照必须能定位到当前版本字面量
+            text = text.replace(f'"version": "{registry_version}"', '"version": "9.9.9"', 1)
             server.write_text(text, encoding="utf-8")
             self.use_snapshot(root)
             errors = PARITY.collect_errors()

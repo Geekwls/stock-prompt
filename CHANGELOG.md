@@ -1,5 +1,15 @@
 # CHANGELOG (更新日志)
 
+## [v7.1.1] - 2026-09-08
+### 🔍 复盘洞察与自证闭环增强 (Review Insights & Self-Verification)
+- 新增 `eval replay` 当日推演化回放：一屏对比盘前 (8:30) → 竞价 (9:25) → 收盘实际 (15:00) 走势与修订对错评价。
+- 新增 `eval misses` 错案集复盘：按单日多分类 Brier 降序输出重错案例卡片（包含环境切片、主线偏差与错误归因）。
+- 新增 `stock_prompt.py weekly` 周度复盘摘要：一页 Markdown 聚合方向命中率、Brier、主线 Top3、情绪分位与触发器核验状态。
+- 新增机会分（Opportunity Score）有效性验证：按高/中/低分档对比第一主线表现与大盘超额。
+- 新增主线生命周期状态机转移台账（`record-daily --mainline-*` + `report-mainline`），统计实际转移频率矩阵与停留时长。
+- 新增证据簇判读力（`--e1`~`--e4`）与情绪极值（`report-daily --extremes`）后续表现统计。
+- `daily-review` 模板新增复盘收尾“五问”强制自审节（必须引用机器 ID，杜绝口头声明）。
+
 ## [v7.1.0] - 2026-09-08
 ### 🔁 连续复盘记忆、不可变评估与状态安全
 - Handoff 增加研究对象身份、Regime 命名空间、结构化触发器和复盘差异；同日多只股票按代码隔离，读取支持 `--subject`，避免个股快照相互覆盖。

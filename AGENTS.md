@@ -7,7 +7,7 @@
 | 触发条件 | 默认唤醒 Skill | 说明 |
 |---|---|---|
 | 交易日 08:30–09:15，或用户提到“盘前 / 竞价 / 9:25” | `market-prediction` | 三态概率、空间点位与机会函数；9:25 竞价证据执行后验更新 |
-| 交易日 15:00–21:00，或用户提到“复盘 / 收盘” | `daily-review` | 收盘复盘；完成后执行评估台账 result / record-daily 落盘 |
+| 交易日 15:00–21:00，或用户提到“复盘 / 收盘” | `daily-review` | 输出收盘事实 Artifact；评估台账由独立后处理器按能力执行 |
 | 周五收盘 / 周末 / 月末，或用户提到“近5日 / 轮动” | `sector-rotation` | 5 日资金迁移、主线生命周期与衰竭指数 |
 | 任意时段输入股票代码 / 名称，或“诊断 XXXXXX” | `stock-analysis` | 八层个股诊断；继承已有交接摘要中的 L1/L2 证据 |
 | 横跨两个以上阶段，或要求继续已有研究流程 | `stock-research-router` | 只负责读取交接、选择专业 Skill 与检查闭环，不替代专业分析 |
@@ -16,12 +16,12 @@
 
 ## 二、跨 Skill 闭环协议
 
-1. **交接摘要 (Handoff JSON)**：每份报告末尾输出公共契约定义的交接摘要 JSON，并通过当前 Skill 根目录的 `scripts/handoff_store.py` 校验、原子落盘；个股交接必须携带 `subject` 并按代码隔离。读取方使用 `latest --within-trading-days 3`，个股另传 `--subject`。缺失字段用空数组或 `N/A`，不得补造。
-2. **板块 → 个股穿透**：daily-review 与 sector-rotation 报告中的标的可通过 `诊断 <代码或名称>` 穿透至 stock-analysis；穿透诊断继承前序报告的 Regime 与主线结论作为 L1/L2 证据，仅增量补采缺失部分。
-3. **评估台账**（固定路径，不随工作目录漂移）：
+1. **交接摘要 (Handoff JSON)**：每份报告末尾输出公共契约定义的交接摘要 JSON；可写环境中再通过 `handoff_store.py` 校验、原子落盘。持久化失败时标注 `handoff_status=emitted_only`，不影响专业分析完成。个股交接必须携带 `subject` 并按代码隔离。读取方使用 `latest --within-trading-days 3`，个股另传 `--subject`。缺失字段用空数组或 `N/A`，不得补造。
+2. **板块 → 个股穿透**：daily-review 与 sector-rotation 报告中的标的可通过 `诊断 <代码或名称>` 穿透至 stock-analysis；穿透诊断将前序 Regime 与主线结论作为候选 L1/L2 证据，必须核验时点、来源、口径和覆盖率，冲突或过期时独立补采并重新裁决。
+3. **评估台账**（独立后处理，可选持久化）：
    - 盘前推演完成后：`python scripts/eval_tracker.py record ...`（三态概率 / Opportunity / 主线 Top3 / R1 / S1）。
    - 收盘复盘完成后：`python scripts/eval_tracker.py result ...`（Z_ATR / 实际主线 Top3 / 收盘高低点）与 `record-daily ...`（情绪五项分 / 资金延续 / 机会评分），随后 `report` / `report-daily` 输出滚动指标与阈值分位落位。
-   - 台账固定为 `~/.stock-prompt/eval/predictions.jsonl` 与同目录 `daily_scores.jsonl`，盘前与收盘写入同一文件；全局安装用户路径为 `<技能安装目录>/scripts/eval_tracker.py`。
+   - 台账路径按命令行参数、环境变量、默认用户目录解析；后处理失败标注 `evaluation_status=emitted_only|failed`，不影响专业分析完成。
 4. **数据获取优先级**：已注册 MarketGraph MCP 时优先使用其结构化公开数据工具（K线/广度/资金流/龙虎榜等，按 P3 记录），MCP 不可用才走网络搜索与降级规则。
 
 ## 三、修改本仓库时的纪律

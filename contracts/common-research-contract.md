@@ -54,6 +54,13 @@ Scored Weight = 实际参与评分的原始权重
 
 ## 跨 Skill 交接
 
+### 独立运行与 Artifact-first 原则
+
+- 四个专业 Skill 必须能独立运行；前序 Skill、Handoff 文件、评估台账、本地脚本或 MCP 均不得成为当前专业报告的硬前置条件。缺失时按本契约补采或降级。
+- Skill 之间只通过结构化 Artifact 交换证据；Router 与宿主流水线负责顺序、持久化和后处理。
+- 报告内生成合法 Handoff JSON 即完成交接产物；可写时再持久化。持久化失败必须披露，但不得把已完成的专业分析改判为失败。
+- 读取旧 Artifact 是缓存优化而非业务依赖。读取方须复核 `as_of`、来源、口径和覆盖率；没有、过期或冲突时自行补采。
+
 报告末尾输出可复用的交接摘要；没有对应内容时使用空数组或 `N/A`，不得补造：
 
 ```json
@@ -81,10 +88,10 @@ Scored Weight = 实际参与评分的原始权重
 }
 ```
 
-- 交接摘要除在报告末尾输出外，必须通过当前 Skill 根目录的 `scripts/handoff_store.py write --stdin` 完成 Schema 校验与原子落盘；读取方优先执行同脚本的 `latest --within-trading-days 3`。市场类文件为 `handoff-<YYYYMMDD>-<report_type>.json`；个股文件必须提供 `subject={type: stock, id: 股票代码, name: 股票名称}`，保存为 `handoff-<YYYYMMDD>-stock-<代码>.json`，读取时使用 `--subject <代码>`，避免同日多股覆盖。
-- `market-prediction` 的预测台账统一写入 `~/.stock-prompt/eval/predictions.jsonl`（由 `scripts/eval_tracker.py` 固定，不随工作目录漂移）；`daily-review` 收盘回测读取同一份文件，禁止在其他位置另建台账。
+- 可持久化时用 `handoff_store.py write --stdin` 校验并落盘；不可持久化时保留报告内 JSON 并输出 `handoff_status=emitted_only`。路径优先级为 `--state-dir`、`STOCK_PROMPT_STATE_DIR`、默认 `~/.stock-prompt/state`。
+- 预测、收盘事实和每日评分先作为报告 Artifact 生成，再由可用的 `eval_tracker.py` 后处理器写入台账。后处理失败输出 `evaluation_status=emitted_only|failed`，不影响分析完成。台账路径可由命令行参数或相关环境变量配置。
 - `daily-review` 提供收盘市场状态、主线和次日验证变量。
 - `market-prediction` 读取最近收盘交接摘要，并根据隔夜与竞价证据更新。
 - `sector-rotation` 提供中期板块阶段、候选方向和衰竭风险。
-- `stock-analysis` 接收市场与板块状态作为 L1/L2 证据，并返回个股确认、失效和复核条件。
+- `stock-analysis` 可接收市场与板块状态作为 L1/L2 候选证据；核验后复用，否则独立补采并重新裁决。
 - 个股需要跨越 3 个交易日持续跟踪时，另用当前 Skill 根目录的 `scripts/thesis_store.py` 维护按股票代码隔离的长期 Thesis Ledger；Handoff 负责短期跨 Skill 交接，Thesis 负责长期逻辑历史，两者不得混用。

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "project": {
     "name": "a-stock-research",
-    "version": "7.3.0",
+    "version": "7.4.0",
     "description": "A-Share Quantitative & Wyckoff Research Protocol for Autonomous Agents (Agent Plugins 1.0)",
     "homepage": "https://github.com/Geekwls/stock-prompt"
   },
@@ -80,7 +80,8 @@
     "report_card_prediction": "schemas/report-card-prediction-v1.schema.json",
     "report_card_rotation": "schemas/report-card-rotation-v1.schema.json",
     "report_card_stock": "schemas/report-card-stock-v1.schema.json",
-    "thesis": "schemas/thesis-v1.schema.json"
+    "thesis": "schemas/thesis-v1.schema.json",
+    "ui_event": "contracts/ui/event.schema.json"
   },
   "artifacts": {
     "base": "contracts/artifacts/base.schema.json",

@@ -1,5 +1,23 @@
 # CHANGELOG (更新日志)
 
+## [v7.4.0] - 2026-09-08
+### ⚡ Skill 结构精简与 Tool Recipes 配方解耦
+- 精简 4 大专业 Skill 主文件至规范行数区间（平均精简 65%+）：
+  * `market-prediction/SKILL.md`: 105 行（原 449 行）
+  * `daily-review/SKILL.md`: 105 行（原 336 行）
+  * `sector-rotation/SKILL.md`: 95 行（原 248 行）
+  * `stock-analysis/SKILL.md`: 110 行（原 248 行）
+- 提取 4 个 Skill 的工具调用配方至 `references/tool-recipes.md`：
+  * 深度沉淀 MCP 上下文工具调用（`get_preopen_context`, `get_close_review_context`, `get_rotation_context`, `get_stock_diagnostic_context`）；
+  * 集中规范 `calculate.py` 确定性纯函数库的命令行参数与标准输入输出；
+  * 明确交接落盘、不可变 Artifact 与长期 Thesis 持久化流程。
+- 保证五大投研心智、YAML frontmatter、口语化自然语言意图映射、状态机及报告八节/十节标准结构完全保留。
+
+### 🖥️ UI 事件协议与轻量调度器
+- 新增标准 UI 交互事件规范 `contracts/ui/event.schema.json`，定义 9 类核心交互事件（view_evidence, render_card, calibrate_view, run_preopen, run_review, run_rotation, run_diagnostic, switch_regime, verify_trigger）及轻量状态机。
+- 新增 `tools/orchestration/event_router.py`，支持将确定性事件（查看证据、长图渲染、校准视图）直接分发至确定性脚本快速响应（无 LLM 介入耗时），将投研分析事件定向分发给对应专业 Skill 执行。
+- 新增单测 `tests/test_ui_event_router.py` 完整覆盖路由决策与事件校验。
+
 ## [v7.3.0] - 2026-09-08
 ### 🔁 Artifact 转换适配器与兼容期双写
 - 新增 `tools/artifacts/adapters.py` 六类转换适配器：盘前预测→prediction（PREOPEN_V1）、9:25 修订→auction（AUCTION_V2，强制挂接同日 PREOPEN parent）、收盘结果→close_actual、每日复盘→daily_score、板块轮动→rotation、个股诊断→stock_diagnostic（按 subject 隔离）；快照 ID 确定性派生，重复镜像幂等跳过。

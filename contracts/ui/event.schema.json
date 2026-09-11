@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "UIEventSchema",
+  "description": "stock-prompt UI 交互层与 Agent 模型/工具层之间的结构化事件契约",
+  "type": "object",
+  "required": ["event", "timestamp"],
+  "properties": {
+    "event": {
+      "type": "string",
+      "enum": [
+        "start_preopen",
+        "update_auction",
+        "run_close_review",
+        "run_rotation",
+        "diagnose_stock",
+        "view_evidence",
+        "view_calibration",
+        "retry_data",
+        "render_report"
+      ],
+      "description": "UI 结构化事件标识符"
+    },
+    "timestamp": {
+      "type": "string",
+      "description": "事件触发时间戳 ISO 8601 或 YYYY-MM-DD HH:MM:SS"
+    },
+    "payload": {
+      "type": "object",
+      "description": "事件业务负载参数，例如 symbol, date_str, display_mode 等",
+      "properties": {
+        "symbol": {"type": "string"},
+        "date_str": {"type": "string"},
+        "benchmark": {"type": "string"},
+        "display_mode": {"type": "string", "enum": ["summary", "full"]},
+        "report_type": {"type": "string"},
+        "target_stage": {"type": "string"}
+      }
+    },
+    "context": {
+      "type": "object",
+      "description": "事件携带的上下文 Artifact 引用与来源",
+      "properties": {
+        "artifact_ids": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "source": {"type": "string"}
+      }
+    },
+    "ui_state": {
+      "type": "string",
+      "enum": [
+        "idle",
+        "loading",
+        "partial",
+        "awaiting_input",
+        "complete",
+        "degraded",
+        "failed"
+      ],
+      "description": "事件发起时前端界面当前所处的状态机状态"
+    }
+  }
+}

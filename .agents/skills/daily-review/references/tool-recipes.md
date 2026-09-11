@@ -17,6 +17,7 @@
 | 计算目标 | 命令行调用入口 | 核心输入参数 |
 |---|---|---|
 | **情绪五项加权分** | `python scripts/calculate.py calculate_market_sentiment_score --json '{"amount_score": 75, "breadth_score": 60, "limit_score": 70, "blown_score": 65, "ladder_score": 60}'` | 5项维度分 (0-100) |
+| **资金延续评分** | `python scripts/calculate.py calculate_capital_continuity --json '{"amount_ratio": 0.85, "break_rate": 0.0909, "trigger_count": 5}'` | `amount_ratio` (0-1), `break_rate` (支持 0.0909 或 9.09 百分数自适应), `trigger_count` (<3 缺失归一化) |
 | **实际 Z_ATR 状态** | `python scripts/calculate.py calculate_atr_state --json '{"close": 3940, "previous_close": 3932, "atr14": 35}'` | `close`, `previous_close`, `atr14` |
 | **多分类 Brier 误差** | `python scripts/calculate.py calculate_multiclass_brier --json '{"probabilities": {"up": 0.36, "side": 0.48, "down": 0.16}, "actual_state": "side"}'` | `probabilities`, `actual_state` |
 

@@ -26,6 +26,7 @@ def installed_roots():
         "gemini": home / ".gemini" / "skills",
         "antigravity": home / ".gemini" / "antigravity" / "skills",
         "codex": codex_home / "skills",
+        "workbuddy": home / ".workbuddy-ai" / "skills",
     }
 
 
@@ -54,6 +55,7 @@ def mcp_registered():
         home / ".gemini" / "antigravity" / "mcp_config.json",
         home / ".gemini" / "mcp_config.json",
         home / ".cursor" / "mcp.json",
+        home / ".workbuddy-ai" / "mcp.json",
         Path(os.environ.get("CODEX_HOME", home / ".codex")) / "config.toml",
     )
     for path in candidates:

@@ -9,6 +9,8 @@ def calculate_capital_continuity(amount_ratio, break_rate=None, trigger_count=No
     volume = clamp(amount_ratio, 0, 1) * 100 if amount_ratio is not None else None
     quality = None
     if break_rate is not None and (trigger_count is None or trigger_count >= 3):
+        if 1 < break_rate <= 100:
+            break_rate = break_rate / 100.0
         require_range("break_rate", break_rate, 0, 1)
         quality = (1 - break_rate) * 100
     else:

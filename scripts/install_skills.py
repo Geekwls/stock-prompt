@@ -47,6 +47,7 @@ MCP_CONFIG_CANDIDATES = (
     Path.home() / ".gemini" / "antigravity" / "mcp_config.json",
     Path.home() / ".gemini" / "mcp_config.json",
     Path.home() / ".cursor" / "mcp.json",
+    Path.home() / ".workbuddy-ai" / "mcp.json",
     Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "config.toml",
 )
 
@@ -58,6 +59,7 @@ def target_roots(target):
         "gemini": home / ".gemini" / "skills",
         "antigravity": home / ".gemini" / "antigravity" / "skills",
         "codex": codex_root,
+        "workbuddy": home / ".workbuddy-ai" / "skills",
     }
     if target == "all":
         return list(roots.items())
@@ -254,7 +256,7 @@ def parse_args():
     parser.add_argument("--dry-run", action="store_true", help="显示计划，不写入")
     parser.add_argument(
         "--target",
-        choices=("all", "gemini", "antigravity", "codex", "workspace"),
+        choices=("all", "gemini", "antigravity", "codex", "workbuddy", "workspace"),
         default="all",
         help="安装目标；workspace 只同步仓库内报告卡脚本",
     )

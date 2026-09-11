@@ -42,6 +42,7 @@ class MarketCalculationsTest(unittest.TestCase):
 class SectorAndStockCalculationsTest(unittest.TestCase):
     def test_capital_continuity_and_small_sample_degrade(self):
         self.assertEqual(calculate_capital_continuity(1.2, 0.25, 4)["value"], 90.0)
+        self.assertEqual(calculate_capital_continuity(1.2, 25.0, 4)["value"], 90.0)
         degraded = calculate_capital_continuity(0.8, 0.1, 2)
         self.assertEqual(degraded["value"], 80.0)
         self.assertEqual(degraded["status"], "partial")

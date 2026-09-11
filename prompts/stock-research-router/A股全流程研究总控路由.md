@@ -127,10 +127,10 @@ Scored Weight = 实际参与评分的原始权重
 ## 编排流程
 
 1. 提取用户要求的研究对象、时间范围、所处阶段和最终交付。
-2. 使用当前 Router Skill 根目录的 `scripts/handoff_store.py latest --within-trading-days 3` 查找最近有效交接；读取个股交接时同时传 `--subject <股票代码>`。不可执行脚本时检查当前会话已有摘要。
+2. **上下文读取（Artifact 优先，Handoff 回退）**：优先执行当前 Router Skill 根目录的 `scripts/artifact_store.py latest --type <prediction|auction|close_actual|daily_score|rotation|stock_diagnostic> --within-trading-days 3`（个股诊断加 `--subject <股票代码>`）读取最新有效 Artifact；输出为 `N/A`、`(expired)` 或文件损坏，以及脚本不可执行时，回退 `scripts/handoff_store.py latest --within-trading-days 3`（个股同样加 `--subject`）；两者都不可用时检查当前会话已有摘要。路由决策必须注明本次上下文来源（artifact / handoff / 会话）与日历精度。
 3. 输出简短路由决策：目标 Skill、可继承证据、仍需补采的数据。不得把旧摘要伪装为当前事实。
 4. 若宿主支持 Skill 调度，交由目标专业 Skill 执行；不支持时，明确提示用户调用对应 Skill，不在 Router 内复制整套专业框架。
-5. 专业报告完成后，用当前目标 Skill 根目录的 `scripts/handoff_store.py write --stdin` 校验并落盘交接摘要；写入失败必须披露，不能声称闭环完成。
+5. 专业报告完成后，用当前目标 Skill 根目录的 `scripts/handoff_store.py write --stdin` 校验并落盘交接摘要（rotation / stock 交接会自动双写为标准 Artifact，`eval_tracker` 的 record / result / record-daily 同理）；任何写入失败必须披露，不能声称闭环完成。
 6. daily-review 或 sector-rotation 输出标的池后，提供 `诊断 <代码或名称>` 的个股穿透入口；个股诊断只继承有来源的 L1/L2，继续补采 L3–L8。
 
 ## 多阶段任务顺序

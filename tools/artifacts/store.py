@@ -220,6 +220,50 @@ def select_artifacts(root=None, artifact_type=None, trading_date=None, subject=N
     return sorted(selected, key=lambda item: (item.get("as_of", ""), item.get("snapshot_id", "")))
 
 
+def _recent_weekdays(reference, count):
+    from datetime import timedelta
+
+    result, cursor = [], reference
+    while len(result) < count:
+        if cursor.weekday() < 5:
+            result.append(cursor.isoformat())
+        cursor -= timedelta(days=1)
+    return set(result)
+
+
+def latest_within_trading_days(root=None, artifact_type=None, subject=None, within=3, reference=None):
+    """最近 N 个交易日内的最新有效 Artifact（工作日近似 + 文件日期窗口 + 10 自然日上限）。
+
+    返回 (payload, precision)；无有效样本返回 (None, precision)。
+    """
+    from datetime import date as date_type, timedelta
+
+    reference = reference or date_type.today()
+    candidates = select_artifacts(root, artifact_type=artifact_type, subject=subject)
+    if not candidates:
+        return None, "empty"
+    weekdays = _recent_weekdays(reference, within)
+    distinct = []
+    for payload in reversed(candidates):
+        trading_date = str(payload.get("trading_date", ""))
+        if trading_date and trading_date not in distinct:
+            distinct.append(trading_date)
+    file_window = set(distinct[:within])
+    try:
+        reference_iso = reference.isoformat()
+        file_window = {
+            day for day in file_window
+            if timedelta(0) <= date_type.fromisoformat(reference_iso) - date_type.fromisoformat(day) <= timedelta(days=10)
+        }
+    except ValueError:
+        file_window = set()
+    accepted = weekdays | file_window
+    for payload in reversed(candidates):
+        if str(payload.get("trading_date", "")) in accepted:
+            return payload, "weekday_fallback"
+    return None, "expired"
+
+
 def _read_json(path=None, from_stdin=False):
     if from_stdin:
         return json.load(sys.stdin)
@@ -247,6 +291,8 @@ def main(argv=None):
     latest.add_argument("--type", dest="artifact_type")
     latest.add_argument("--date", dest="trading_date")
     latest.add_argument("--subject")
+    latest.add_argument("--within-trading-days", type=int, default=None,
+                        help="最近 N 个交易日窗口（工作日近似+文件日期兜底，超窗视为过期）")
 
     args = parser.parse_args(argv)
     if args.command == "validate":
@@ -269,12 +315,23 @@ def main(argv=None):
         return 1 if payload is None else 0
     selected = select_artifacts(args.state_dir, args.artifact_type, args.trading_date, args.subject)
     if args.command == "latest":
+        if getattr(args, "within_trading_days", None):
+            payload, precision = latest_within_trading_days(
+                args.state_dir, artifact_type=args.artifact_type, subject=args.subject,
+                within=args.within_trading_days,
+            )
+            if payload is None:
+                print("N/A" if precision == "empty" else f"N/A (expired: 无最近 {args.within_trading_days} 个交易日内的有效 Artifact)")
+                return 1
+            print(json.dumps({"calendar_precision": precision, "artifact": payload},
+                             ensure_ascii=False, indent=2))
+            return 0
         if not selected:
             print("N/A")
             return 1
         print(json.dumps(selected[-1], ensure_ascii=False, indent=2))
-    else:
-        print(json.dumps(selected, ensure_ascii=False, indent=2))
+        return 0
+    print(json.dumps(selected, ensure_ascii=False, indent=2))
     return 0
 
 

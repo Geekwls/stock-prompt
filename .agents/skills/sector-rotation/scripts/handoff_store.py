@@ -11,6 +11,13 @@ import tempfile
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+# 兼容期双写：定位项目根以复用 tools.artifacts（独立安装时由 .stock-prompt-runtime.json 锚定）
+for _parent in Path(__file__).resolve().parents:
+    if (_parent / "registry.json").is_file() or (_parent / ".stock-prompt-runtime.json").is_file():
+        if str(_parent) not in sys.path:
+            sys.path.insert(0, str(_parent))
+        break
+
 
 SCHEMA_VERSION = "1.0"
 REPORT_TYPES = {"prediction", "daily", "rotation", "stock"}
@@ -32,6 +39,18 @@ def state_root(explicit=None):
         return Path(explicit).expanduser()
     override = os.environ.get("STOCK_PROMPT_STATE_DIR")
     return Path(override).expanduser() if override else Path.home() / ".stock-prompt" / "state"
+
+
+def dual_write_artifact(payload):
+    """兼容期双写：rotation/stock 交接镜像为标准 Artifact；失败仅告警，不影响 Handoff 完成。"""
+    try:
+        from tools.artifacts.adapters import mirror_and_store
+
+        destination = mirror_and_store("handoff", payload)
+        if destination is not None:
+            print(f"[ARTIFACT] 双写 {payload.get('report_type')} -> {destination}")
+    except Exception as exc:  # noqa: BLE001 旁路能力，任何失败都不得阻断主流程
+        print(f"[WARN] Artifact 双写失败（不影响 Handoff）: {exc}")
 
 
 def discover_model_version():
@@ -338,6 +357,8 @@ def main():
     if args.command == "write":
         payload = prepare_handoff(load_json(args.input, args.stdin), args.model_version)
         print(atomic_write(payload, root))
+        if payload.get("report_type") in ("rotation", "stock"):
+            dual_write_artifact(payload)
         return 0
     if args.command == "latest":
         if args.within_trading_days < 1:

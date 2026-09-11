@@ -265,9 +265,22 @@ def cmd_record(args):
         rec["s1"] = args.s1
     append_record(args.ledger, rec)
     print(f"[OK] 已记录 {args.date} 盘前预测 -> {args.ledger}")
+    dual_write_artifact("prediction" if phase == "preopen" else "auction", rec)
     if evidence:
         print("[HINT] 已存证据簇判档 " + ", ".join(f"{k}={v}" for k, v in evidence.items())
               + "；积累后 report 将输出各簇判读力统计")
+
+
+def dual_write_artifact(kind, record):
+    """兼容期双写：镜像到标准 Artifact 存储；失败仅告警，不影响台账与报告完成。"""
+    try:
+        from tools.artifacts.adapters import mirror_and_store
+
+        destination = mirror_and_store(kind, record)
+        if destination is not None:
+            print(f"[ARTIFACT] 双写 {kind} -> {destination}")
+    except Exception as exc:  # noqa: BLE001 双写为旁路能力，任何失败都不得阻断主流程
+        print(f"[WARN] Artifact 双写失败（不影响台账与分析）: {exc}")
 
 
 def cmd_result(args):
@@ -304,6 +317,7 @@ def cmd_result(args):
         rec["error_reasons"] = reasons
     append_record(args.ledger, rec)
     print(f"[OK] 已记录 {args.date} 收盘实际 (Z_ATR={args.z_atr} -> {STATE_CN[rec['actual_state']]}) -> {args.ledger}")
+    dual_write_artifact("close_actual", rec)
 
 
 def merge_pairs(preds, results):
@@ -398,6 +412,7 @@ def cmd_record_daily(args):
         rec["top_sector"] = args.top_sector
     append_record(args.daily_ledger, rec)
     print(f"[OK] 已记录 {args.date} 每日评分 -> {args.daily_ledger}")
+    dual_write_artifact("daily_score", rec)
 
 
 def cmd_report_daily(args):

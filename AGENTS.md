@@ -23,6 +23,7 @@
    - 收盘复盘完成后：`python scripts/eval_tracker.py result ...`（Z_ATR / 实际主线 Top3 / 收盘高低点）与 `record-daily ...`（情绪五项分 / 资金延续 / 机会评分），随后 `report` / `report-daily` 输出滚动指标与阈值分位落位。
    - 台账路径按命令行参数、环境变量、默认用户目录解析；后处理失败标注 `evaluation_status=emitted_only|failed`，不影响专业分析完成。
 4. **数据获取优先级**：已注册 MarketGraph MCP 时优先使用其结构化公开数据工具（K线/广度/资金流/龙虎榜等，按 P3 记录），MCP 不可用才走网络搜索与降级规则。
+5. **标准 Artifact（兼容期双写）**：`handoff_store.py`（rotation/stock）与 `eval_tracker.py`（record/result/record-daily）写入成功后自动镜像为不可变标准 Artifact（`~/.stock-prompt/artifacts/`，snapshot 级防覆盖、低覆盖率强制条件化无精确分）。双写失败仅告警，不影响 Handoff/台账/报告完成。跨 Skill 读取上下文时**优先** `artifact_store.py latest --type <类型> --within-trading-days 3`（个股加 `--subject`），缺失、过期或损坏时回退 Handoff `latest`，并在决策中注明来源与精度。
 
 ## 三、修改本仓库时的纪律
 

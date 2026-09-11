@@ -1,5 +1,13 @@
 # CHANGELOG (更新日志)
 
+## [v7.3.0] - 2026-09-08
+### 🔁 Artifact 转换适配器与兼容期双写
+- 新增 `tools/artifacts/adapters.py` 六类转换适配器：盘前预测→prediction（PREOPEN_V1）、9:25 修订→auction（AUCTION_V2，强制挂接同日 PREOPEN parent）、收盘结果→close_actual、每日复盘→daily_score、板块轮动→rotation、个股诊断→stock_diagnostic（按 subject 隔离）；快照 ID 确定性派生，重复镜像幂等跳过。
+- 兼容期双写接线：`eval_tracker.py`（record / result / record-daily）与 `handoff_store.py`（rotation / stock 交接）写入成功后自动镜像为不可变 Artifact；任何双写失败仅输出 `[WARN]`，不影响台账、Handoff 与报告完成。
+- 低覆盖率强制条件化：coverage_band=insufficient 或 coverage<50% 的预测 Artifact 一律 probabilities/opportunity_score=null 且 status=degraded（prediction/auction Schema 相应可空化），杜绝精确分渗入低质量样本。
+- Router 编排改为 Artifact 优先：`artifact_store.py latest` 新增 `--within-trading-days`（工作日近似 + 文件日期窗口 + 10 自然日上限，过期显式 N/A (expired)）；缺失、过期、损坏或脚本不可用时回退 Handoff `latest`，并在路由决策注明上下文来源与精度；AGENTS.md 同步闭环协议。
+- 新增端到端测试 `tests/test_artifact_pipeline.py` 覆盖五项关键约束：PREOPEN 不被竞价覆盖（含同 ID 不可覆盖）、同日多股不串票、低覆盖禁精确分、双写失败不阻断分析、新旧路径 ATR 三态 / Brier / 机会分完全一致。
+
 ## [v7.2.0] - 2026-09-08
 ### 🏗 Artifact 与确定性计算边界落地（可回退基线）
 - 对齐两份开发设计文档的规范边界：工程实施以 `AGENT_TOOLING_REFACTOR_PLAN.md` 为主，`UI_MODEL_SEPARATION_DESIGN.md` 只定义未来 UI/宿主消费接口，路线图只保留产品里程碑，避免三处重复定义。

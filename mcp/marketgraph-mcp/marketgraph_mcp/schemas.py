@@ -1,4 +1,4 @@
-"""13 个 MCP 工具的 JSON Schema 定义（供 tools/list 声明）。"""
+"""17 个 MCP 工具的 JSON Schema 定义（供 tools/list 声明）。"""
 
 AVAILABLE_TOOLS = [
     {
@@ -233,6 +233,93 @@ AVAILABLE_TOOLS = [
                     "type": "string",
                     "description": "股票代码或中文名，例如 '301489', '思泉新材'",
                 }
+            },
+            "required": ["symbol"],
+        },
+    },
+    {
+        "name": "get_preopen_context",
+        "description": "获取 A 股盘前推演标准化上下文证据包：聚合核心指数 T-1 收盘/涨跌/ATR14/均线点位、两市量能偏离度与情绪总分、连板梯队摘要与市场广度红盘率（无买卖倾向黑箱，统一标准化信封返回）",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "indices": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "核心指数代码或简称列表，默认 ['SHCI', 'SZCI', 'CYB', 'CSIALL']",
+                },
+                "date_str": {
+                    "type": "string",
+                    "description": "可选基准日期 YYYYMMDD 或 YYYY-MM-DD，省略默认为最新/T-1日",
+                    "pattern": "^[0-9]{8}$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+                },
+                "sectors": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "可选前序重点关注板块列表，支持板块中文名或 BK 代码",
+                },
+            },
+        },
+    },
+    {
+        "name": "get_close_review_context",
+        "description": "获取 A 股收盘复盘标准化上下文证据包：聚合收盘核心指数表现、全市场量能与真实炸板率、全市场红盘率分布、主力资金流入前列板块及领涨板块封板质量（标准化证据，带缺失审计）",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "date_str": {
+                    "type": "string",
+                    "description": "交易日期 YYYYMMDD 或 YYYY-MM-DD，省略默认为最新收盘日",
+                    "pattern": "^[0-9]{8}$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+                },
+                "top_sectors_count": {
+                    "type": "integer",
+                    "description": "主力资金流入前 N 个板块，默认 5",
+                    "default": 5,
+                    "minimum": 1,
+                    "maximum": 20,
+                },
+            },
+        },
+    },
+    {
+        "name": "get_rotation_context",
+        "description": "获取 A 股 5 日板块轮动标准化上下文证据包：聚合近 N 个交易日板块主力资金连续迁移矩阵、核心指数走势基准与全市场情绪序列（用于计算 SEI 与主线生命周期）",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "days": {
+                    "type": "integer",
+                    "description": "交易日窗口天数，默认 5",
+                    "default": 5,
+                    "minimum": 2,
+                    "maximum": 10,
+                },
+                "sector_count": {
+                    "type": "integer",
+                    "description": "监控主力资金板块数量，默认 10",
+                    "default": 10,
+                    "minimum": 5,
+                    "maximum": 30,
+                },
+            },
+        },
+    },
+    {
+        "name": "get_stock_diagnostic_context",
+        "description": "获取 A 股个股八层诊断标准化上下文证据包：聚合实时行情估值、120/750日复权K线结构与威科夫特征、基本面财务与商誉质押质量、分时与竞价承接力、龙虎榜席位以及对标基准相对强度 RS 支撑数据",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "股票代码或中文名，例如 '300308', '中际旭创'",
+                },
+                "benchmark": {
+                    "type": "string",
+                    "description": "对标基准指数代码，默认 'CSIALL'（中证全指）或 'SHCI'（上证指数）",
+                    "default": "CSIALL",
+                },
             },
             "required": ["symbol"],
         },

@@ -113,8 +113,8 @@ def validate_registry(data: Dict[str, Any], root: Path = ROOT) -> None:
     if not mcp_server.is_file():
         raise RegistryError(f"MCP 服务端入口不存在: {mcp_server}")
     tools = mcp.get("tools", [])
-    if len(tools) != 13:
-        raise RegistryError(f"MCP tools 数量期望 13，实际为 {len(tools)}")
+    if len(tools) != 17:
+        raise RegistryError(f"MCP tools 数量期望 17，实际为 {len(tools)}")
 
     # 校验 script_sources 母本是否存在
     script_sources = data.get("script_sources", {})

@@ -8,6 +8,11 @@
 - Router 编排改为 Artifact 优先：`artifact_store.py latest` 新增 `--within-trading-days`（工作日近似 + 文件日期窗口 + 10 自然日上限，过期显式 N/A (expired)）；缺失、过期、损坏或脚本不可用时回退 Handoff `latest`，并在路由决策注明上下文来源与精度；AGENTS.md 同步闭环协议。
 - 新增端到端测试 `tests/test_artifact_pipeline.py` 覆盖五项关键约束：PREOPEN 不被竞价覆盖（含同 ID 不可覆盖）、同日多股不串票、低覆盖禁精确分、双写失败不阻断分析、新旧路径 ATR 三态 / Brier / 机会分完全一致。
 
+### 🔌 MarketGraph MCP 上下文工具升级 (v1.9.0)
+- 新增四个上下文型 MCP 工具：`get_preopen_context`（盘前推演证据包）、`get_close_review_context`（收盘复盘证据包）、`get_rotation_context`（5日轮动资金与指数走势包）、`get_stock_diagnostic_context`（个股八层诊断与对标基准包），工具注册总数扩充至 17 项。
+- 标准化证据信封与优雅降级：统一返回 `data_status`、`source`、`source_family`、`data_date`、`as_of`、`payload`、`missing`、`conflicts`；子源异常时标记 `partial` 降级，全源故障标记 `unavailable`，坚决不做不可审计的买卖观点黑箱。
+- 新增单元测试 `tests/test_mcp_context_tools.py` 完整覆盖 4 个上下文工具的 Schema 声明、入参校验、Mock 聚合、冲突检查与降级信封。
+
 ## [v7.2.0] - 2026-09-08
 ### 🏗 Artifact 与确定性计算边界落地（可回退基线）
 - 对齐两份开发设计文档的规范边界：工程实施以 `AGENT_TOOLING_REFACTOR_PLAN.md` 为主，`UI_MODEL_SEPARATION_DESIGN.md` 只定义未来 UI/宿主消费接口，路线图只保留产品里程碑，避免三处重复定义。

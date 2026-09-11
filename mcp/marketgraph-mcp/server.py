@@ -2040,11 +2040,322 @@ def fetch_stock_timeline(symbol: str) -> Dict[str, Any]:
 
 
 # -----------------------------------------------------------------------------
+# 2.1 上下文聚合型数据包引擎 (Context-Oriented Aggregators)
+# -----------------------------------------------------------------------------
+def _make_context_envelope(
+    context_name: str,
+    payload: Dict[str, Any],
+    missing: List[str],
+    conflicts: Optional[List[str]] = None,
+    data_date: Optional[str] = None,
+    source: Optional[str] = None,
+) -> Dict[str, Any]:
+    """标准化上下文证据信封，保证统一输出与优雅降级"""
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S +08:00")
+    today_date = date.today().strftime("%Y-%m-%d")
+    total_expected = len(payload) + len(missing)
+    if not missing:
+        status = "ok"
+    elif payload and len(payload) > 0:
+        status = "partial"
+    else:
+        status = "unavailable"
+    return {
+        "source": source or f"P3_MarketGraph_{context_name}",
+        "source_family": "MarketGraph_Aggregator",
+        "independence_group": "MarketGraph_Context",
+        "data_status": status,
+        "data_date": data_date or today_date,
+        "as_of": now_str,
+        "payload": payload,
+        "missing": missing,
+        "conflicts": conflicts or [],
+    }
+
+
+def fetch_preopen_context(
+    indices: Optional[List[str]] = None,
+    date_str: Optional[str] = None,
+    sectors: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """聚合 A 股盘前推演标准化证据包：T-1 指数日K与点位、市场情绪、连板天梯、市场广度"""
+    idx_keys = indices or ["SHCI", "SZCI", "CYB", "CSIALL"]
+    missing: List[str] = []
+    conflicts: List[str] = []
+    payload: Dict[str, Any] = {}
+    data_date = None
+
+    try:
+        idx_res = fetch_index_kline(idx_keys, count=20)
+        if isinstance(idx_res, dict) and idx_res.get("data_status") != "unavailable" and not idx_res.get("error"):
+            payload["indices"] = idx_res.get("indices", {})
+            data_date = idx_res.get("latest_date")
+        else:
+            missing.append("indices")
+    except Exception as exc:
+        missing.append(f"indices({exc})")
+
+    try:
+        sent_res = fetch_market_sentiment(date_str)
+        if isinstance(sent_res, dict) and sent_res.get("data_status") != "unavailable" and not sent_res.get("error"):
+            payload["sentiment"] = sent_res
+            if not data_date:
+                data_date = sent_res.get("date")
+        else:
+            missing.append("sentiment")
+    except Exception as exc:
+        missing.append(f"sentiment({exc})")
+
+    try:
+        ladder_res = fetch_limit_up_ladder(date_str)
+        if isinstance(ladder_res, dict) and ladder_res.get("data_status") != "unavailable" and not ladder_res.get("error"):
+            payload["ladder_summary"] = {
+                "max_height": ladder_res.get("max_height"),
+                "total_limit_up": ladder_res.get("total_limit_up"),
+                "ladder_distribution": ladder_res.get("ladder_distribution", {}),
+                "highest_tier_stocks": ladder_res.get("highest_tier_stocks", []),
+            }
+        else:
+            missing.append("ladder")
+    except Exception as exc:
+        missing.append(f"ladder({exc})")
+
+    try:
+        breadth_res = fetch_market_breadth(days=2)
+        if isinstance(breadth_res, dict) and breadth_res.get("data_status") != "unavailable" and not breadth_res.get("error"):
+            payload["breadth"] = breadth_res
+        else:
+            missing.append("breadth")
+    except Exception as exc:
+        missing.append(f"breadth({exc})")
+
+    if sectors and isinstance(sectors, list):
+        sector_results = {}
+        for s in sectors:
+            if isinstance(s, str) and s.strip():
+                try:
+                    q_res = fetch_sector_limit_quality(s.strip(), date_str)
+                    if isinstance(q_res, dict) and not q_res.get("error"):
+                        sector_results[s.strip()] = q_res
+                except Exception:
+                    pass
+        if sector_results:
+            payload["sectors_preview"] = sector_results
+
+    return _make_context_envelope("Preopen", payload, missing, conflicts, data_date)
+
+
+def fetch_close_review_context(
+    date_str: Optional[str] = None,
+    top_sectors_count: int = 5,
+) -> Dict[str, Any]:
+    """聚合 A 股收盘复盘标准化证据包：收盘核心指数、情绪指标、广度红盘率、主力资金板块及领头封板质量"""
+    missing: List[str] = []
+    conflicts: List[str] = []
+    payload: Dict[str, Any] = {}
+    data_date = None
+
+    try:
+        idx_res = fetch_index_kline(["SHCI", "SZCI", "CYB", "CSIALL", "HS300"], count=2)
+        if isinstance(idx_res, dict) and idx_res.get("data_status") != "unavailable" and not idx_res.get("error"):
+            payload["indices"] = idx_res.get("indices", {})
+            data_date = idx_res.get("latest_date")
+        else:
+            missing.append("indices")
+    except Exception as exc:
+        missing.append(f"indices({exc})")
+
+    try:
+        sent_res = fetch_market_sentiment(date_str)
+        if isinstance(sent_res, dict) and sent_res.get("data_status") != "unavailable" and not sent_res.get("error"):
+            payload["sentiment"] = sent_res
+            if not data_date:
+                data_date = sent_res.get("date")
+        else:
+            missing.append("sentiment")
+    except Exception as exc:
+        missing.append(f"sentiment({exc})")
+
+    try:
+        breadth_res = fetch_market_breadth(days=2)
+        if isinstance(breadth_res, dict) and breadth_res.get("data_status") != "unavailable" and not breadth_res.get("error"):
+            payload["breadth"] = breadth_res
+        else:
+            missing.append("breadth")
+    except Exception as exc:
+        missing.append(f"breadth({exc})")
+
+    try:
+        fund_res = fetch_sector_fund_flow(count=max(top_sectors_count, 1), days=1)
+        if isinstance(fund_res, dict) and fund_res.get("data_status") != "unavailable" and not fund_res.get("error"):
+            payload["top_fund_flow_sectors"] = fund_res.get("rankings", [])
+        else:
+            missing.append("sector_fund_flow")
+    except Exception as exc:
+        missing.append(f"sector_fund_flow({exc})")
+
+    try:
+        ladder_res = fetch_limit_up_ladder(date_str)
+        if isinstance(ladder_res, dict) and ladder_res.get("data_status") != "unavailable" and not ladder_res.get("error"):
+            payload["limit_up_ladder"] = ladder_res
+        else:
+            missing.append("ladder")
+    except Exception as exc:
+        missing.append(f"ladder({exc})")
+
+    rankings = payload.get("top_fund_flow_sectors", [])
+    if rankings:
+        sampled_qualities = {}
+        for item in rankings[:2]:
+            sec_name = item.get("sector_name") or item.get("name")
+            if sec_name:
+                try:
+                    q = fetch_sector_limit_quality(sec_name, date_str)
+                    if isinstance(q, dict) and not q.get("error"):
+                        sampled_qualities[sec_name] = q
+                except Exception:
+                    pass
+        if sampled_qualities:
+            payload["mainline_limit_quality"] = sampled_qualities
+
+    indices_data = payload.get("indices", {})
+    sh_info = indices_data.get("SHCI", {}) or indices_data.get("sh000001", {})
+    breadth_data = payload.get("breadth", {})
+    if sh_info and breadth_data:
+        try:
+            sh_chg = safe_float(str(sh_info.get("change_pct", "0")).rstrip("%"), 0.0)
+            red_ratio = safe_float(str(breadth_data.get("red_ratio", "50%")).rstrip("%"), 50.0)
+            if sh_chg is not None and red_ratio is not None:
+                if sh_chg > 0.6 and red_ratio < 40.0:
+                    conflicts.append("指数明显上涨但全市场红盘率不足40%，呈现典型权重推升二八分化")
+                elif sh_chg < -0.6 and red_ratio > 60.0:
+                    conflicts.append("指数明显下跌但红盘率超60%，呈现权重拖累中小题材活跃")
+        except Exception:
+            pass
+
+    return _make_context_envelope("Close_Review", payload, missing, conflicts, data_date)
+
+
+def fetch_rotation_context(
+    days: int = 5,
+    sector_count: int = 10,
+) -> Dict[str, Any]:
+    """聚合 A 股 5 日板块轮动标准化证据包：近 N 日资金流向、核心指数走势对比与广度情绪走势"""
+    missing: List[str] = []
+    conflicts: List[str] = []
+    payload: Dict[str, Any] = {}
+    data_date = None
+
+    try:
+        fund_res = fetch_sector_fund_flow(count=sector_count, days=days)
+        if isinstance(fund_res, dict) and fund_res.get("data_status") != "unavailable" and not fund_res.get("error"):
+            payload["sector_fund_flows"] = fund_res
+            data_date = fund_res.get("date")
+        else:
+            missing.append("sector_fund_flows")
+    except Exception as exc:
+        missing.append(f"sector_fund_flows({exc})")
+
+    try:
+        idx_res = fetch_index_kline(["SHCI", "CYB", "CSIALL"], count=days)
+        if isinstance(idx_res, dict) and idx_res.get("data_status") != "unavailable" and not idx_res.get("error"):
+            payload["index_trend"] = idx_res.get("indices", {})
+            if not data_date:
+                data_date = idx_res.get("latest_date")
+        else:
+            missing.append("index_trend")
+    except Exception as exc:
+        missing.append(f"index_trend({exc})")
+
+    try:
+        breadth_res = fetch_market_breadth(days=days)
+        if isinstance(breadth_res, dict) and breadth_res.get("data_status") != "unavailable" and not breadth_res.get("error"):
+            payload["breadth_trend"] = breadth_res
+        else:
+            missing.append("breadth_trend")
+    except Exception as exc:
+        missing.append(f"breadth_trend({exc})")
+
+    return _make_context_envelope("Rotation", payload, missing, conflicts, data_date)
+
+
+def fetch_stock_diagnostic_context(
+    symbol: str,
+    benchmark: str = "CSIALL",
+) -> Dict[str, Any]:
+    """聚合 A 股个股八层诊断标准化证据包：实时报价、750日复权K线与威科夫结构、财务与商誉质押、分时竞价、龙虎榜席位与对标基准"""
+    missing: List[str] = []
+    conflicts: List[str] = []
+    payload: Dict[str, Any] = {}
+    data_date = None
+
+    try:
+        quote_res = fetch_stock_quote(symbol)
+        if isinstance(quote_res, dict) and quote_res.get("data_status") != "unavailable" and not quote_res.get("error"):
+            payload["quote"] = quote_res
+            data_date = quote_res.get("date")
+        else:
+            missing.append("quote")
+    except Exception as exc:
+        missing.append(f"quote({exc})")
+
+    try:
+        kline_res = fetch_stock_kline(symbol, count=750, compact=True)
+        if isinstance(kline_res, dict) and kline_res.get("data_status") != "unavailable" and not kline_res.get("error"):
+            payload["kline_structure"] = kline_res
+            if not data_date:
+                data_date = kline_res.get("latest_kline_date")
+        else:
+            missing.append("kline_structure")
+    except Exception as exc:
+        missing.append(f"kline_structure({exc})")
+
+    try:
+        quality_res = fetch_company_quality(symbol)
+        if isinstance(quality_res, dict) and quality_res.get("data_status") != "unavailable" and not quality_res.get("error"):
+            payload["company_quality"] = quality_res
+        else:
+            missing.append("company_quality")
+    except Exception as exc:
+        missing.append(f"company_quality({exc})")
+
+    try:
+        timeline_res = fetch_stock_timeline(symbol)
+        if isinstance(timeline_res, dict) and timeline_res.get("data_status") != "unavailable" and not timeline_res.get("error"):
+            payload["timeline"] = timeline_res
+        else:
+            missing.append("timeline")
+    except Exception as exc:
+        missing.append(f"timeline({exc})")
+
+    try:
+        lhb_res = fetch_longhubang_detail(symbol=symbol)
+        if isinstance(lhb_res, dict) and not lhb_res.get("error"):
+            payload["longhubang"] = lhb_res
+        else:
+            payload["longhubang"] = {"status": "none", "message": "近期无公开龙虎榜异动"}
+    except Exception:
+        payload["longhubang"] = {"status": "unavailable", "message": "龙虎榜接口暂时不可用"}
+
+    try:
+        bm_key = benchmark or "CSIALL"
+        idx_res = fetch_index_kline([bm_key], count=130)
+        if isinstance(idx_res, dict) and idx_res.get("data_status") != "unavailable" and not idx_res.get("error"):
+            payload["benchmark_kline"] = idx_res.get("indices", {})
+        else:
+            missing.append("benchmark_kline")
+    except Exception as exc:
+        missing.append(f"benchmark_kline({exc})")
+
+    return _make_context_envelope("Stock_Diagnostic", payload, missing, conflicts, data_date)
+
+
+# -----------------------------------------------------------------------------
 # 3. 标准 MCP JSON-RPC 2.0 协议处理器 (stdio 管道)
 # -----------------------------------------------------------------------------
 SERVER_INFO = {
     "name": "marketgraph-data",
-    "version": "1.8.0",
+    "version": "1.9.0",
 }
 
 def _dispatch_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -2077,6 +2388,26 @@ def _dispatch_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         not isinstance(arguments.get("indices"), list) or not all(isinstance(x, str) for x in arguments["indices"])
     ):
         return {"error": "indices 必须是字符串数组", "data_status": "unavailable"}
+    if name == "get_stock_diagnostic_context":
+        if not isinstance(arguments.get("symbol"), str) or not arguments["symbol"].strip():
+            return {"error": "symbol 必须是非空字符串", "data_status": "unavailable"}
+    if name == "get_rotation_context":
+        if arguments.get("days", 5) is not None and (not isinstance(arguments.get("days", 5), int) or not 2 <= arguments.get("days", 5) <= 10):
+            return {"error": "days 必须是 2 至 10 的整数", "data_status": "unavailable"}
+        if arguments.get("sector_count", 10) is not None and (not isinstance(arguments.get("sector_count", 10), int) or not 1 <= arguments.get("sector_count", 10) <= 50):
+            return {"error": "sector_count 必须是 1 至 50 的整数", "data_status": "unavailable"}
+    if name == "get_close_review_context":
+        if arguments.get("top_sectors_count", 5) is not None and (not isinstance(arguments.get("top_sectors_count", 5), int) or not 1 <= arguments.get("top_sectors_count", 5) <= 20):
+            return {"error": "top_sectors_count 必须是 1 至 20 的整数", "data_status": "unavailable"}
+    if name == "get_preopen_context":
+        if arguments.get("indices") is not None and (
+            not isinstance(arguments.get("indices"), list) or not all(isinstance(x, str) for x in arguments["indices"])
+        ):
+            return {"error": "indices 必须是字符串数组", "data_status": "unavailable"}
+        if arguments.get("sectors") is not None and (
+            not isinstance(arguments.get("sectors"), list) or not all(isinstance(x, str) for x in arguments["sectors"])
+        ):
+            return {"error": "sectors 必须是字符串数组", "data_status": "unavailable"}
     if name == "get_stock_quote":
         return fetch_stock_quote(arguments.get("symbol", ""))
     elif name == "get_stock_kline":
@@ -2107,6 +2438,27 @@ def _dispatch_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         return fetch_longhubang_detail(arguments.get("symbol"), arguments.get("date_str"))
     elif name == "get_company_quality":
         return fetch_company_quality(arguments.get("symbol", ""))
+    elif name == "get_preopen_context":
+        return fetch_preopen_context(
+            arguments.get("indices"),
+            arguments.get("date_str"),
+            arguments.get("sectors"),
+        )
+    elif name == "get_close_review_context":
+        return fetch_close_review_context(
+            arguments.get("date_str"),
+            arguments.get("top_sectors_count", 5),
+        )
+    elif name == "get_rotation_context":
+        return fetch_rotation_context(
+            arguments.get("days", 5),
+            arguments.get("sector_count", 10),
+        )
+    elif name == "get_stock_diagnostic_context":
+        return fetch_stock_diagnostic_context(
+            arguments.get("symbol", ""),
+            arguments.get("benchmark", "CSIALL"),
+        )
     else:
         return {"error": f"未知工具: {name}"}
 
@@ -2286,6 +2638,14 @@ if __name__ == "__main__":
             out = fetch_longhubang_detail(target_symbol)
         elif tool_name == "get_company_quality":
             out = fetch_company_quality(target_symbol)
+        elif tool_name == "get_preopen_context":
+            out = fetch_preopen_context()
+        elif tool_name == "get_close_review_context":
+            out = fetch_close_review_context()
+        elif tool_name == "get_rotation_context":
+            out = fetch_rotation_context()
+        elif tool_name == "get_stock_diagnostic_context":
+            out = fetch_stock_diagnostic_context(target_symbol)
         else:
             out = {"error": "未知工具"}
         print(json.dumps(out, ensure_ascii=False, indent=2))

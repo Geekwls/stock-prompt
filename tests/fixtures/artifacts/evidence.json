@@ -1,0 +1,9 @@
+{
+  "artifact_type": "evidence", "schema_version": "1.0", "snapshot_id": "fixture-evidence-F01-20260911",
+  "trading_date": "2026-09-11", "as_of": "2026-09-11T09:05:00+08:00", "data_status": "ok",
+  "coverage": "100%", "evidence_ids": ["F01"], "formula_version": "evidence-v1", "status": "complete",
+  "evidence_id": "F01", "fact": "上证指数 T-1 收盘数据已核验", "source_tier": "P3",
+  "source_name": "MarketGraph", "source_url": null, "source_family": "public-market-gateway",
+  "independence_group": "a-share-price", "data_date": "2026-09-10", "retrieved_at": "2026-09-11T09:05:00+08:00",
+  "methodology": "结构化公开行情网关"
+}

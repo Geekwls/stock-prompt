@@ -1,0 +1,7 @@
+{
+  "artifact_type": "prediction", "schema_version": "1.0", "snapshot_id": "fixture-preopen-20260911",
+  "trading_date": "2026-09-11", "as_of": "2026-09-11T09:10:00+08:00", "data_status": "ok",
+  "coverage": "85%", "evidence_ids": ["F01"], "formula_version": "prediction-v1", "status": "complete",
+  "stage": "PREOPEN_V1", "market_regime": "S2", "probabilities": {"up": 30, "side": 50, "down": 20},
+  "r1": 3850, "s1": 3800, "opportunity_score": 62, "top_sectors": ["半导体"]
+}

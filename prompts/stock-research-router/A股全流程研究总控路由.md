@@ -23,7 +23,7 @@
 
 当宿主智能体环境已挂载 MCP 金融数据工具（如 `marketgraph-data`）时，执行以下优先路由协议：
 
-- **公开网关数据为 P3，可优先调用但不可自动升为 P1**：`marketgraph-data` 提供 `get_stock_quote`、`get_stock_kline`、`get_stock_timeline`、`get_index_kline`、`get_market_breadth`、`get_market_sentiment`、`get_limit_up_ladder`、`get_sector_fund_flow`、`get_sector_kline`、`get_basket_index`、`get_longhubang_detail` 与 `get_company_quality` 共 12 个工具。每次调用必须保留其 `source`、`data_status`、数据日期/`as_of`；`data_status != ok` 时不得参与计算或输出方向结论。工具支持代码与常见中文名称解析；`get_market_sentiment`、`get_limit_up_ladder` 与 `get_longhubang_detail` 支持历史 `date_str`（`YYYYMMDD` 或工具声明的格式）；`get_sector_fund_flow` 传 `days`（2-10）可回补板块主力资金 N 日历史；`get_index_kline` 提供核心指数 N 日逐日涨跌幅；`get_market_breadth` 最新交易日为精确涨跌家数与红盘率、历史交易日为情绪池替代口径（以 `breadth_precision` 区分，历史红盘率不得估算）。
+- **公开网关数据为 P3，可优先调用但不可自动升为 P1**：`marketgraph-data` 当前提供 13 个注册工具，权威清单以 `registry.json` 为准；其中 `get_sector_limit_quality` 专门提供板块触板结构和封板质量，其他工具覆盖行情、K 线、广度、情绪、板块、龙虎榜与公司质量。每次调用必须保留 `source`、`data_status`、数据日期/`as_of`；`data_status != ok` 时不得参与精确计算或直接支撑方向结论。工具支持代码与常见中文名称解析；历史参数、窗口上限和返回字段以工具 Schema 为准，Skill 不再复制易漂移的完整工具清单。
 - **证据独立性**：同一底层网关、同一公告转载或同一数据供应链只能算一个独立证据族。证据表应同时记录 `source_family` 与 `independence_group`；来源数量和独立确认数量分别披露，禁止用多个转载链接抬高置信度。
 - **行情硬门槛仅验证序列完整性**：仅当 `get_stock_kline` 明确返回 `adjustment: qfq`、`data_status: ok` 且 `valid_bars >= 120` 时，才可通过“120 日复权 OHLCV”结构门槛；其来源仍按 P3 记录，涉及交易所公告、审计意见、监管和公司事件的关键事实仍须 P2/P1 原始来源核验。
 - **构造代理序列边界**：东财板块指数等网关不可用时，代理序列只能来自 `get_basket_index` 等权构造（须显式传入成分股、披露成分覆盖度与失败清单，`series_type=equal_weight_constructed`），不得由模型临时挑选成分股自行拼凑。代理序列属"构造数据"（非 P1–P3 网关原始输出）：只能用于方向性强弱对照（如板块相对强度、主线篮子走势），不得用于精确评分阈值、赔率计算或情绪得分，报告中必须标注"代理序列"并注明成分覆盖度（如"4/6 只成分股"）；等权口径与板块官方市值加权指数存在系统性差异，覆盖度不足（少于半数成分）时宁可保留 N/A。
@@ -64,6 +64,21 @@ Scored Weight = 实际参与评分的原始权重
 
 ## 跨 Skill 交接
 
+### 独立运行与 Artifact-first 原则
+
+- 四个专业 Skill 必须能独立运行；前序 Skill、Handoff 文件、评估台账、本地脚本或 MCP 均不得成为当前专业报告的硬前置条件。缺失时按本契约补采或降级。
+- Skill 之间只通过结构化 Artifact 交换证据；Router 与宿主流水线负责顺序、持久化和后处理。
+- 报告内生成合法 Handoff JSON 即完成交接产物；可写时再持久化。持久化失败必须披露，但不得把已完成的专业分析改判为失败。
+- 读取旧 Artifact 是缓存优化而非业务依赖。读取方须复核 `as_of`、来源、口径和覆盖率；没有、过期或冲突时自行补采。
+
+### 标准 Artifact 与确定性计算
+
+- 报告正文是给用户阅读的解释层；可用运行时同时生成机器可读 Artifact。类型映射为：盘前 `prediction/PREOPEN_V1`、竞价 `auction/AUCTION_V2`、收盘事实 `close_actual/CLOSE_ACTUAL`、每日复盘评分 `daily_score`、5 日轮动 `rotation`、个股诊断 `stock_diagnostic`，证据可独立保存为 `evidence`。
+- 每个 Artifact 至少包含 `artifact_type`、`schema_version`、`snapshot_id`、`trading_date`、`as_of`、`data_status`、`coverage`、`evidence_ids`、`formula_version` 和 `status`；具体字段以 `contracts/artifacts/*.schema.json` 为准。
+- 可执行脚本时，先用 `artifact_store.py validate --input <file>` 校验，再用 `save` 不可变落盘；同一 `snapshot_id` 禁止覆盖。无法执行或写入失败时，报告仍完成，并标记 `artifact_status=emitted_only|failed`。
+- ATR 三态、贝叶斯后验、机会分、资金延续、SEI、RS、赔率与评估指标在计算工具可用时必须调用当前 Skill `scripts/calculate.py`，不得由模型重新发明公式。工具不可用时仍允许 Skill 独立完成报告，但必须沿用本 Skill 明示公式、披露 `calculation_status=manual_fallback`，并在输入不完整时输出 `N/A`。
+- 计算结果必须保留 `formula_version`、`input_snapshot_id`、`missing` 与 `status`；威科夫计算只输出量价特征，结构阶段和竞争假设仍由模型结合证据裁决。
+
 报告末尾输出可复用的交接摘要；没有对应内容时使用空数组或 `N/A`，不得补造：
 
 ```json
@@ -91,12 +106,12 @@ Scored Weight = 实际参与评分的原始权重
 }
 ```
 
-- 交接摘要除在报告末尾输出外，必须通过当前 Skill 根目录的 `scripts/handoff_store.py write --stdin` 完成 Schema 校验与原子落盘；读取方优先执行同脚本的 `latest --within-trading-days 3`。市场类文件为 `handoff-<YYYYMMDD>-<report_type>.json`；个股文件必须提供 `subject={type: stock, id: 股票代码, name: 股票名称}`，保存为 `handoff-<YYYYMMDD>-stock-<代码>.json`，读取时使用 `--subject <代码>`，避免同日多股覆盖。
-- `market-prediction` 的预测台账统一写入 `~/.stock-prompt/eval/predictions.jsonl`（由 `scripts/eval_tracker.py` 固定，不随工作目录漂移）；`daily-review` 收盘回测读取同一份文件，禁止在其他位置另建台账。
+- 可持久化时用 `handoff_store.py write --stdin` 校验并落盘；不可持久化时保留报告内 JSON 并输出 `handoff_status=emitted_only`。路径优先级为 `--state-dir`、`STOCK_PROMPT_STATE_DIR`、默认 `~/.stock-prompt/state`。
+- 预测、收盘事实和每日评分先作为报告 Artifact 生成，再由可用的 `eval_tracker.py` 后处理器写入台账。后处理失败输出 `evaluation_status=emitted_only|failed`，不影响分析完成。台账路径可由命令行参数或相关环境变量配置。
 - `daily-review` 提供收盘市场状态、主线和次日验证变量。
 - `market-prediction` 读取最近收盘交接摘要，并根据隔夜与竞价证据更新。
 - `sector-rotation` 提供中期板块阶段、候选方向和衰竭风险。
-- `stock-analysis` 接收市场与板块状态作为 L1/L2 证据，并返回个股确认、失效和复核条件。
+- `stock-analysis` 可接收市场与板块状态作为 L1/L2 候选证据；核验后复用，否则独立补采并重新裁决。
 - 个股需要跨越 3 个交易日持续跟踪时，另用当前 Skill 根目录的 `scripts/thesis_store.py` 维护按股票代码隔离的长期 Thesis Ledger；Handoff 负责短期跨 Skill 交接，Thesis 负责长期逻辑历史，两者不得混用。
 
 ## 路由边界

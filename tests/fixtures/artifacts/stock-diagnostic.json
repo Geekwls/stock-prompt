@@ -1,0 +1,8 @@
+{
+  "artifact_type": "stock_diagnostic", "schema_version": "1.0", "snapshot_id": "fixture-stock-300308-20260911",
+  "trading_date": "2026-09-11", "as_of": "2026-09-11T15:30:00+08:00", "data_status": "partial",
+  "coverage": "82%", "evidence_ids": ["F05", "F06"], "formula_version": "stock-v1", "status": "partial",
+  "subject": {"type": "stock", "id": "300308", "name": "中际旭创"}, "layers": {"L1": "S2", "L2": "强化"},
+  "logic_health": "强化", "structure_position": "偏热", "confidence": "中",
+  "confirmation_conditions": ["放量站稳结构确认位"], "invalidation_conditions": ["跌破假设失效位"]
+}

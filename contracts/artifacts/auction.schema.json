@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Geekwls/stock-prompt/contracts/artifacts/auction.schema.json",
+  "title": "Auction Artifact AUCTION_V2",
+  "type": "object",
+  "required": ["artifact_type", "schema_version", "snapshot_id", "trading_date", "as_of", "data_status", "coverage", "evidence_ids", "formula_version", "status", "stage", "parent_snapshot_id", "posterior_probabilities", "information_delta"],
+  "properties": {
+    "artifact_type": {"const": "auction"}, "schema_version": {"const": "1.0"},
+    "snapshot_id": {"type": "string"}, "trading_date": {"type": "string"}, "as_of": {"type": "string"},
+    "data_status": {"enum": ["ok", "partial", "unavailable"]}, "coverage": {"type": "string"},
+    "evidence_ids": {"type": "array"}, "formula_version": {"type": "string"},
+    "status": {"enum": ["complete", "partial", "degraded", "failed", "emitted_only"]},
+    "stage": {"const": "AUCTION_V2"}, "parent_snapshot_id": {"type": "string", "minLength": 1},
+    "posterior_probabilities": {
+      "type": "object", "required": ["up", "side", "down"],
+      "properties": {
+        "up": {"type": "number", "minimum": 0, "maximum": 100},
+        "side": {"type": "number", "minimum": 0, "maximum": 100},
+        "down": {"type": "number", "minimum": 0, "maximum": 100}
+      }
+    },
+    "information_delta": {"type": "array"}
+  },
+  "additionalProperties": true
+}

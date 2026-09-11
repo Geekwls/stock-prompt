@@ -1,0 +1,6 @@
+{
+  "artifact_type": "daily_score", "schema_version": "1.0", "snapshot_id": "fixture-daily-20260911",
+  "trading_date": "2026-09-11", "as_of": "2026-09-11T15:10:00+08:00", "data_status": "ok",
+  "coverage": "90%", "evidence_ids": ["F03", "F04"], "formula_version": "daily-v2", "status": "complete",
+  "metrics": {"sentiment": 68, "capital_continuity": 82, "opportunity": 75}, "top_sector": "通信设备"
+}

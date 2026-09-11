@@ -1,5 +1,23 @@
 # Agent 工具化与 Skill 解耦实施计划
 
+> **文档状态**：Accepted / 分阶段实施中
+>
+> **规范边界**：本文是 Tool、Artifact、Router 与 Evaluator 的工程实施主计划；具体机器字段以 `contracts/artifacts/*.schema.json` 和 `registry.json` 为准，研究纪律以 `contracts/common-research-contract.md` 为准。
+> **与 UI 文档关系**：`UI_MODEL_SEPARATION_DESIGN.md` 只定义交互层如何消费本计划产出的 Artifact，不重复定义 Artifact 业务语义。
+
+## 当前实施状态（v7.1.1 基线）
+
+| 能力 | 状态 | 当前证据 / 下一缺口 |
+|---|---|---|
+| 四个专业 Skill 独立运行 | 已完成 | 公共契约允许无 Handoff/MCP 时独立补采或降级 |
+| PREOPEN / AUCTION 不可变分离 | 已完成 | `eval_tracker.py` 按 `market_phase` 与 revision 管理 |
+| Handoff / Thesis / 评估持久化 | 已完成 | 已有独立脚本和统一 CLI 兼容入口 |
+| 通用 Artifact Schema 与存储 | 已完成（P0） | 8 类 Schema、7 组 fixture、不可变快照存储与统一 CLI 已接入注册表和安装器 |
+| 确定性计算工具化 | 已完成（首批） | `tools/calculations/` 已覆盖市场、板块、个股与评估的 21 个纯函数；后续只扩展口径，不回填模型手算 |
+| 上下文型 MCP 工具 | 未完成 | 当前为 13 个细粒度数据工具 |
+| Skill 主文件压缩 | 待兼容期验证 | 等 Artifact/计算结果与旧路径对照稳定后执行，避免一次性迁移 |
+| UI 工程 | 不在本仓库当前交付内 | 本仓库先提供事件与 Artifact 接口契约 |
+
 ## 目标
 
 将项目从“长提示词研究框架”升级为可执行、可测试、可审计的 Agent 研究系统：
@@ -26,7 +44,7 @@ Evaluator  = 衡量预测质量和模型校准
 ### 工作项
 
 - 为四个专业 Skill、Handoff、评估器建立固定输入和输出样例。
-- 记录当前 12 个 MarketGraph MCP 工具、脚本和 Schema 的行为基线。
+- 记录当前 13 个 MarketGraph MCP 工具、脚本和 Schema 的行为基线。
 - 建立单元测试、集成测试和 Artifact fixtures。
 - 固定现有指标口径，避免重构过程中无意改变结果。
 
@@ -62,6 +80,14 @@ tests/
 ```
 
 现有 `scripts/` 保留兼容入口，但逐步变成薄封装，调用 `tools/` 中的实现。
+
+当前已提供：
+
+```text
+scripts/artifact_store.py  -> tools/artifacts/store.py
+scripts/calculate.py       -> tools/calculations/*
+scripts/eval_tracker.py    -> 复用统一 ATR 三态与 Brier 函数
+```
 
 ## 阶段 2：建立 Artifact 层
 
@@ -141,6 +167,8 @@ calculate_calibration_curve
 ```
 
 每个计算结果必须包含 `formula_version`、输入快照 ID、缺失字段和计算状态。
+
+首批实现已落在 `tools/calculations/`，并由 `scripts/calculate.py` 暴露统一 JSON CLI。威科夫工具仅生成可审计量价特征，不替模型确认阶段；生命周期与 Regime 工具仅在明确规则命中时给出状态，否则返回 `N/A`，避免把不完整事实伪装成确定分类。
 
 ## 阶段 4：升级 MarketGraph MCP
 

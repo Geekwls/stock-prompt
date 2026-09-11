@@ -1,6 +1,12 @@
 # CHANGELOG (更新日志)
 
-## [Unreleased]
+## [v7.2.0] - 2026-09-08
+### 🏗 Artifact 与确定性计算边界落地（可回退基线）
+- 对齐两份开发设计文档的规范边界：工程实施以 `AGENT_TOOLING_REFACTOR_PLAN.md` 为主，`UI_MODEL_SEPARATION_DESIGN.md` 只定义未来 UI/宿主消费接口，路线图只保留产品里程碑，避免三处重复定义。
+- 新增 8 类标准 Artifact Schema、7 份固定 fixture 与不可变快照存储；统一入口新增 `artifact`，注册表、安装器和 Schema 漂移检查同步接线。
+- 新增市场、板块、个股和评估共 21 个确定性计算函数及 `calculate` CLI；`eval_tracker.py` 开始复用统一 ATR 三态与多分类 Brier 口径。
+- 公共契约明确报告解释层、Artifact 数据层、计算工具层与失败降级关系，并同步至五个 Skill 和全部 Markdown Prompt。
+
 ### 🐛 修复
 - **板块炸板率 hybk 缩写匹配失真**：东财涨停池/炸板池 `hybk` 行业字段为 ≤4 字缩写（"农产品加工"→"农产品加"），原"按板块名过滤"路径若按全称精确匹配会整批漏票、虚高板块炸板率与封板质量 Q。新增 MCP 工具 `get_sector_limit_quality`（组件 v1.8.0）在确定性层完成归属：精确同名唯一归属 + 缩写前缀匹配 + 多板块歧义剔除披露；触板 <3 家 Q 记 null。`daily-review` / `market-prediction` 契约同步改为优先调用该工具，手工过滤时明确禁止全称精确匹配。
 

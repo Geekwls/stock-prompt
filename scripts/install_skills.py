@@ -40,6 +40,8 @@ MCP_ROOT = MCP_SERVER.parent
 MCP_BUNDLED_PATH = "marketgraph-mcp/server.py"
 RUNTIME_REGISTRY_PATH = ".stock-prompt-runtime.json"
 REPORT_CARD_PACKAGE = ROOT / "scripts" / "report_card"
+TOOLS_PACKAGE = ROOT / "tools"
+ARTIFACT_SCHEMA_ROOT = ROOT / "contracts" / "artifacts"
 MCP_CONFIG_CANDIDATES = (
     Path.home() / ".gemini" / "antigravity" / "mcp_config.json",
     Path.home() / ".gemini" / "mcp_config.json",
@@ -90,6 +92,10 @@ def source_files():
     for path in REPORT_CARD_PACKAGE.rglob("*.py"):
         for skill in report_card_skills:
             files[f"{skill}/scripts/report_card/{path.relative_to(REPORT_CARD_PACKAGE).as_posix()}"] = path
+    for path in TOOLS_PACKAGE.rglob("*.py"):
+        files[f"tools/{path.relative_to(TOOLS_PACKAGE).as_posix()}"] = path
+    for path in ARTIFACT_SCHEMA_ROOT.glob("*.schema.json"):
+        files[f"contracts/artifacts/{path.name}"] = path
     if not MCP_SERVER.is_file():
         raise FileNotFoundError(f"MCP 服务端母本不存在: {MCP_SERVER}")
     for path in MCP_ROOT.rglob("*"):
@@ -297,6 +303,13 @@ def main():
                 bundled = SOURCE_ROOT / skill / "scripts" / name
                 if not bundled.is_file() or file_hash(bundled) != master_hash:
                     print(f"[DRIFT] workspace/{skill}/scripts/{name}")
+                    failures += 1
+        report_card_skills = BUNDLED_SCRIPTS.get("generate_report_card.py", (None, ()))[1]
+        for source in REPORT_CARD_PACKAGE.rglob("*.py"):
+            for skill in report_card_skills:
+                bundled = SOURCE_ROOT / skill / "scripts" / "report_card" / source.relative_to(REPORT_CARD_PACKAGE)
+                if not bundled.is_file() or file_hash(bundled) != file_hash(source):
+                    print(f"[DRIFT] workspace/{bundled.relative_to(SOURCE_ROOT)}")
                     failures += 1
         files = source_files()
         for label, root in target_roots(args.target):

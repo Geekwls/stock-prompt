@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "project": {
     "name": "a-stock-research",
-    "version": "7.1.1",
+    "version": "7.2.0",
     "description": "A-Share Quantitative & Wyckoff Research Protocol for Autonomous Agents (Agent Plugins 1.0)",
     "homepage": "https://github.com/Geekwls/stock-prompt"
   },
@@ -15,7 +15,9 @@
       "bundled_scripts": [
         "generate_report_card.py",
         "eval_tracker.py",
-        "handoff_store.py"
+        "handoff_store.py",
+        "artifact_store.py",
+        "calculate.py"
       ]
     },
     {
@@ -26,7 +28,9 @@
       "bundled_scripts": [
         "generate_report_card.py",
         "eval_tracker.py",
-        "handoff_store.py"
+        "handoff_store.py",
+        "artifact_store.py",
+        "calculate.py"
       ]
     },
     {
@@ -36,7 +40,9 @@
       "prompt_target": "prompts/sector-rotation/A股近5日板块轮动与节奏复盘.md",
       "bundled_scripts": [
         "generate_report_card.py",
-        "handoff_store.py"
+        "handoff_store.py",
+        "artifact_store.py",
+        "calculate.py"
       ]
     },
     {
@@ -47,7 +53,9 @@
       "bundled_scripts": [
         "generate_report_card.py",
         "handoff_store.py",
-        "thesis_store.py"
+        "thesis_store.py",
+        "artifact_store.py",
+        "calculate.py"
       ]
     },
     {
@@ -57,7 +65,9 @@
       "prompt_target": "prompts/stock-research-router/A股全流程研究总控路由.md",
       "bundled_scripts": [
         "handoff_store.py",
-        "thesis_store.py"
+        "thesis_store.py",
+        "artifact_store.py",
+        "calculate.py"
       ]
     }
   ],
@@ -71,6 +81,16 @@
     "report_card_rotation": "schemas/report-card-rotation-v1.schema.json",
     "report_card_stock": "schemas/report-card-stock-v1.schema.json",
     "thesis": "schemas/thesis-v1.schema.json"
+  },
+  "artifacts": {
+    "base": "contracts/artifacts/base.schema.json",
+    "evidence": "contracts/artifacts/evidence.schema.json",
+    "prediction": "contracts/artifacts/prediction.schema.json",
+    "auction": "contracts/artifacts/auction.schema.json",
+    "close_actual": "contracts/artifacts/close-actual.schema.json",
+    "daily_score": "contracts/artifacts/daily-score.schema.json",
+    "rotation": "contracts/artifacts/rotation.schema.json",
+    "stock_diagnostic": "contracts/artifacts/stock-diagnostic.schema.json"
   },
   "mcp": {
     "name": "marketgraph-data",
@@ -100,6 +120,8 @@
     "generate_report_card.py": "scripts/generate_report_card.py",
     "eval_tracker.py": "scripts/eval_tracker.py",
     "handoff_store.py": "scripts/handoff_store.py",
-    "thesis_store.py": "scripts/thesis_store.py"
+    "thesis_store.py": "scripts/thesis_store.py",
+    "artifact_store.py": "scripts/artifact_store.py",
+    "calculate.py": "scripts/calculate.py"
   }
 }

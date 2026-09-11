@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Geekwls/stock-prompt/contracts/artifacts/rotation.schema.json",
+  "title": "Rotation Artifact",
+  "type": "object",
+  "required": ["artifact_type", "schema_version", "snapshot_id", "trading_date", "as_of", "data_status", "coverage", "evidence_ids", "formula_version", "status", "window", "rotation_state", "sector_ranking", "exhaustion_score"],
+  "properties": {
+    "artifact_type": {"const": "rotation"}, "schema_version": {"const": "1.0"},
+    "snapshot_id": {"type": "string"}, "trading_date": {"type": "string"}, "as_of": {"type": "string"},
+    "data_status": {"enum": ["ok", "partial", "unavailable"]}, "coverage": {"type": "string"},
+    "evidence_ids": {"type": "array"}, "formula_version": {"type": "string"},
+    "status": {"enum": ["complete", "partial", "degraded", "failed", "emitted_only"]},
+    "window": {"type": "integer", "minimum": 2}, "rotation_state": {"type": "string"},
+    "sector_ranking": {"type": "array"}, "exhaustion_score": {"type": ["number", "null"], "minimum": 0, "maximum": 100}
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,7 @@
+{
+  "artifact_type": "auction", "schema_version": "1.0", "snapshot_id": "fixture-auction-20260911",
+  "trading_date": "2026-09-11", "as_of": "2026-09-11T09:25:00+08:00", "data_status": "partial",
+  "coverage": "78%", "evidence_ids": ["F01", "F02"], "formula_version": "auction-v1", "status": "partial",
+  "stage": "AUCTION_V2", "parent_snapshot_id": "fixture-preopen-20260911",
+  "posterior_probabilities": {"up": 35, "side": 50, "down": 15}, "information_delta": ["核心标的竞价承接偏强"]
+}

@@ -31,6 +31,14 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
+script_path = Path(__file__).resolve()
+for parent in script_path.parents:
+    if (parent / "registry.json").is_file() or (parent / ".stock-prompt-runtime.json").is_file():
+        sys.path.insert(0, str(parent))
+        break
+from tools.calculations.market import calculate_atr_state
+from tools.calculations.metrics import calculate_multiclass_brier
+
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
@@ -140,11 +148,8 @@ def resolve_ledger(explicit=None):
 
 def zatr_to_state(z):
     """Z_ATR 五档 -> 三态归并（与 SKILL.md 评估口径一致）"""
-    if z >= 0.3:
-        return "up"
-    if z <= -0.3:
-        return "down"
-    return "side"
+    # 令 previous_close=0、atr14=1，可直接复用统一 Z_ATR 三态边界。
+    return calculate_atr_state(z, 0, 1)["value"]
 
 
 def load_ledger(path, model_version=None, market_phase="preopen"):
@@ -464,7 +469,7 @@ def cmd_report_daily(args):
 
 
 def brier_multiclass(probs, actual_state):
-    return sum((probs[s] / 100.0 - (1.0 if s == actual_state else 0.0)) ** 2 for s in STATES)
+    return calculate_multiclass_brier(probs, actual_state)["value"]
 
 
 def cmd_report(args):

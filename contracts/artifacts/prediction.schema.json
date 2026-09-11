@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Geekwls/stock-prompt/contracts/artifacts/prediction.schema.json",
+  "title": "Prediction Artifact PREOPEN_V1",
+  "type": "object",
+  "required": ["artifact_type", "schema_version", "snapshot_id", "trading_date", "as_of", "data_status", "coverage", "evidence_ids", "formula_version", "status", "stage", "market_regime", "probabilities", "opportunity_score", "top_sectors"],
+  "properties": {
+    "artifact_type": {"const": "prediction"}, "schema_version": {"const": "1.0"},
+    "snapshot_id": {"type": "string"}, "trading_date": {"type": "string"}, "as_of": {"type": "string"},
+    "data_status": {"enum": ["ok", "partial", "unavailable"]}, "coverage": {"type": "string"},
+    "evidence_ids": {"type": "array"}, "formula_version": {"type": "string"},
+    "status": {"enum": ["complete", "partial", "degraded", "failed", "emitted_only"]},
+    "stage": {"const": "PREOPEN_V1"},
+    "market_regime": {"type": "string"},
+    "probabilities": {
+      "type": "object", "required": ["up", "side", "down"],
+      "properties": {
+        "up": {"type": "number", "minimum": 0, "maximum": 100},
+        "side": {"type": "number", "minimum": 0, "maximum": 100},
+        "down": {"type": "number", "minimum": 0, "maximum": 100}
+      }
+    },
+    "r1": {"type": ["number", "null"]}, "s1": {"type": ["number", "null"]},
+    "opportunity_score": {"type": ["number", "null"], "minimum": 0, "maximum": 100}, "top_sectors": {"type": "array"}
+  },
+  "additionalProperties": true
+}

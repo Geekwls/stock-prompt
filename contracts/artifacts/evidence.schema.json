@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Geekwls/stock-prompt/contracts/artifacts/evidence.schema.json",
+  "title": "Evidence Artifact v1",
+  "type": "object",
+  "required": ["artifact_type", "schema_version", "snapshot_id", "trading_date", "as_of", "data_status", "coverage", "evidence_ids", "formula_version", "status", "evidence_id", "fact", "source_tier", "source_name", "source_family", "independence_group", "data_date", "retrieved_at", "methodology"],
+  "properties": {
+    "artifact_type": {"const": "evidence"},
+    "schema_version": {"const": "1.0"},
+    "snapshot_id": {"type": "string", "minLength": 1},
+    "trading_date": {"type": "string"},
+    "as_of": {"type": "string"},
+    "data_status": {"enum": ["ok", "partial", "unavailable"]},
+    "coverage": {"type": "string"},
+    "evidence_ids": {"type": "array"},
+    "formula_version": {"type": "string"},
+    "status": {"enum": ["complete", "partial", "degraded", "failed", "emitted_only"]},
+    "evidence_id": {"type": "string", "pattern": "^F[0-9]{2,}$"},
+    "fact": {"type": "string", "minLength": 1},
+    "source_tier": {"enum": ["P1", "P2", "P3", "P4", "P5", "constructed"]},
+    "source_name": {"type": "string"},
+    "source_url": {"type": ["string", "null"]},
+    "source_family": {"type": "string", "minLength": 1},
+    "independence_group": {"type": "string", "minLength": 1},
+    "data_date": {"type": "string"},
+    "retrieved_at": {"type": "string"},
+    "methodology": {"type": "string"}
+  },
+  "additionalProperties": true
+}

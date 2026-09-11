@@ -1,0 +1,6 @@
+{
+  "artifact_type": "rotation", "schema_version": "1.0", "snapshot_id": "fixture-rotation-20260911",
+  "trading_date": "2026-09-11", "as_of": "2026-09-11T15:20:00+08:00", "data_status": "partial",
+  "coverage": "80%", "evidence_ids": ["F03", "F04"], "formula_version": "rotation-v1", "status": "partial",
+  "window": 5, "rotation_state": "state_2", "sector_ranking": ["通信设备", "半导体"], "exhaustion_score": 58
+}

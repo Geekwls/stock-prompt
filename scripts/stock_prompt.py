@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""stock-prompt 统一命令入口：聚合 handoff / thesis / eval / doctor / card / update 子命令。
+"""stock-prompt 统一命令入口：聚合 artifact / handoff / thesis / eval / doctor / card / update 子命令。
 
 子命令之后的参数原样转发给 scripts/ 下对应工具，保持各工具自有 CLI 与
 参数不变；本入口只做发现与转发，便于全局安装用户一条命令直达。
@@ -18,6 +18,8 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 
 # 子命令 -> 目标脚本
 SUBCOMMANDS = {
+    "artifact": "artifact_store.py",
+    "calculate": "calculate.py",
     "handoff": "handoff_store.py",
     "thesis": "thesis_store.py",
     "eval": "eval_tracker.py",
@@ -33,6 +35,8 @@ HELP = """stock-prompt 统一入口
 用法: python scripts/stock_prompt.py <子命令> [参数原样转发]
 
 子命令:
+  artifact       标准研究 Artifact 校验/不可变写入/读取 (artifact_store.py)
+  calculate      ATR/概率/机会分/板块/个股/评估纯函数 (calculate.py)
   handoff        交接摘要校验/写入/读取/清理 (handoff_store.py)
   thesis         个股长期 Thesis Ledger (thesis_store.py)
   eval           评估台账 record/result/replay/misses/report/report-mainline/migrate (eval_tracker.py)
@@ -45,6 +49,8 @@ HELP = """stock-prompt 统一入口
   --version      显示项目版本
 
 示例:
+  python scripts/stock_prompt.py artifact validate --input artifact.json
+  python scripts/stock_prompt.py calculate calculate_atr_state --json '{"close": 101, "previous_close": 100, "atr14": 2}'
   python scripts/stock_prompt.py handoff latest --within-trading-days 3
   python scripts/stock_prompt.py eval replay --date 2026-09-08
   python scripts/stock_prompt.py weekly --days 7

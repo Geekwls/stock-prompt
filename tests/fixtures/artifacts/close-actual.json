@@ -1,0 +1,7 @@
+{
+  "artifact_type": "close_actual", "schema_version": "1.0", "snapshot_id": "fixture-close-20260911",
+  "trading_date": "2026-09-11", "as_of": "2026-09-11T15:00:00+08:00", "data_status": "ok",
+  "coverage": "100%", "evidence_ids": ["F03"], "formula_version": "close-v1", "status": "complete",
+  "stage": "CLOSE_ACTUAL", "actual_state": "side", "z_atr": 0.12, "close": 3828, "high": 3846,
+  "low": 3809, "top_sectors": ["通信设备", "半导体"]
+}

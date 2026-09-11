@@ -19,6 +19,8 @@ class RegistryTest(unittest.TestCase):
         self.assertIn("stock-research-router", ids)
         for relative in data["schemas"].values():
             self.assertTrue(REGISTRY.resolve_path(relative).is_file())
+        for relative in data["artifacts"].values():
+            self.assertTrue(REGISTRY.resolve_path(relative).is_file())
 
     def test_mcp_registry_matches_public_docs_count(self):
         data = REGISTRY.load_registry()
@@ -28,7 +30,6 @@ class RegistryTest(unittest.TestCase):
 
     def test_all_schema_files_are_valid_json(self):
         data = REGISTRY.load_registry()
-        for relative in data["schemas"].values():
+        for relative in list(data["schemas"].values()) + list(data["artifacts"].values()):
             parsed = json.loads(REGISTRY.resolve_path(relative).read_text(encoding="utf-8"))
             self.assertEqual(parsed.get("type"), "object")
-

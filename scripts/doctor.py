@@ -84,7 +84,7 @@ def calendar_status():
 
 
 def thesis_status(state_base):
-    root = state_base / "theses"
+    root = Path(os.environ.get("STOCK_PROMPT_THESIS_DIR") or (state_base / "theses"))
     total = 0
     pending = 0
     due_soon = 0

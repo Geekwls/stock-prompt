@@ -1,5 +1,7 @@
 import importlib.util
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -58,6 +60,9 @@ class SourceFilesTest(unittest.TestCase):
                 self.assertEqual(files[f"{skill}/scripts/{name}"], source)
         self.assertNotIn("sector-rotation/scripts/eval_tracker.py", files)
         self.assertNotIn("stock-analysis/scripts/eval_tracker.py", files)
+        self.assertIn("stock-analysis/scripts/artifact_store.py", files)
+        self.assertIn("tools/artifacts/store.py", files)
+        self.assertIn("contracts/artifacts/base.schema.json", files)
 
     def test_workspace_sync_copies_bundled_scripts(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -75,6 +80,30 @@ class SourceFilesTest(unittest.TestCase):
             finally:
                 INSTALLER.SOURCE_ROOT = original_root
                 INSTALLER.ROOT = original_repo
+
+    def test_installed_calculation_and_artifact_cli_are_self_contained(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "skills"
+            INSTALLER.install_to("test-runtime", root, INSTALLER.source_files())
+            calculation = subprocess.run(
+                [
+                    sys.executable, str(root / "daily-review" / "scripts" / "calculate.py"),
+                    "calculate_atr_state", "--json",
+                    '{"close":101,"previous_close":100,"atr14":2}',
+                ],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(calculation.returncode, 0, calculation.stderr)
+            self.assertEqual(json.loads(calculation.stdout)["value"], "up")
+            fixture = INSTALLER.ROOT / "tests" / "fixtures" / "artifacts" / "prediction.json"
+            validation = subprocess.run(
+                [
+                    sys.executable, str(root / "daily-review" / "scripts" / "artifact_store.py"),
+                    "validate", "--input", str(fixture),
+                ],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(validation.returncode, 0, validation.stdout + validation.stderr)
 
 
 if __name__ == "__main__":

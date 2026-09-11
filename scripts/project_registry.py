@@ -46,7 +46,7 @@ def validate_registry(data: Dict[str, Any], root: Path = ROOT) -> None:
     if not isinstance(data, dict):
         raise RegistryError("注册表根节点必须为 JSON 对象")
 
-    for field in ("project", "skills", "schemas", "mcp", "contracts", "script_sources"):
+    for field in ("project", "skills", "schemas", "artifacts", "mcp", "contracts", "script_sources"):
         if field not in data:
             raise RegistryError(f"注册表缺失必填字段: {field}")
 
@@ -84,6 +84,22 @@ def validate_registry(data: Dict[str, Any], root: Path = ROOT) -> None:
         s_path = resolve_path(s_rel, root=root)
         if not s_path.is_file():
             raise RegistryError(f"Schema 文件不存在: {s_path} (key: {s_name})")
+
+    artifacts = data.get("artifacts", {})
+    required_artifacts = {
+        "base", "evidence", "prediction", "auction", "close_actual",
+        "daily_score", "rotation", "stock_diagnostic",
+    }
+    if set(artifacts) != required_artifacts:
+        raise RegistryError(
+            "artifacts 注册项不完整: "
+            f"missing={sorted(required_artifacts - set(artifacts))}, "
+            f"extra={sorted(set(artifacts) - required_artifacts)}"
+        )
+    for artifact_name, artifact_rel in artifacts.items():
+        artifact_path = resolve_path(artifact_rel, root=root)
+        if not artifact_path.is_file():
+            raise RegistryError(f"Artifact Schema 不存在: {artifact_path} (key: {artifact_name})")
 
     # 校验 contracts
     contracts = data.get("contracts", {})

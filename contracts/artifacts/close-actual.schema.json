@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Geekwls/stock-prompt/contracts/artifacts/close-actual.schema.json",
+  "title": "Close Actual Artifact",
+  "type": "object",
+  "required": ["artifact_type", "schema_version", "snapshot_id", "trading_date", "as_of", "data_status", "coverage", "evidence_ids", "formula_version", "status", "stage", "actual_state", "z_atr", "top_sectors"],
+  "properties": {
+    "artifact_type": {"const": "close_actual"}, "schema_version": {"const": "1.0"},
+    "snapshot_id": {"type": "string"}, "trading_date": {"type": "string"}, "as_of": {"type": "string"},
+    "data_status": {"enum": ["ok", "partial", "unavailable"]}, "coverage": {"type": "string"},
+    "evidence_ids": {"type": "array"}, "formula_version": {"type": "string"},
+    "status": {"enum": ["complete", "partial", "degraded", "failed", "emitted_only"]},
+    "stage": {"const": "CLOSE_ACTUAL"}, "actual_state": {"enum": ["up", "side", "down"]},
+    "z_atr": {"type": "number"}, "close": {"type": ["number", "null"]},
+    "high": {"type": ["number", "null"]}, "low": {"type": ["number", "null"]}, "top_sectors": {"type": "array"}
+  },
+  "additionalProperties": true
+}

@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -45,7 +46,8 @@ class ArtifactStoreTest(unittest.TestCase):
         self.assertEqual(STORE.validate_artifact(payload), [])
         with tempfile.TemporaryDirectory() as temporary:
             path = STORE.save_artifact(payload, temporary)
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            if os.name == "posix":
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             saved = STORE.load_artifact(payload["snapshot_id"], temporary)
             self.assertEqual(saved["probabilities"], payload["probabilities"])
             self.assertIn("created_at", saved)

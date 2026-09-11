@@ -6,7 +6,6 @@
 """
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -28,6 +27,7 @@ SUBCOMMANDS = {
     "card": "generate_report_card.py",
     "card-check": "check_schema_parity.py",
     "version-check": "check_version_parity.py",
+    "update": "update_manager.py",
 }
 
 HELP = """stock-prompt 统一入口
@@ -45,7 +45,7 @@ HELP = """stock-prompt 统一入口
   card           战报长图渲染 (generate_report_card.py)
   card-check     Schema 与运行时字段一致性检查 (check_schema_parity.py)
   version-check  版本一致性检查 (check_version_parity.py)
-  update         日常更新 (update.sh / update.bat)
+  update         检查、查看或安装新版本 (update_manager.py)
   --version      显示项目版本
 
 示例:
@@ -55,6 +55,7 @@ HELP = """stock-prompt 统一入口
   python scripts/stock_prompt.py eval replay --date 2026-09-08
   python scripts/stock_prompt.py weekly --days 7
   python scripts/stock_prompt.py doctor
+  python scripts/stock_prompt.py update check
 """
 
 
@@ -76,15 +77,6 @@ def main(argv=None):
         return 0
 
     command, extra = argv[0], argv[1:]
-    if command == "update":
-        script = "update.bat" if os.name == "nt" else "update.sh"
-        target = SCRIPTS_DIR / script
-        if not target.is_file():
-            print(f"[ERR] 更新脚本不存在: {target}")
-            return 1
-        runner = ["cmd", "/c", str(target)] if os.name == "nt" else ["bash", str(target)]
-        return subprocess.run(runner + extra).returncode
-
     if command not in SUBCOMMANDS:
         print(f"[ERR] 未知子命令: {command}\n")
         print(HELP.strip())

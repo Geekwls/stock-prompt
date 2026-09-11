@@ -5,7 +5,7 @@
 > **规范边界**：本文是 Tool、Artifact、Router 与 Evaluator 的工程实施主计划；具体机器字段以 `contracts/artifacts/*.schema.json` 和 `registry.json` 为准，研究纪律以 `contracts/common-research-contract.md` 为准。
 > **与 UI 文档关系**：`UI_MODEL_SEPARATION_DESIGN.md` 只定义交互层如何消费本计划产出的 Artifact，不重复定义 Artifact 业务语义。
 
-## 当前实施状态（v7.4.0）
+## 当前实施状态（v7.5.0）
 
 | 能力 | 状态 | 当前证据 / 下一缺口 |
 |---|---|---|
@@ -17,6 +17,7 @@
 | 上下文型 MCP 工具 | 已完成（v7.3.0） | 4 个上下文聚合工具已接入，MarketGraph 共 17 个工具，并有降级信封测试 |
 | Skill 主文件压缩 | 已完成（v7.4.0） | 4 个专业 Skill 已拆出 Tool Recipes，主文件保留路由、判断与输出契约 |
 | UI 工程 | 接口层已完成，宿主 UI 未交付 | 已提供 9 类事件 Schema 与确定性路由器；真实界面由宿主侧实现 |
+| 安装与更新闭环 | 已完成（v7.5.0） | Git/ZIP 双来源、每日一次静默提醒、Manifest v2、Release 压缩包与 SHA-256 校验 |
 
 ## 目标
 

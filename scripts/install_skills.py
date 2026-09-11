@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -147,10 +148,20 @@ def load_manifest(root):
 
 
 def write_manifest(root, files):
+    try:
+        source_commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, stderr=subprocess.DEVNULL
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        source_commit = None
     payload = {
-        "format": 1,
+        "format": 2,
         "project": "stock-prompt",
         "project_version": REGISTRY["project"]["version"],
+        "source_repo": str(REGISTRY["project"].get("homepage", "")).removeprefix("https://github.com/"),
+        "source_channel": "stable",
+        "source_type": "git" if (ROOT / ".git").exists() else "release-zip",
+        "source_commit": source_commit,
         "installed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "managed_files": sorted(files),
         "hashes": {relative: file_hash(source) for relative, source in sorted(files.items())},
@@ -272,7 +283,8 @@ def print_post_install_guide(target):
     print('   任意时段       : "诊断 300308" / "中际旭创现在能买吗"')
     print("🎨 战报长图（仓库根目录运行）:")
     print("   python scripts/generate_report_card.py --demo --type stock")
-    print("🔄 日常更新: bash scripts/update.sh （Windows: scripts\\update.bat）")
+    print("🔄 检查更新: python scripts/stock_prompt.py update check")
+    print("⬆️ 确认更新: python scripts/stock_prompt.py update apply --yes")
     print("🩺 环境诊断: python scripts/doctor.py")
     print()
     if MCP_SERVER.is_file() and not mcp_registered():

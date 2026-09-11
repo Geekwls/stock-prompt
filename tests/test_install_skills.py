@@ -50,6 +50,10 @@ class InstallSkillsTest(unittest.TestCase):
             self.assertEqual(destination.read_text(encoding="utf-8"), "v2\n")
             manifest = json.loads((root / INSTALLER.MANIFEST_NAME).read_text(encoding="utf-8"))
             self.assertIn("stock-analysis/SKILL.md", manifest["hashes"])
+            self.assertEqual(manifest["format"], 2)
+            self.assertEqual(manifest["project_version"], INSTALLER.REGISTRY["project"]["version"])
+            self.assertEqual(manifest["source_repo"], "Geekwls/stock-prompt")
+            self.assertIn(manifest["source_type"], ("git", "release-zip"))
 
 
 class SourceFilesTest(unittest.TestCase):

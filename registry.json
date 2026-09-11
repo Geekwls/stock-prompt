@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "project": {
     "name": "a-stock-research",
-    "version": "7.4.0",
+    "version": "7.5.0",
     "description": "A-Share Quantitative & Wyckoff Research Protocol for Autonomous Agents (Agent Plugins 1.0)",
     "homepage": "https://github.com/Geekwls/stock-prompt"
   },
@@ -17,7 +17,8 @@
         "eval_tracker.py",
         "handoff_store.py",
         "artifact_store.py",
-        "calculate.py"
+        "calculate.py",
+        "update_manager.py"
       ]
     },
     {
@@ -30,7 +31,8 @@
         "eval_tracker.py",
         "handoff_store.py",
         "artifact_store.py",
-        "calculate.py"
+        "calculate.py",
+        "update_manager.py"
       ]
     },
     {
@@ -42,7 +44,8 @@
         "generate_report_card.py",
         "handoff_store.py",
         "artifact_store.py",
-        "calculate.py"
+        "calculate.py",
+        "update_manager.py"
       ]
     },
     {
@@ -55,7 +58,8 @@
         "handoff_store.py",
         "thesis_store.py",
         "artifact_store.py",
-        "calculate.py"
+        "calculate.py",
+        "update_manager.py"
       ]
     },
     {
@@ -67,7 +71,8 @@
         "handoff_store.py",
         "thesis_store.py",
         "artifact_store.py",
-        "calculate.py"
+        "calculate.py",
+        "update_manager.py"
       ]
     }
   ],
@@ -127,6 +132,7 @@
     "handoff_store.py": "scripts/handoff_store.py",
     "thesis_store.py": "scripts/thesis_store.py",
     "artifact_store.py": "scripts/artifact_store.py",
-    "calculate.py": "scripts/calculate.py"
+    "calculate.py": "scripts/calculate.py",
+    "update_manager.py": "scripts/update_manager.py"
   }
 }

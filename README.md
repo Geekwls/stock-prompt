@@ -1,7 +1,7 @@
 # 📈 A股量化分析 AI 提示词与 Skill 体系库 (`stock-prompt`)
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Release-v7.4.0-blue.svg" alt="Release v7.4.0" />
+  <img src="https://img.shields.io/badge/Release-v7.5.0-blue.svg" alt="Release v7.5.0" />
   <img src="https://img.shields.io/badge/Tests-CI%20Passing-brightgreen.svg" alt="Tests Passing" />
   <img src="https://img.shields.io/badge/Architecture-5%20Skills%20%2B%2017%20MCP%20Tools-orange.svg" alt="Architecture" />
   <img src="https://img.shields.io/badge/Zero--Config-Built--in%20MarketGraph%20MCP-success.svg" alt="Zero-Config MCP" />
@@ -15,7 +15,9 @@
 
 ---
 
-## ⚡ v7.4.0 核心亮点
+## ⚡ v7.5.0 核心亮点
+
+> v7.5.0 新增 Git/Release ZIP 双来源更新管理器、24 小时非打扰版本提醒、安装来源追踪，以及带 SHA-256 校验的自动发布资产。
 
 1. **🔌 内置 17 个结构化公开数据 MCP 工具 (`marketgraph-mcp`)**
    - 零注册、免 Token；MCP 核心使用 Python 3.10+ 标准库实现，报告卡依赖 Pillow。
@@ -298,17 +300,30 @@ python3 scripts/install_skills.py --target codex
 python3 scripts/install_skills.py --dry-run
 ```
 
-**日常更新**（上游发布新版本后，一条命令完成 拉取代码 ➡️ 同步全局副本 ➡️ 防漂移校验）：
+**日常更新**采用“每日最多一次静默检查 + 用户确认后更新”。支持 Git 仓库和 GitHub Release ZIP 两类安装来源：
 
 ```bash
-# Linux / macOS
-bash scripts/update.sh
+# 只检查，不修改文件（结果默认缓存 24 小时）
+python scripts/stock_prompt.py update check
 
-# Windows（双击运行亦可）
-scripts\update.bat
+# 查看仓库、安装来源与缓存状态
+python scripts/stock_prompt.py update status
+
+# 明确确认后更新；自动识别 Git 或 ZIP 来源
+python scripts/stock_prompt.py update apply --yes
 ```
 
-更新脚本会先检查本地修改；存在未提交内容时停止，避免覆盖用户定制。随后先比对远程再以 fast-forward 方式拉取 GitHub main，并运行 `install_skills.py` 将五大技能同步到 Gemini、Antigravity 与 Codex。安装器通过 manifest 清理旧版本残留，只处理本项目记录的文件；`--check` 会校验完整 Skill 文件。
+`update.sh` 与 `update.bat` 继续作为兼容入口。Git 来源只允许 fast-forward，检测到本地修改会停止；ZIP 来源下载 Release 资产并核验 `SHA256SUMS`，覆盖前自动备份。安装器 Manifest v2 记录版本、仓库、通道、来源类型和 Git 提交，只处理本项目管理的文件。
+
+每个 Skill 可调用 `python scripts/update_manager.py reminder --quiet` 进行非阻断提醒：24 小时内最多联网一次，无新版本或检查失败时保持静默；发现新版本时只在报告末尾提示，不会未经确认自动更新。
+
+每次 GitHub Release 自动发布完整项目包、Skills 直装包和 SHA-256 校验文件：
+
+```text
+stock-prompt-vX.Y.Z.zip
+stock-prompt-skills-vX.Y.Z.zip
+SHA256SUMS
+```
 
 安装成功后会自动打印 **30 秒快速上手速查表**，并检测 MarketGraph MCP 数据网关的注册状态——未注册时会给出配置片段与自测命令（手动配置见 [mcp/marketgraph-mcp/README.md](mcp/marketgraph-mcp/README.md)）。
 
@@ -327,7 +342,7 @@ python scripts/stock_prompt.py calculate calculate_atr_state --json '{"close": 1
 python scripts/stock_prompt.py thesis get --stock-code 300308
 python scripts/stock_prompt.py eval report
 python scripts/stock_prompt.py doctor
-python scripts/stock_prompt.py update
+python scripts/stock_prompt.py update check
 ```
 
 ---

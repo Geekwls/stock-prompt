@@ -29,12 +29,29 @@ jobs:
         run: |
           python3 scripts/check_version_parity.py --tag "$RELEASE_TAG"
 
+      - name: Run release checks
+        run: |
+          python3 scripts/check_schema_parity.py
+          python3 -m unittest discover -s tests
+          python3 scripts/sync_skill_contracts.py --check
+          python3 scripts/sync_prompts.py --check
+          python3 scripts/install_skills.py --check --target workspace
+
       - name: Generate Automatic Release Notes
         id: release_notes
         env:
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: |
           python3 scripts/extract_release_notes.py --version "$RELEASE_TAG" --output RELEASE_NOTES.md
+
+      - name: Build release archives and checksums
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: python3 scripts/build_release_assets.py --version "$RELEASE_TAG" --output dist
+
+      - name: Verify release checksums
+        working-directory: dist
+        run: sha256sum -c SHA256SUMS
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
@@ -46,5 +63,7 @@ jobs:
             registry.json
             plugin.json
             CHANGELOG.md
+            dist/*.zip
+            dist/SHA256SUMS
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

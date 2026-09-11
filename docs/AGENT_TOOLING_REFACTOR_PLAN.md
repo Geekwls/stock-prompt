@@ -5,18 +5,18 @@
 > **规范边界**：本文是 Tool、Artifact、Router 与 Evaluator 的工程实施主计划；具体机器字段以 `contracts/artifacts/*.schema.json` 和 `registry.json` 为准，研究纪律以 `contracts/common-research-contract.md` 为准。
 > **与 UI 文档关系**：`UI_MODEL_SEPARATION_DESIGN.md` 只定义交互层如何消费本计划产出的 Artifact，不重复定义 Artifact 业务语义。
 
-## 当前实施状态（v7.1.1 基线）
+## 当前实施状态（v7.4.0）
 
 | 能力 | 状态 | 当前证据 / 下一缺口 |
 |---|---|---|
 | 四个专业 Skill 独立运行 | 已完成 | 公共契约允许无 Handoff/MCP 时独立补采或降级 |
 | PREOPEN / AUCTION 不可变分离 | 已完成 | `eval_tracker.py` 按 `market_phase` 与 revision 管理 |
 | Handoff / Thesis / 评估持久化 | 已完成 | 已有独立脚本和统一 CLI 兼容入口 |
-| 通用 Artifact Schema 与存储 | 已完成（P0） | 8 类 Schema、7 组 fixture、不可变快照存储与统一 CLI 已接入注册表和安装器 |
+| 通用 Artifact Schema 与存储 | 已完成（P0） | 8 类 Schema、7 组 fixture、不可变快照存储与统一 CLI 已接入注册表和安装器；个股 Artifact 已补齐 L1–L8 证据结构 |
 | 确定性计算工具化 | 已完成（首批） | `tools/calculations/` 已覆盖市场、板块、个股与评估的 21 个纯函数；后续只扩展口径，不回填模型手算 |
-| 上下文型 MCP 工具 | 未完成 | 当前为 13 个细粒度数据工具 |
-| Skill 主文件压缩 | 待兼容期验证 | 等 Artifact/计算结果与旧路径对照稳定后执行，避免一次性迁移 |
-| UI 工程 | 不在本仓库当前交付内 | 本仓库先提供事件与 Artifact 接口契约 |
+| 上下文型 MCP 工具 | 已完成（v7.3.0） | 4 个上下文聚合工具已接入，MarketGraph 共 17 个工具，并有降级信封测试 |
+| Skill 主文件压缩 | 已完成（v7.4.0） | 4 个专业 Skill 已拆出 Tool Recipes，主文件保留路由、判断与输出契约 |
+| UI 工程 | 接口层已完成，宿主 UI 未交付 | 已提供 9 类事件 Schema 与确定性路由器；真实界面由宿主侧实现 |
 
 ## 目标
 
@@ -44,7 +44,7 @@ Evaluator  = 衡量预测质量和模型校准
 ### 工作项
 
 - 为四个专业 Skill、Handoff、评估器建立固定输入和输出样例。
-- 记录当前 13 个 MarketGraph MCP 工具、脚本和 Schema 的行为基线。
+- 记录当前 17 个 MarketGraph MCP 工具、脚本和 Schema 的行为基线。
 - 建立单元测试、集成测试和 Artifact fixtures。
 - 固定现有指标口径，避免重构过程中无意改变结果。
 

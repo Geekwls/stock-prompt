@@ -2,10 +2,20 @@
 """UI 事件协议与调度器单元测试。"""
 
 import unittest
+import json
+from pathlib import Path
 from tools.orchestration import route_ui_event, validate_ui_event
+from tools.orchestration.event_router import VALID_EVENTS
 
 
 class UIEventRouterTest(unittest.TestCase):
+    def test_schema_and_router_event_sets_are_identical(self):
+        """Schema 与运行时路由器必须共享同一组事件名称。"""
+        schema_path = Path(__file__).resolve().parents[1] / "contracts" / "ui" / "event.schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        schema_events = set(schema["properties"]["event"]["enum"])
+        self.assertEqual(schema_events, VALID_EVENTS)
+
     def test_deterministic_events_do_not_require_llm(self):
         """测试确定性事件（查看证据、渲染战报、校准视图）不需要 LLM 介入。"""
         for event_name in ("view_evidence", "view_calibration", "retry_data", "render_report"):

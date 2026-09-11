@@ -1,6 +1,6 @@
 # UI 交互与模型推理分层设计
 
-> **文档状态**：Proposed / 接口设计
+> **文档状态**：Implemented / 接口层（v7.4.0）；Schema/Router 校验已接入，宿主 UI 仍待实现
 >
 > **当前边界**：仓库当前不包含独立 UI 应用；本文定义未来 UI 或宿主客户端应遵循的事件、状态和 Artifact 消费方式，不代表按钮、页面或监控已经实现。
 > **上游规范**：Artifact 业务字段、持久化与工具失败语义以 `AGENT_TOOLING_REFACTOR_PLAN.md`、`contracts/artifacts/*.schema.json` 和公共研究契约为准。本文只增加 UI 状态和交互约束，不重复发明研究口径。

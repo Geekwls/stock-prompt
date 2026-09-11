@@ -14,7 +14,7 @@
 - 保证五大投研心智、YAML frontmatter、口语化自然语言意图映射、状态机及报告八节/十节标准结构完全保留。
 
 ### 🖥️ UI 事件协议与轻量调度器
-- 新增标准 UI 交互事件规范 `contracts/ui/event.schema.json`，定义 9 类核心交互事件（view_evidence, render_card, calibrate_view, run_preopen, run_review, run_rotation, run_diagnostic, switch_regime, verify_trigger）及轻量状态机。
+- 新增标准 UI 交互事件规范 `contracts/ui/event.schema.json`，定义 9 类核心交互事件（start_preopen, update_auction, run_close_review, run_rotation, diagnose_stock, view_evidence, view_calibration, retry_data, render_report）及轻量状态机。
 - 新增 `tools/orchestration/event_router.py`，支持将确定性事件（查看证据、长图渲染、校准视图）直接分发至确定性脚本快速响应（无 LLM 介入耗时），将投研分析事件定向分发给对应专业 Skill 执行。
 - 新增单测 `tests/test_ui_event_router.py` 完整覆盖路由决策与事件校验。
 
@@ -22,7 +22,7 @@
 ### 🔁 Artifact 转换适配器与兼容期双写
 - 新增 `tools/artifacts/adapters.py` 六类转换适配器：盘前预测→prediction（PREOPEN_V1）、9:25 修订→auction（AUCTION_V2，强制挂接同日 PREOPEN parent）、收盘结果→close_actual、每日复盘→daily_score、板块轮动→rotation、个股诊断→stock_diagnostic（按 subject 隔离）；快照 ID 确定性派生，重复镜像幂等跳过。
 - 兼容期双写接线：`eval_tracker.py`（record / result / record-daily）与 `handoff_store.py`（rotation / stock 交接）写入成功后自动镜像为不可变 Artifact；任何双写失败仅输出 `[WARN]`，不影响台账、Handoff 与报告完成。
-- 低覆盖率强制条件化：coverage_band=insufficient 或 coverage<50% 的预测 Artifact 一律 probabilities/opportunity_score=null 且 status=degraded（prediction/auction Schema 相应可空化），杜绝精确分渗入低质量样本。
+- 低覆盖率强制条件化：coverage_band=low/insufficient 或 coverage<70% 的预测 Artifact 一律 probabilities/opportunity_score=null 且 status=degraded（prediction/auction Schema 相应可空化），杜绝精确分渗入低质量样本。
 - Router 编排改为 Artifact 优先：`artifact_store.py latest` 新增 `--within-trading-days`（工作日近似 + 文件日期窗口 + 10 自然日上限，过期显式 N/A (expired)）；缺失、过期、损坏或脚本不可用时回退 Handoff `latest`，并在路由决策注明上下文来源与精度；AGENTS.md 同步闭环协议。
 - 新增端到端测试 `tests/test_artifact_pipeline.py` 覆盖五项关键约束：PREOPEN 不被竞价覆盖（含同 ID 不可覆盖）、同日多股不串票、低覆盖禁精确分、双写失败不阻断分析、新旧路径 ATR 三态 / Brier / 机会分完全一致。
 

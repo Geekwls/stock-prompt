@@ -119,6 +119,8 @@ class ArtifactPipelineE2E(unittest.TestCase):
         self.assertNotEqual(first[0]["snapshot_id"], second[0]["snapshot_id"])
         self.assertEqual(first[0]["subject"]["id"], "300308")
         self.assertEqual(second[0]["subject"]["id"], "600519")
+        self.assertEqual(set(first[0]["layers"]), {f"L{i}" for i in range(1, 9)})
+        self.assertEqual(first[0]["layers"]["L1"]["status"], "unavailable")
 
     def test_low_coverage_suppresses_precise_scores(self):
         """场景3：覆盖率不足时 Artifact 不得携带精确概率与机会分。"""
@@ -129,6 +131,17 @@ class ArtifactPipelineE2E(unittest.TestCase):
         self.assertIsNone(artifact["opportunity_score"])
         self.assertEqual(artifact["status"], "degraded")
         self.assertEqual(ARTIFACTS.validate_artifact(artifact), [])
+
+    def test_medium_low_coverage_suppresses_precise_scores(self):
+        """场景3b：50%–69% 覆盖率同样只能输出条件化 Artifact。"""
+        payload = adapters.mirror_prediction_record({
+            "date": "2026-09-08", "coverage": "69%", "coverage_band": "medium",
+            "probs": {"up": 0.55, "side": 0.30, "down": 0.15},
+            "opportunity": 78, "regime": "S3", "market_phase": "preopen",
+        })
+        self.assertIsNone(payload["probabilities"])
+        self.assertIsNone(payload["opportunity_score"])
+        self.assertEqual(payload["status"], "degraded")
 
     def test_artifact_failure_does_not_block_analysis(self):
         """场景4：Artifact 双写失败时台账照常写入且仅告警。"""
@@ -144,7 +157,8 @@ class ArtifactPipelineE2E(unittest.TestCase):
         """场景5：新旧路径的 ATR 三态、Brier 与机会分完全一致。"""
         run(EVAL.cmd_record, **record_args(ledger=self.ledger, opportunity=76))
         run(EVAL.cmd_result, **result_args(ledger=self.ledger))
-        ledger_pred = json.loads(open(self.ledger, encoding="utf-8").readline())
+        with open(self.ledger, encoding="utf-8") as stream:
+            ledger_pred = json.loads(stream.readline())
         artifact_pred = ARTIFACTS.select_artifacts(artifact_type="prediction")[0]
         artifact_close = ARTIFACTS.select_artifacts(artifact_type="close_actual")[0]
 

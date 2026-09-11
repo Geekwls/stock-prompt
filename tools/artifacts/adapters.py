@@ -3,7 +3,7 @@
 设计约束（与 v7.2.0 基线一致）：
 - 只做只读转换，不改写既有 Handoff / Thesis / 评估台账；
 - 快照 ID 确定性派生（同源记录重复镜像天然幂等，存储层再以不可覆盖约束兜底）；
-- 低覆盖率（coverage_band=insufficient 或 coverage<50%）不得生成精确概率与机会分，
+- 低覆盖率（coverage_band=insufficient/low 或 coverage<70%）不得生成精确概率与机会分，
   一律降级为条件化 Artifact（probabilities/opportunity_score = null，status=degraded）；
 - 任何失败由调用方捕获后仅告警，绝不影响报告与台账写入。
 """
@@ -11,7 +11,7 @@
 import hashlib
 import json
 
-LOW_COVERAGE_BANDS = {"insufficient"}
+LOW_COVERAGE_BANDS = {"low", "insufficient"}
 
 
 def _digest(*parts):
@@ -35,7 +35,7 @@ def _is_low_coverage(record):
     coverage = _coverage_percent(record)
     if coverage.endswith("%"):
         try:
-            return float(coverage[:-1]) < 50
+            return float(coverage[:-1]) < 70
         except ValueError:
             return False
     return False
@@ -154,6 +154,53 @@ def mirror_daily_record(record):
     return common
 
 
+LAYER_IDS = tuple(f"L{i}" for i in range(1, 9))
+
+
+def _diagnostic_layers(payload):
+    """将报告中的 L1–L8 证据规范化为可审计结构，不补造缺失结论。"""
+    incoming = payload.get("layers") or payload.get("evidence_map") or {}
+    layers = {}
+    for layer_id in LAYER_IDS:
+        value = incoming.get(layer_id) if isinstance(incoming, dict) else None
+        if isinstance(value, dict):
+            layer = dict(value)
+        elif value is not None:
+            layer = {"fact": str(value)}
+        else:
+            layer = {}
+        layer.setdefault("status", "unavailable")
+        layer.setdefault("fact", "N/A")
+        layer.setdefault("inference", "N/A")
+        layer.setdefault("counter_evidence", [])
+        layer.setdefault("evidence_ids", [])
+        layer.setdefault("as_of", str(payload.get("as_of") or "N/A"))
+        layer.setdefault("coverage", payload.get("coverage") or "N/A")
+        layer.setdefault("source", "handoff_summary")
+        layers[layer_id] = layer
+    return layers
+
+
+def _summary_card(payload, subject, triggers):
+    """生成 Agent 首屏消费的稳定摘要卡；不替模型补造结论。"""
+    return {
+        "summary": str(payload.get("summary") or "N/A"),
+        "logic_health": str(payload.get("logic_health") or "暂不评级"),
+        "structure_position": str(payload.get("structure_position") or "暂不评级"),
+        "confidence": str(payload.get("confidence") or "数据不足"),
+        "coverage": str(payload.get("coverage") or "N/A"),
+        "data_status": str(payload.get("data_status") or "partial"),
+        "subject": {"id": str(subject["id"]), "name": str(subject.get("name") or "")},
+        "risk_flags": [str(flag) for flag in payload.get("risk_flags", [])],
+        "next_actions": [
+            "查看 L1–L8 证据",
+            "查看确认与失效条件",
+            "生成研报长图",
+        ],
+        "next_triggers": triggers,
+    }
+
+
 def mirror_handoff(payload):
     """板块轮动交接 → rotation；个股诊断交接 → stock_diagnostic（按 subject 隔离）。"""
     report_type = str(payload.get("report_type", ""))
@@ -178,12 +225,13 @@ def mirror_handoff(payload):
         pending = [t.get("condition", str(t)) if isinstance(t, dict) else str(t) for t in triggers]
         common.update({
             "subject": {"type": "stock", "id": str(subject["id"]), "name": str(subject.get("name", ""))},
-            "layers": {"source": "handoff_summary"},
+            "layers": _diagnostic_layers(payload),
             "logic_health": str(payload.get("logic_health") or "暂不评级"),
             "structure_position": str(payload.get("structure_position") or "暂不评级"),
             "confidence": str(payload.get("confidence", "数据不足")),
             "confirmation_conditions": pending,
             "invalidation_conditions": [str(flag) for flag in payload.get("risk_flags", [])],
+            "summary_card": _summary_card(payload, subject, pending),
         })
         return common
     return None

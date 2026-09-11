@@ -2,11 +2,13 @@
 
 > **目标**：以 4 个专业研究 Skill 和 1 个轻量编排 Router，形成具备 **时段感知路由 ➡️ 程序化交接 ➡️ 盘前盘后自校准 ➡️ 板块标的深度穿透** 的研究闭环。Router 只做分流和交接，不代替专业分析。
 
-## v7.1.1 实施状态
+## v7.4.0 实施状态
 
-- 已完成：单一 `registry.json`、版本一致性检查、13 个 MCP 工具清单对齐。
+- 已完成：单一 `registry.json`、版本一致性检查、17 个 MCP 工具清单对齐。
 - 已完成：Handoff Schema、原子存储 CLI、台账版本隔离和 legacy 迁移。
 - 已完成：`stock-research-router` 编排 Skill、机器产物 Schema、CI 多 Python 版本矩阵。
+- 已完成：Artifact 双写适配器、Artifact 优先读取与 Handoff 降级、四类上下文型 MCP 工具。
+- 已完成：UI 事件 Schema 与确定性事件路由器；真实 UI 宿主仍属于外部交付范围。
 - 兼容演进：MCP v2 信封保留旧顶层字段；传输/缓存和报告卡公共组件已从入口拆出，业务工具与四类排版继续按测试覆盖逐步细分。
 - 下一阶段工程主计划以 [Agent 工具化与 Skill 解耦实施计划](AGENT_TOOLING_REFACTOR_PLAN.md) 为准；未来 UI/宿主交互边界见 [UI 交互与模型推理分层设计](UI_MODEL_SEPARATION_DESIGN.md)。本 Roadmap 只保留产品级里程碑，不重复定义机器契约。
 

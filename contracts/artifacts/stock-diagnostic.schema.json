@@ -11,9 +11,45 @@
     "evidence_ids": {"type": "array"}, "formula_version": {"type": "string"},
     "status": {"enum": ["complete", "partial", "degraded", "failed", "emitted_only"]},
     "subject": {"type": "object", "required": ["type", "id", "name"]},
-    "layers": {"type": "object"}, "logic_health": {"type": "string"},
+    "layers": {
+      "type": "object",
+      "description": "L1–L8 八层证据。每层记录事实、推断、反证、来源、时点与覆盖率；缺失时使用 N/A/unavailable，不得补造结论。",
+      "properties": {
+        "L1": {"$ref": "#/$defs/layer"}, "L2": {"$ref": "#/$defs/layer"},
+        "L3": {"$ref": "#/$defs/layer"}, "L4": {"$ref": "#/$defs/layer"},
+        "L5": {"$ref": "#/$defs/layer"}, "L6": {"$ref": "#/$defs/layer"},
+        "L7": {"$ref": "#/$defs/layer"}, "L8": {"$ref": "#/$defs/layer"}
+      },
+      "additionalProperties": true
+    }, "logic_health": {"type": "string"},
     "structure_position": {"type": "string"}, "confidence": {"type": "string"},
-    "confirmation_conditions": {"type": "array"}, "invalidation_conditions": {"type": "array"}
+    "confirmation_conditions": {"type": "array"}, "invalidation_conditions": {"type": "array"},
+    "summary_card": {
+      "type": "object",
+      "description": "Agent 首屏展示摘要；只承载已确认字段和可继续操作，不替代完整证据链。",
+      "required": ["summary", "logic_health", "structure_position", "confidence", "coverage", "data_status", "subject", "risk_flags", "next_actions", "next_triggers"],
+      "properties": {
+        "summary": {"type": "string"}, "logic_health": {"type": "string"},
+        "structure_position": {"type": "string"}, "confidence": {"type": "string"},
+        "coverage": {"type": "string"}, "data_status": {"type": "string"},
+        "subject": {"type": "object"}, "risk_flags": {"type": "array"},
+        "next_actions": {"type": "array"}, "next_triggers": {"type": "array"}
+      },
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "layer": {
+      "type": "object",
+      "required": ["status", "fact", "inference", "counter_evidence", "evidence_ids", "as_of", "coverage", "source"],
+      "properties": {
+        "status": {"type": "string"}, "fact": {"type": "string"},
+        "inference": {"type": "string"}, "counter_evidence": {"type": "array"},
+        "evidence_ids": {"type": "array"}, "as_of": {"type": "string"},
+        "coverage": {"type": "string"}, "source": {"type": "string"}
+      },
+      "additionalProperties": true
+    }
   },
   "additionalProperties": true
 }

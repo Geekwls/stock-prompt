@@ -103,3 +103,22 @@ Scored Weight = 实际参与评分的原始权重
 - `sector-rotation` 提供中期板块阶段、候选方向和衰竭风险。
 - `stock-analysis` 可接收市场与板块状态作为 L1/L2 候选证据；核验后复用，否则独立补采并重新裁决。
 - 个股需要跨越 3 个交易日持续跟踪时，另用当前 Skill 根目录的 `scripts/thesis_store.py` 维护按股票代码隔离的长期 Thesis Ledger；Handoff 负责短期跨 Skill 交接，Thesis 负责长期逻辑历史，两者不得混用。
+
+## Agent 输出协议（首屏与可追问展示）
+
+五个 Skill 的报告首屏必须先输出统一摘要卡，再展开专业详情。摘要卡字段固定为：
+
+```text
+结论：<一句话，不得超过两句>
+逻辑状态：<强化/稳定/弱化/证伪/不适用>
+当前位置：<阶段或位置；不适用时写 N/A>
+置信度：<高/中/低/数据不足>
+数据覆盖率：<精确百分比或 N/A>
+数据状态：<完整数据/部分数据/数据不足>
+最大风险：<一至三项>
+下一步观察：<一至三项可验证变量>
+```
+
+同时输出机器可读的 `summary_card`，字段至少包含 `summary`、`logic_health`、`structure_position`、`confidence`、`coverage`、`data_status`、`risk_flags`、`next_actions`。`next_actions` 只能使用当前能力支持的操作，例如 `view_evidence`、`retry_data`、`render_report`、`view_calibration` 或跳转其他专业 Skill。
+
+展示规则：首屏只显示摘要卡和各证据层的一句话状态；用户追问或调用 `view_evidence` 后，再展开事实、推断、反证、来源、数据时间和覆盖率。`coverage < 70%` 时 `data_status` 必须为“部分数据”或“数据不足”，只做条件化判断，不得输出精确综合评分。

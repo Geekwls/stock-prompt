@@ -1,8 +1,8 @@
 # UI 交互与模型推理分层设计
 
-> **文档状态**：Implemented / 接口层（v7.4.0）；Schema/Router 校验已接入，宿主 UI 仍待实现
+> **文档状态**：Implemented / Agent 接口层；独立宿主 UI、监控与调度 Deferred
 >
-> **当前边界**：仓库当前不包含独立 UI 应用；本文定义未来 UI 或宿主客户端应遵循的事件、状态和 Artifact 消费方式，不代表按钮、页面或监控已经实现。
+> **当前边界**：仓库不计划在当前阶段交付独立 Web/桌面 UI。Agent 宿主可直接消费 12 类事件和 Artifact；按钮、页面、生产监控、自动调度及断点恢复均明确标记为 Deferred。
 > **上游规范**：Artifact 业务字段、持久化与工具失败语义以 `AGENT_TOOLING_REFACTOR_PLAN.md`、`contracts/artifacts/*.schema.json` 和公共研究契约为准。本文只增加 UI 状态和交互约束，不重复发明研究口径。
 
 ## 1. 设计目标
@@ -146,6 +146,9 @@ view_evidence
 view_calibration
 retry_data
 render_report
+save_artifact
+load_artifact
+evaluate_prediction
 ```
 
 ### 路由优先级
@@ -331,17 +334,19 @@ UI 提供代码选择和诊断入口；模型解释八层证据与竞争假设�
 ### P1
 
 1. 增加上下文型 MCP 工具；
-2. 增加 `save_artifact`、`load_artifact`、`evaluate_prediction`；
+2. 增加 `save_artifact`、`load_artifact`、`evaluate_prediction`、`render_report`；
 3. 为四个 Skill 编写工具调用配方；
 4. 实现摘要视图与证据详情按需加载；
-5. 统计模型调用次数和 Token 消耗。
+5. 通过端到端事件测试验证保存、读取、评估和渲染执行链路。
 
-### P2
+以上 P1 项已完成。
 
-1. 增加自动化调度和任务进度；
-2. 增加可恢复任务和断点续跑；
-3. 增加工具耗时、失败率和缓存命中率监控；
-4. 将报告卡渲染和分享能力完全移到展示层。
+### P2（Deferred，不属于当前版本验收范围）
+
+1. **独立 UI**：Web/桌面页面、按钮、导航与分享界面；当前使用 Agent 宿主的 Markdown、文件和图片展示能力。
+2. **自动化调度**：无人值守定时运行和任务进度；当前由用户或宿主主动触发。
+3. **可恢复任务**：检查点和断点续跑；待出现长时间生产任务后重新评估。
+4. **生产监控**：工具耗时、失败率、缓存命中率和 Token 消耗；待生产部署后实施。
 
 ## 12. 验收标准
 
@@ -355,12 +360,12 @@ UI 状态始终来自 Artifact，而非本地猜测
 MCP 或持久化失败时能降级
 报告摘要和证据详情可分层加载
 用户可清楚看到数据时间、覆盖率和失败原因
-API 调用次数和平均 Token 消耗下降
+Artifact 闭环事件可在不调用模型的情况下完成
 ```
 
 ## 13. 成功指标
 
-上线后持续跟踪：
+以下为未来独立 UI/生产部署指标，当前统一标记为 **Deferred**：
 
 - 确定性 UI 操作的模型调用率；
 - 平均每次任务模型调用次数；

@@ -4,7 +4,7 @@
 
 ## v7.5.0 实施状态
 
-- 已完成：单一 `registry.json`、版本一致性检查、17 个 MCP 工具清单对齐。
+- 已完成：单一 `registry.json`、版本一致性检查、21 个 MCP 工具清单对齐（17 个数据/上下文工具 + 4 个研究闭环工具）。
 - 已完成：Handoff Schema、原子存储 CLI、台账版本隔离和 legacy 迁移。
 - 已完成：`stock-research-router` 编排 Skill、机器产物 Schema、CI 多 Python 版本矩阵。
 - 已完成：Artifact 双写适配器、Artifact 优先读取与 Handoff 降级、四类上下文型 MCP 工具。

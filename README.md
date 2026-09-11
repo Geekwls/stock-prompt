@@ -19,7 +19,7 @@
 
 > v7.5.0 新增 Git/Release ZIP 双来源更新管理器、24 小时非打扰版本提醒、安装来源追踪，以及带 SHA-256 校验的自动发布资产。
 
-1. **🔌 内置 17 个结构化公开数据 MCP 工具 (`marketgraph-mcp`)**
+1. **🔌 内置 21 个结构化数据与研究闭环 MCP 工具 (`marketgraph-mcp`)**
    - 零注册、免 Token；MCP 核心使用 Python 3.10+ 标准库实现，报告卡依赖 Pillow。
    - 直连腾讯证券与东方财富公开网络节点，涵盖 750 日 K 线、周线共振、当日分时、龙虎榜席位、行业资金流及等权篮子容灾；所有输出仍按 P3 公开网关证据记录，显著降低而不能宣称彻底消除幻觉风险。
 2. **🔤 纯中文股票名秒级智能联想解析**
@@ -158,7 +158,7 @@ python scripts/generate_report_card.py --demo --type stock --theme dark
 ## 🌐 跨平台多场景使用指南
 
 > **先看能力分层**：本项目的数据可靠性取决于宿主能否运行本地 MCP 服务。
-> - **完整模式**（推荐）：Antigravity、Gemini CLI、Claude Code、Cursor 等**本地 Agent 宿主**——注册 `marketgraph-data` MCP 后获得 17 个结构化公开数据工具（含盘前、收盘、轮动、个股四类上下文聚合工具），联网搜索仅在 MCP 覆盖外字段（隔夜外盘、宏观汇率等）作补充。
+> - **完整模式**（推荐）：Antigravity、Gemini CLI、Claude Code、Cursor 等**本地 Agent 宿主**——注册 `marketgraph-data` MCP 后获得 21 个结构化工具（17 个公开数据/上下文工具，以及 Artifact 保存、读取、评估、渲染 4 个研究闭环工具），联网搜索仅在 MCP 覆盖外字段（隔夜外盘、宏观汇率等）作补充。
 > - **降级模式**：Dify/Coze 工作流平台、ChatGPT GPTs、网页版 LLM——**无法运行本地 stdio MCP**，只能绑定联网搜索插件获取行情（公共契约 P4 线索），数据缺失时按各 Skill 降级规则输出 N/A，不伪造。
 > 两种模式下 Skill 的分析纪律完全相同，差别在数据结构化程度、可追溯性和覆盖率。
 
@@ -202,7 +202,7 @@ Agent 客户端会自动读取根目录 [AGENTS.md](AGENTS.md)，按交易时段
 1. **System Prompt**：新建 Bot/Workflow 节点，将 `prompts/` 目录或 `SKILL.md` 中主 Prompt 文件的文本粘贴到 **系统提示词 (System Prompt)** 中。
 2. **工具集成**：为 Bot 绑定**联网搜索插件**（如 Tavily, Serper 或财经资讯 API），让 Bot 具备获取当日实时行情数据的能力。
 
-> ⚠️ **能力边界**：这类平台无法运行本地 stdio MCP 服务，因此只能工作在**降级模式**——行情数据依赖联网搜索（P4 线索），无法使用 17 个结构化公开数据工具。Skill 的防幻觉规则会要求数据不足时明确输出 N/A，但评分覆盖率和结论置信度会显著低于本地宿主。若 Bot 只需“大盘情绪 + 板块轮动”级别的粗粒度结论，降级模式可用；个股八层诊断建议在本地宿主中运行。
+> ⚠️ **能力边界**：这类平台无法运行本地 stdio MCP 服务，因此只能工作在**降级模式**——行情数据依赖联网搜索（P4 线索），也无法直接使用本地 Artifact 闭环工具。Skill 的防幻觉规则会要求数据不足时明确输出 N/A，但评分覆盖率和结论置信度会显著低于本地宿主。若 Bot 只需“大盘情绪 + 板块轮动”级别的粗粒度结论，降级模式可用；个股八层诊断建议在本地宿主中运行。
 
 ---
 
@@ -350,7 +350,7 @@ python scripts/stock_prompt.py update check
 ## 🗺️ 未来演进路线 (Roadmap)
 
 项目正持续从“独立的单点技能”演进为“全天候跨 Skill 交易闭环协同流水线”：
-- **已落地**：公共契约交接摘要、标准 Artifact Schema 与不可变快照、市场/板块/个股/评估确定性计算、板块→个股穿透、盘前↔盘后评估闭环、时段路由与 17 个结构化公开数据 MCP 工具。
+- **已落地**：公共契约交接摘要、标准 Artifact Schema 与不可变快照、市场/板块/个股/评估确定性计算、板块→个股穿透、盘前↔盘后评估闭环、可执行事件路由与 21 个结构化 MCP 工具。
 - 产品路线见[跨 Skill 交易闭环计划](docs/ROADMAP_CROSS_SKILL_PIPELINE.md)，工程实施边界见[Agent 工具化与 Skill 解耦计划](docs/AGENT_TOOLING_REFACTOR_PLAN.md)，未来交互接口见[UI 与模型职责分离设计](docs/UI_MODEL_SEPARATION_DESIGN.md)。
 
 ---

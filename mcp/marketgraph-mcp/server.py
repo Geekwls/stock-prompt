@@ -21,6 +21,15 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+PROJECT_ROOT = next(
+    (
+        parent for parent in Path(__file__).resolve().parents
+        if (parent / "registry.json").is_file() or (parent / ".stock-prompt-runtime.json").is_file()
+    ),
+    Path(__file__).resolve().parents[2],
+)
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 from marketgraph_mcp.cache import (
     CACHE_STORE, CACHE_TTL_SECONDS, HISTORICAL_CACHE_TTL_SECONDS,
     get_cached, set_cached, ttl_for_history,
@@ -35,6 +44,12 @@ from marketgraph_mcp.transport import (
     HOST_MIN_INTERVAL_SECONDS, MAX_HTTP_RESPONSE_BYTES, USER_AGENT,
     _HOST_FAILURE_STATE, _HOST_LAST_REQUEST, _breaker_check,
     _breaker_record_failure, _breaker_record_success, _throttle_host, http_get,
+)
+from tools.agent_tools import (
+    evaluate_prediction_tool,
+    load_artifact_tool,
+    render_report_tool,
+    save_artifact_tool,
 )
 
 if hasattr(sys.stdout, 'reconfigure'):
@@ -2355,7 +2370,7 @@ def fetch_stock_diagnostic_context(
 # -----------------------------------------------------------------------------
 SERVER_INFO = {
     "name": "marketgraph-data",
-    "version": "1.9.0",
+    "version": "2.0.0",
 }
 
 def _dispatch_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -2408,6 +2423,15 @@ def _dispatch_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
             not isinstance(arguments.get("sectors"), list) or not all(isinstance(x, str) for x in arguments["sectors"])
         ):
             return {"error": "sectors 必须是字符串数组", "data_status": "unavailable"}
+    if name == "save_artifact" and not isinstance(arguments.get("artifact"), dict):
+        return {"error": "artifact 必须是对象", "data_status": "unavailable"}
+    if name == "load_artifact" and not any(arguments.get(key) for key in ("snapshot_id", "artifact_type", "trading_date", "subject")):
+        return {"error": "至少提供 snapshot_id 或一个筛选条件", "data_status": "unavailable"}
+    if name == "evaluate_prediction" and not all(
+        isinstance(arguments.get(key), str) and arguments[key].strip()
+        for key in ("prediction_snapshot_id", "actual_snapshot_id")
+    ):
+        return {"error": "prediction_snapshot_id 和 actual_snapshot_id 必须是非空字符串", "data_status": "unavailable"}
     if name == "get_stock_quote":
         return fetch_stock_quote(arguments.get("symbol", ""))
     elif name == "get_stock_kline":
@@ -2458,6 +2482,28 @@ def _dispatch_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         return fetch_stock_diagnostic_context(
             arguments.get("symbol", ""),
             arguments.get("benchmark", "CSIALL"),
+        )
+    elif name == "save_artifact":
+        return save_artifact_tool(arguments["artifact"])
+    elif name == "load_artifact":
+        return load_artifact_tool(
+            arguments.get("snapshot_id"),
+            artifact_type=arguments.get("artifact_type"),
+            trading_date=arguments.get("trading_date"),
+            subject=arguments.get("subject"),
+        )
+    elif name == "evaluate_prediction":
+        return evaluate_prediction_tool(
+            arguments["prediction_snapshot_id"], arguments["actual_snapshot_id"]
+        )
+    elif name == "render_report":
+        return render_report_tool(
+            snapshot_id=arguments.get("snapshot_id"),
+            report_type=arguments.get("report_type"),
+            report_data=arguments.get("report_data"),
+            theme=arguments.get("theme", "light"),
+            output_format=arguments.get("output_format", "png"),
+            output_name=arguments.get("output_name"),
         )
     else:
         return {"error": f"未知工具: {name}"}

@@ -1,6 +1,10 @@
 # CHANGELOG (更新日志)
 
 ## [v7.5.0] - 2026-09-11
+
+- 将 `save_artifact`、`load_artifact`、`evaluate_prediction`、`render_report` 暴露为 Agent 可直接调用的 MCP 工具，MarketGraph 工具总数增至 21。
+- `event_router.py` 新增确定性事件执行入口，完成 Artifact 保存、读取、证据展开、预测评估与报告渲染的真实分发，并增加端到端事件测试。
+- 两份架构文档明确将独立 UI、生产监控、自动调度与断点恢复标记为 Deferred。
 ### ⬆️ 安装、更新与版本提醒闭环
 - 新增 `update_manager.py check/status/apply`，统一 Git 快进更新与 GitHub Release ZIP 更新；任何写入必须显式传入 `--yes`。
 - 新增 24 小时缓存的非打扰版本提醒：无更新或检查失败保持静默，不影响专业分析。

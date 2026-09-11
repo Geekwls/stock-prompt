@@ -108,6 +108,22 @@ class SourceFilesTest(unittest.TestCase):
                 capture_output=True, text=True,
             )
             self.assertEqual(validation.returncode, 0, validation.stdout + validation.stderr)
+            renderer_probe = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    (
+                        "import sys; "
+                        f"sys.path.insert(0, {str(root)!r}); "
+                        "from tools.agent_tools import _report_runtime; "
+                        "validate, renderers = _report_runtime(); "
+                        "print(','.join(sorted(renderers)))"
+                    ),
+                ],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(renderer_probe.returncode, 0, renderer_probe.stderr)
+            self.assertEqual(renderer_probe.stdout.strip(), "daily,prediction,rotation,stock")
 
 
 if __name__ == "__main__":

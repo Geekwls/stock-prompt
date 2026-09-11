@@ -24,7 +24,7 @@ class RegistryTest(unittest.TestCase):
 
     def test_mcp_registry_matches_public_docs_count(self):
         data = REGISTRY.load_registry()
-        self.assertEqual(len(data["mcp"]["tools"]), 17)
+        self.assertEqual(len(data["mcp"]["tools"]), 21)
         self.assertIn("get_sector_kline", data["mcp"]["tools"])
         self.assertIn("get_basket_index", data["mcp"]["tools"])
 

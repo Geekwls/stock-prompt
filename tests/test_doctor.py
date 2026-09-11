@@ -14,5 +14,5 @@ class DoctorTest(unittest.TestCase):
         status = DOCTOR.collect_status()
         self.assertTrue(status["version_parity"]["ok"])
         self.assertEqual(status["skills"]["ready"], status["skills"]["total"])
-        self.assertEqual(status["mcp"]["tool_count"], 17)
+        self.assertEqual(status["mcp"]["tool_count"], 21)
         self.assertIn("last_trading_day", status["calendar"])

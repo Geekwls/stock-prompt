@@ -16,7 +16,10 @@
         "view_evidence",
         "view_calibration",
         "retry_data",
-        "render_report"
+        "render_report",
+        "save_artifact",
+        "load_artifact",
+        "evaluate_prediction"
       ],
       "description": "UI 结构化事件标识符"
     },
@@ -33,7 +36,19 @@
         "benchmark": {"type": "string"},
         "display_mode": {"type": "string", "enum": ["summary", "full"]},
         "report_type": {"type": "string"},
-        "target_stage": {"type": "string"}
+        "target_stage": {"type": "string"},
+        "snapshot_id": {"type": "string"},
+        "prediction_snapshot_id": {"type": "string"},
+        "actual_snapshot_id": {"type": "string"},
+        "artifact_type": {"type": "string"},
+        "trading_date": {"type": "string"},
+        "subject": {"type": "string"},
+        "layer_id": {"type": "string", "pattern": "^L[1-8]$"},
+        "artifact": {"type": "object"},
+        "report_data": {"type": "object"},
+        "theme": {"type": "string", "enum": ["light", "dark"]},
+        "output_format": {"type": "string", "enum": ["png", "markdown"]},
+        "output_name": {"type": "string"}
       }
     },
     "context": {

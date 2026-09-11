@@ -1,4 +1,4 @@
-"""17 个 MCP 工具的 JSON Schema 定义（供 tools/list 声明）。"""
+"""21 个 MCP 工具的 JSON Schema 定义（供 tools/list 声明）。"""
 
 AVAILABLE_TOOLS = [
     {
@@ -322,6 +322,57 @@ AVAILABLE_TOOLS = [
                 },
             },
             "required": ["symbol"],
+        },
+    },
+    {
+        "name": "save_artifact",
+        "description": "校验并不可变保存标准研究 Artifact；同一 snapshot_id 不允许覆盖",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "artifact": {"type": "object", "description": "符合 contracts/artifacts Schema 的完整 Artifact"},
+            },
+            "required": ["artifact"],
+        },
+    },
+    {
+        "name": "load_artifact",
+        "description": "按 snapshot_id 精确读取，或按类型、交易日、标的读取最新标准 Artifact",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "snapshot_id": {"type": "string"},
+                "artifact_type": {"type": "string", "enum": ["prediction", "auction", "close_actual", "daily_score", "rotation", "stock_diagnostic", "evidence"]},
+                "trading_date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+                "subject": {"type": "string", "description": "个股代码等 subject.id"},
+            },
+        },
+    },
+    {
+        "name": "evaluate_prediction",
+        "description": "将 prediction/auction Artifact 与同交易日 close_actual Artifact 对齐，计算 Brier、方向命中、板块 Top3 命中和点位触碰",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "prediction_snapshot_id": {"type": "string"},
+                "actual_snapshot_id": {"type": "string"},
+            },
+            "required": ["prediction_snapshot_id", "actual_snapshot_id"],
+        },
+    },
+    {
+        "name": "render_report",
+        "description": "把标准 Artifact 渲染为可分享 Markdown，或把完整 report_data 渲染为金融研报风 PNG 长图",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "snapshot_id": {"type": "string"},
+                "report_type": {"type": "string", "enum": ["prediction", "daily", "rotation", "stock"]},
+                "report_data": {"type": "object", "description": "PNG 模式所需的完整报告卡数据"},
+                "theme": {"type": "string", "enum": ["light", "dark"], "default": "light"},
+                "output_format": {"type": "string", "enum": ["png", "markdown"], "default": "png"},
+                "output_name": {"type": "string", "description": "安全文件名；输出目录固定为用户报告目录"},
+            },
         },
     },
 ]

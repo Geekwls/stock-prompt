@@ -100,7 +100,7 @@
   },
   "mcp": {
     "name": "marketgraph-data",
-    "version": "1.9.0",
+    "version": "2.0.0",
     "entrypoint": "mcp/marketgraph-mcp/server.py",
     "tools": [
       "get_stock_quote",
@@ -119,7 +119,11 @@
       "get_preopen_context",
       "get_close_review_context",
       "get_rotation_context",
-      "get_stock_diagnostic_context"
+      "get_stock_diagnostic_context",
+      "save_artifact",
+      "load_artifact",
+      "evaluate_prediction",
+      "render_report"
     ]
   },
   "contracts": {

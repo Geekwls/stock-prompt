@@ -4,7 +4,7 @@
 import unittest
 import json
 from pathlib import Path
-from tools.orchestration import route_ui_event, validate_ui_event
+from tools.orchestration import execute_ui_event, route_ui_event, validate_ui_event
 from tools.orchestration.event_router import VALID_EVENTS
 
 
@@ -18,11 +18,16 @@ class UIEventRouterTest(unittest.TestCase):
 
     def test_deterministic_events_do_not_require_llm(self):
         """测试确定性事件（查看证据、渲染战报、校准视图）不需要 LLM 介入。"""
-        for event_name in ("view_evidence", "view_calibration", "retry_data", "render_report"):
+        for event_name in ("view_evidence", "view_calibration", "retry_data", "render_report", "save_artifact", "load_artifact", "evaluate_prediction"):
             event = {
                 "event": event_name,
                 "timestamp": "2026-09-11T10:00:00+08:00",
-                "payload": {"report_type": "prediction"},
+                "payload": {
+                    "report_type": "prediction",
+                    **({"artifact": {}} if event_name == "save_artifact" else {}),
+                    **({"prediction_snapshot_id": "pred-1", "actual_snapshot_id": "actual-1"}
+                       if event_name in {"view_calibration", "evaluate_prediction"} else {}),
+                },
             }
             res = route_ui_event(event)
             self.assertTrue(res["valid"])

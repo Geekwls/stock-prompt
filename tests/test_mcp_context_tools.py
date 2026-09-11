@@ -27,15 +27,19 @@ class MCPContextToolsTest(unittest.TestCase):
         SERVER._HOST_LAST_REQUEST.clear()
 
     def test_context_tools_in_available_tools(self):
-        """验证 4 个上下文工具已在 AVAILABLE_TOOLS 声明，且工具总数为 17。"""
+        """验证上下文和研究闭环工具已声明，且工具总数为 21。"""
         tools = SERVER.AVAILABLE_TOOLS
-        self.assertEqual(len(tools), 17)
+        self.assertEqual(len(tools), 21)
         tool_names = {t["name"] for t in tools}
         for expected in (
             "get_preopen_context",
             "get_close_review_context",
             "get_rotation_context",
             "get_stock_diagnostic_context",
+            "save_artifact",
+            "load_artifact",
+            "evaluate_prediction",
+            "render_report",
         ):
             self.assertIn(expected, tool_names)
 

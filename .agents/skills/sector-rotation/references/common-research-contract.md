@@ -69,7 +69,7 @@ Scored Weight = 实际参与评分的原始权重
 - 每个 Artifact 至少包含 `artifact_type`、`schema_version`、`snapshot_id`、`trading_date`、`as_of`、`data_status`、`coverage`、`evidence_ids`、`formula_version` 和 `status`；具体字段以 `contracts/artifacts/*.schema.json` 为准。
 - 可执行脚本时，先用 `artifact_store.py validate --input <file>` 校验，再用 `save` 不可变落盘；同一 `snapshot_id` 禁止覆盖。无法执行或写入失败时，报告仍完成，并标记 `artifact_status=emitted_only|failed`。
 - ATR 三态、贝叶斯后验、机会分、资金延续、SEI、RS、赔率与评估指标在计算工具可用时必须调用当前 Skill `scripts/calculate.py`，不得由模型重新发明公式。工具不可用时仍允许 Skill 独立完成报告，但必须沿用本 Skill 明示公式、披露 `calculation_status=manual_fallback`，并在输入不完整时输出 `N/A`。
-- 计算结果必须保留 `formula_version`、`input_snapshot_id`、`missing` 与 `status`；盘前机会函数（Opportunity）若 `missing` 包含 `direction`，说明核心方向概率缺失或非法，其数值仅为残缺偏置分（`status=partial`），严禁直接作为正式机会评分引用；威科夫计算只输出量价特征，结构阶段和竞争假设仍由模型结合证据裁决。
+- 计算结果必须保留 `formula_version`、`input_snapshot_id`、`missing` 与 `status`；盘前机会函数（Opportunity）若 `missing` 包含 `direction`，说明核心方向概率缺失或非法，其数值仅为残缺偏置分（`status=partial`），严禁直接作为正式机会评分引用；主线衰竭指数（SEI）支持客观推导模式（`derivation=objective`），基于缩量天数、背离比率、断板率、炸板率、成交占比与低位扩散比率自动推导；连板梯队必须经过 `calculate_ladder_health` 审计，最高板 $\ge 4$ 且断层 $\ge 2$ 时强制输出 `isolated_leader_risk` 孤桩龙头风险；存量博弈下领涨主线成交额占比 $\ge 8\%$ 且流出板块平均跌幅 $> 1.5\%$ 时由 `calculate_sector_cannibalization` 触发 `siphon_extreme` 存量吸血极化预警；盘中快照模式（09:30–15:00）须遵循 10:00 分水岭规则，早盘 10:00 前板块脉冲标为 `early_morning_impulse`，需经分时均线站稳方确认为日内强势；威科夫计算只输出量价特征，结构阶段和竞争假设仍由模型结合证据裁决。
 
 报告末尾输出可复用的交接摘要；没有对应内容时使用空数组或 `N/A`，不得补造：
 
@@ -86,7 +86,21 @@ Scored Weight = 实际参与评分的原始权重
   "primary_sectors": [],
   "watchlist": [],
   "risk_flags": [],
-  "next_triggers": [],
+  "next_triggers": [
+    {
+      "id": "TRG-01",
+      "trigger_type": "竞价强弱 | 分时均线 | 中军承接",
+      "condition": "主触发条件描述",
+      "status": "pending",
+      "condition_above": "超预期条件",
+      "action_above": "超预期执行预案",
+      "condition_as_expected": "符合预期条件",
+      "action_as_expected": "符合预期执行预案",
+      "condition_below": "低于预期条件",
+      "action_below": "低于预期执行预案",
+      "invalidation_condition": "失效条件"
+    }
+  ],
   "review_delta": {
     "previous_snapshot_id": null,
     "changed_facts": [],

@@ -77,7 +77,7 @@ Scored Weight = 实际参与评分的原始权重
 - 每个 Artifact 至少包含 `artifact_type`、`schema_version`、`snapshot_id`、`trading_date`、`as_of`、`data_status`、`coverage`、`evidence_ids`、`formula_version` 和 `status`；具体字段以 `contracts/artifacts/*.schema.json` 为准。
 - 可执行脚本时，先用 `artifact_store.py validate --input <file>` 校验，再用 `save` 不可变落盘；同一 `snapshot_id` 禁止覆盖。无法执行或写入失败时，报告仍完成，并标记 `artifact_status=emitted_only|failed`。
 - ATR 三态、贝叶斯后验、机会分、资金延续、SEI、RS、赔率与评估指标在计算工具可用时必须调用当前 Skill `scripts/calculate.py`，不得由模型重新发明公式。工具不可用时仍允许 Skill 独立完成报告，但必须沿用本 Skill 明示公式、披露 `calculation_status=manual_fallback`，并在输入不完整时输出 `N/A`。
-- 计算结果必须保留 `formula_version`、`input_snapshot_id`、`missing` 与 `status`；盘前机会函数（Opportunity）若 `missing` 包含 `direction`，说明核心方向概率缺失或非法，其数值仅为残缺偏置分（`status=partial`），严禁直接作为正式机会评分引用；威科夫计算只输出量价特征，结构阶段和竞争假设仍由模型结合证据裁决。
+- 计算结果必须保留 `formula_version`、`input_snapshot_id`、`missing` 与 `status`；盘前机会函数（Opportunity）若 `missing` 包含 `direction`，说明核心方向概率缺失或非法，其数值仅为残缺偏置分（`status=partial`），严禁直接作为正式机会评分引用；主线衰竭指数（SEI）支持客观推导模式（`derivation=objective`），基于缩量天数、背离比率、断板率、炸板率、成交占比与低位扩散比率自动推导；连板梯队必须经过 `calculate_ladder_health` 审计，最高板 $\ge 4$ 且断层 $\ge 2$ 时强制输出 `isolated_leader_risk` 孤桩龙头风险；存量博弈下领涨主线成交额占比 $\ge 8\%$ 且流出板块平均跌幅 $> 1.5\%$ 时由 `calculate_sector_cannibalization` 触发 `siphon_extreme` 存量吸血极化预警；盘中快照模式（09:30–15:00）须遵循 10:00 分水岭规则，早盘 10:00 前板块脉冲标为 `early_morning_impulse`，需经分时均线站稳方确认为日内强势；威科夫计算只输出量价特征，结构阶段和竞争假设仍由模型结合证据裁决。
 
 报告末尾输出可复用的交接摘要；没有对应内容时使用空数组或 `N/A`，不得补造：
 
@@ -94,7 +94,21 @@ Scored Weight = 实际参与评分的原始权重
   "primary_sectors": [],
   "watchlist": [],
   "risk_flags": [],
-  "next_triggers": [],
+  "next_triggers": [
+    {
+      "id": "TRG-01",
+      "trigger_type": "竞价强弱 | 分时均线 | 中军承接",
+      "condition": "主触发条件描述",
+      "status": "pending",
+      "condition_above": "超预期条件",
+      "action_above": "超预期执行预案",
+      "condition_as_expected": "符合预期条件",
+      "action_as_expected": "符合预期执行预案",
+      "condition_below": "低于预期条件",
+      "action_below": "低于预期执行预案",
+      "invalidation_condition": "失效条件"
+    }
+  ],
   "review_delta": {
     "previous_snapshot_id": null,
     "changed_facts": [],
@@ -185,6 +199,17 @@ $$\text{情绪总分} = \text{涨跌比得分}(25) + \text{昨涨停溢价}(20) 
 - **加速期**：龙头连续缩量一字/缩量涨停，板块拥挤度触及高位警戒；
 - **衰竭期**：高位筹码松动，龙头跳水放巨量滞涨或跌停，资金向低位溢出。
 
+### 4. 连板梯队健康度与孤桩断层预警
+- 调用 `calculate_ladder_health` 评估连板梯队完整度与断层风险。
+- **断层预警**：最高板 $\ge 4$ 且中间连续断层 $\ge 2$ 层时，输出 `isolated_leader_risk: 孤桩龙头，警惕断板A杀与板块踩踏`，并在首屏摘要卡与风险旗标中强制披露。
+
+### 5. 存量吸血极化与板块流出勾稽
+- 存量市场（两市成交额比值 $\le 1.05$）且领涨主线成交额占比 $\ge 8\%$ 时，调用 `calculate_sector_cannibalization` 识别虹吸现象，输出 `siphon_index` 与失血受损板块 `affected_sectors`。
+
+### 6. 日内分时微结构（盘中快照模式专项）
+- **10:00 分水岭法则**：10:00 前的板块异动标记为 `early_morning_impulse`，需经受分时均价线（分时黄线）回踩不破且换手承接充分的考验，方可定调为日内真强势，杜绝假高潮诱多；
+- **尾盘博弈法则**：14:00 后的异动识别尾盘抢筹（次日高开预期）或尾盘跳水（隔夜避险抢跑）。
+
 ---
 
 ## 四、报告输出模版与术语白话化
@@ -214,7 +239,21 @@ $$\text{情绪总分} = \text{涨跌比得分}(25) + \text{昨涨停溢价}(20) 
   "primary_sectors": ["领涨主线1", "领涨主线2"],
   "watchlist": ["龙头标的代码", "中军标的代码"],
   "risk_flags": ["背离预警", "高位风险"],
-  "next_triggers": [{"id": "TRG-0925-01", "condition": "次日中军平开震荡且龙头无大额负反馈", "status": "pending"}]
+  "next_triggers": [
+    {
+      "id": "TRG-0925-01",
+      "trigger_type": "竞价强弱 | 分时均线 | 中军承接",
+      "condition": "次日中军平开震荡且龙头无大额负反馈",
+      "status": "pending",
+      "condition_above": "龙头高开>=3%且竞价量比>=1.5",
+      "action_above": "前排弱转强确认买点",
+      "condition_as_expected": "平开震荡，中军均线上方承接良好",
+      "action_as_expected": "持股观望，分时均线不破不减",
+      "condition_below": "龙头低开<=-3%或大单砸盘",
+      "action_below": "放弃追高，无条件执行防守减仓",
+      "invalidation_condition": "开盘5分钟放巨量跌停"
+    }
+  ]
 }
 ```
 
@@ -222,7 +261,10 @@ $$\text{情绪总分} = \text{涨跌比得分}(25) + \text{昨涨停溢价}(20) 
 专业术语首次出现必须附一句话白话解释：
 - **炸板率**（涨停后又被卖单砸开的比例，越高说明高位接力越脆弱）；
 - **容量中军**（板块里成交体量大、负责托住板块趋势的机构大票）；
-- **连板晋级率**（昨天涨停的票今天继续涨停的概率，反映短线赚钱效应持续性）。
+- **连板晋级率**（昨天涨停的票今天继续涨停的概率，反映短线赚钱效应持续性）；
+- **连板梯队断层**（连板股之间层级出现空缺，如 6 板与 2 板之间断层，反映龙头孤立无援，极易引发断板踩踏）；
+- **存量吸血极化**（单一板块成交过大且无全市场增量，导致资金从其他板块大量抽血下跌）；
+- **10:00 分水岭**（早盘前半小时容易冲高出货，需等待回踩分时均线确认承接力）。
 
 ---
 

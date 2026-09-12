@@ -46,10 +46,16 @@ description: >-
 
 ### 2. 主线衰竭与背离指数 (Sector Exhaustion Index, SEI: 0–100 分)
 $$\text{SEI} = \text{量价背离度}(0\text{-}40) + \text{接力与炸板风险}(0\text{-}30) + \text{资金溢出与高低切}(0\text{-}30)$$
-- **SEI 判定基准**：0–30分【动能充沛】；31–60分【良性分歧】；61–80分【动能严重衰竭/高低切确立】；81–100分【全面退潮踩踏】。调用 `calculate_sector_exhaustion` 计算。
+- **双模计算**：
+  1. 直接打分模式：传入 `price_volume_divergence`、`relay_risk` 与 `capital_spillover` 分值；
+  2. 客观推导模式（推荐）：传入创新高缩量天数、顶背离个股占比、断板率、炸板率、板块成交占比与低位扩散个股占比，由 `calculate_sector_exhaustion(auto_derive=True, ...)` 自动客观推导。
+- **SEI 判定基准**：0–30分【动能充沛】；31–60分【良性分歧】；61–80分【动能严重衰竭/高低切确立】；81–100分【全面退潮踩踏】。
 
 ### 3. 5 日情绪温度加权分
 - 每日日度情绪分结合连板晋级率、红盘率与炸板率计算后，按 5 日权重调用 `calculate_5d_sentiment_score` 归一化输出。
+
+### 4. 存量吸血极化度与资金迁移勾稽
+- 调用 `calculate_sector_cannibalization` 结合领涨主线成交额占比与流出板块平均跌幅，量化 `siphon_index` 与流向领涨板块的资金沉淀比例，识别 `balanced_growth`、`siphon_extreme` 或 `diffuse_rotation`。
 
 ---
 
@@ -78,7 +84,21 @@ $$\text{SEI} = \text{量价背离度}(0\text{-}40) + \text{接力与炸板风险
   "primary_sectors": ["候选主线1", "老主线"],
   "watchlist": ["候选先锋代码", "中军代码"],
   "risk_flags": ["主线SEI分值与评级"],
-  "next_triggers": [{"id": "TRG-0925-01", "condition": "次日候选板块竞价金额比>=1.5且开盘溢价", "status": "pending"}]
+  "next_triggers": [
+    {
+      "id": "TRG-0925-01",
+      "trigger_type": "竞价强弱 | 分时均线 | 中军承接",
+      "condition": "次日候选板块竞价金额比>=1.5且开盘溢价",
+      "status": "pending",
+      "condition_above": "开盘集合竞价金额比>=2.0且高开>=2%",
+      "action_above": "确认新主线启动，第一波低吸切入",
+      "condition_as_expected": "金额比在1.2-1.8之间，小幅高开或平开",
+      "action_as_expected": "等待开盘后10:00前分时承接回踩确认",
+      "condition_below": "竞价平开或低开，且竞价金额比<1.0",
+      "action_below": "判定为虚假脉冲，放弃买入计划",
+      "invalidation_condition": "板块龙头开盘直接跌停或大幅低开"
+    }
+  ]
 }
 ```
 
@@ -86,7 +106,9 @@ $$\text{SEI} = \text{量价背离度}(0\text{-}40) + \text{接力与炸板风险
 专业术语首次出现必须附一句话白话解释：
 - **主线衰竭指数 SEI**（衡量强势题材动能是否被透支、有无高位放量出货风险）；
 - **高低切换**（资金从涨幅巨大的高位板块撤出，流向低位还没涨过的同逻辑安全方向）；
-- **跷跷板吸血效应**（一个大板块暴涨大量吸纳资金，导致其余题材失血阴跌）。
+- **跷跷板吸血效应**（一个大板块暴涨大量吸纳资金，导致其余题材失血阴跌）；
+- **存量吸血极化**（存量市场下资金高度集中单一板块，引发其余板块无承接失血）；
+- **SEI 客观推导**（由缩量天数、背离比率、断板率、炸板率等真实行情数据自动计算衰竭度，摆脱主观打分）。
 
 ---
 

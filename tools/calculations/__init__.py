@@ -21,6 +21,8 @@ from .sector import (
     calculate_capital_continuity,
     calculate_lifecycle_state,
     calculate_rotation_state,
+    calculate_ladder_health,
+    calculate_sector_cannibalization,
     calculate_sector_exhaustion,
     calculate_sector_ranking,
 )

@@ -24,7 +24,9 @@
 
 | 计算目标 | 命令行调用入口 | 核心输入参数 |
 |---|---|---|
-| **主线衰竭指数 (SEI)** | `python scripts/calculate.py calculate_sector_exhaustion --json '{"price_volume_divergence": 28, "relay_risk": 22, "capital_spillover": 14}'` | `price_volume_divergence` (0-40), `relay_risk` (0-30), `capital_spillover` (0-30) |
+| **主线衰竭指数 (SEI 直接打分)** | `python scripts/calculate.py calculate_sector_exhaustion --json '{"price_volume_divergence": 28, "relay_risk": 22, "capital_spillover": 14}'` | `price_volume_divergence` (0-40), `relay_risk` (0-30), `capital_spillover` (0-30) |
+| **主线衰竭指数 (SEI 客观自动推导)** | `python scripts/calculate.py calculate_sector_exhaustion --json '{"new_high_shrink_days": 2, "divergence_ratio": 0.5, "relay_failed_ratio": 0.4, "break_rate": 0.2, "sector_turnover_share": 12, "low_position_spillover": 0.2, "auto_derive": true}'` | 缩量天数、背离比率、断板率、炸板率、成交占比、低位扩散比率；自动推导三项子分并输出 SEI |
+| **存量吸血极化度** | `python scripts/calculate.py calculate_sector_cannibalization --json '{"leader_sector_turnover_share": 12.5, "market_amount_ratio": 0.95, "outflow_sectors_loss_rate": 2.1}'` | 领涨占比、两市成交额比、流出板块跌幅；输出 siphon_index 与受损板块 |
 | **5日情绪温度加权分** | `python scripts/calculate.py calculate_5d_sentiment_score --json '{"daily_scores": [50, 65, 55, 70, 68], "weights": [0.05, 0.05, 0.20, 0.30, 0.40]}'` | `daily_scores`, `weights` |
 | **资金延续性打分** | `python scripts/calculate.py calculate_capital_continuity --json '{"amount_ratio": 1.08, "break_rate": 0.28, "trigger_count": 5}'` | `amount_ratio`, `break_rate`, `trigger_count` |
 

@@ -104,4 +104,4 @@ $$\text{情绪总分} = \text{涨跌比得分}(25) + \text{昨涨停溢价}(20) 
 1. **台账与标准 Artifact 持久化**：盘中模式不执行以下收盘台账命令；仅在 15:00 完场数据核验后执行。
    - 记录收盘实际表现（自动双写 close_actual Artifact）：`python scripts/stock_prompt.py eval result --date YYYY-MM-DD --z-atr ...`。
    - 记录每日情绪与主线状态（自动双写 daily_score Artifact）：`python scripts/stock_prompt.py eval record-daily --date YYYY-MM-DD --sentiment-total ...`。
-2. **可选战报长图**：用户要求生成卡片时，调用 `python scripts/generate_report_card.py --type daily --json report.json`。
+2. **可选战报长图**：用户要求生成卡片时，调用 `python scripts/generate_report_card.py --type daily --json report.json`（可参考 `references/report-card-example.json` 数据结构填入）。

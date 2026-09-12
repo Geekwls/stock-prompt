@@ -143,6 +143,8 @@ def calculate_opportunity_score(probabilities=None, space_up=None, space_down=No
                                 input_snapshot_id=None, p_up=None, p_side=None, p_down=None,
                                 sentiment_score=None):
     if probabilities is None and any(value is not None for value in (p_up, p_side, p_down)):
+        if p_down is None and p_up is not None and p_side is not None and float(p_up) + float(p_side) <= 100:
+            p_down = round(100.0 - float(p_up) - float(p_side), 4)
         probabilities = {"up": p_up, "side": p_side, "down": p_down}
     if mode == "close" and probabilities is None:
         probabilities = sentiment_score

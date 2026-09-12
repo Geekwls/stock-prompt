@@ -2,7 +2,7 @@
 
 > 基于“市场环境(L1) + 板块共振(L2) + 催化剂(L3) + 相对强度(L4) + 威科夫量价(L5) + 位置偏离(L6) + 空间盈亏比(L7) + 公司质量(L8)”八层证据的个股量化诊断框架。
 
-执行分析前必须读取并遵循 [A股研究公共契约](references/common-research-contract.md) 与 [工具调用配方](references/tool-recipes.md)。
+执行分析前必须读取并遵循 [A股研究公共契约](references/common-research-contract.md)、[数据契约](references/data-contract.md)、[诊断规则](references/diagnostic-rules.md) 与 [工具调用配方](references/tool-recipes.md)。
 
 <!-- 已从 references/common-research-contract.md 展开 -->
 
@@ -236,4 +236,4 @@ Scored Weight = 实际参与评分的原始权重
 
 1. **交接摘要落盘**：调用 `python scripts/handoff_store.py write --stdin`（自动双写 stock_diagnostic Artifact）。
 2. **长期 Thesis 管理**：需长期跟踪时，调用 `python scripts/thesis_store.py write --stdin` 更新个股逻辑档案。
-3. **可选战报长图**：用户要求生成卡片时，调用 `python scripts/generate_report_card.py --type stock --json report.json`。
+3. **可选战报长图**：用户要求生成卡片时，调用 `python scripts/generate_report_card.py --type stock --json report.json`（可参考 `references/report-card-example.json` 数据结构填入）。

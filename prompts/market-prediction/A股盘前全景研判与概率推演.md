@@ -230,4 +230,4 @@ Scored Weight = 实际参与评分的原始权重
 1. **台账与标准 Artifact 持久化**：
    - 盘前推演后执行：`python scripts/stock_prompt.py eval record --market-phase preopen ...`（自动双写 prediction Artifact）。
    - 9:25 竞价后验执行：`python scripts/stock_prompt.py eval record --market-phase auction ...`（自动双写 auction Artifact）。
-2. **可选战报长图**：用户要求生成卡片时，调用 `python scripts/generate_report_card.py --type prediction --json report.json`。
+2. **可选战报长图**：用户要求生成卡片时，调用 `python scripts/generate_report_card.py --type prediction --json report.json`（可参考 `references/report-card-example.json` 数据结构填入）。

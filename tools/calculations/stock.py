@@ -103,23 +103,40 @@ def calculate_wyckoff_features(bars, lookback=20, input_snapshot_id=None):
     return result(value, "wyckoff-features-v1", input_snapshot_id, note="只提供特征，不自动确认威科夫阶段")
 
 
+
 def calculate_price_position(price=None, ma20=None, ma50=None, atr14=None, structure_level=None,
                              recent_5d_return=None, input_snapshot_id=None, close=None):
     if price is None:
         price = close
     if price is None:
         return result("N/A", "price-position-v1", input_snapshot_id, ["price"], "unavailable")
-    values = {"ma20": ma20, "ma50": ma50, "atr14": atr14, "structure_level": structure_level}
-    missing = [name for name, value in values.items() if value is None or (name == "atr14" and value <= 0)]
-    if missing:
+    missing = []
+    if ma20 is None or ma20 <= 0:
+        missing.append("ma20")
+    if ma50 is None or ma50 <= 0:
+        missing.append("ma50")
+    bias_ma20 = round((price / ma20 - 1) * 100, 6) if ma20 and ma20 > 0 else None
+    bias_ma50 = round((price / ma50 - 1) * 100, 6) if ma50 and ma50 > 0 else None
+
+    distance_structure = None
+    if structure_level is None:
+        missing.append("structure_level")
+    elif atr14 is None or atr14 <= 0:
+        missing.append("atr14")
+    else:
+        distance_structure = round((price - structure_level) / atr14, 6)
+
+    if bias_ma20 is None and bias_ma50 is None and distance_structure is None:
         return result("N/A", "price-position-v1", input_snapshot_id, missing, "unavailable")
+
     output = {
-        "bias_ma20_pct": round((price / ma20 - 1) * 100, 6),
-        "bias_ma50_pct": round((price / ma50 - 1) * 100, 6),
-        "distance_to_structure_atr": round((price - structure_level) / atr14, 6),
+        "bias_ma20_pct": bias_ma20,
+        "bias_ma50_pct": bias_ma50,
+        "distance_to_structure_atr": distance_structure,
         "return_5d_pct": recent_5d_return,
     }
-    return result(output, "price-position-v1", input_snapshot_id)
+    status = "complete" if not missing else "partial"
+    return result(output, "price-position-v1", input_snapshot_id, missing, status)
 
 
 def calculate_risk_reward(entry=None, stop=None, targets=None, friction=0.0, input_snapshot_id=None,

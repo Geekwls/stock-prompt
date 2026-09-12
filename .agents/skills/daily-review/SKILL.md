@@ -1,7 +1,7 @@
 ---
 name: daily-review
 description: >-
-  用于A股交易日收盘后的每日复盘，分析市场情绪、主线板块、产业链共振、资金延续及龙头中军状态，输出可验证的完整收盘报告。不适用于盘前预测或近5日轮动复盘。
+  用于A股交易日收盘后的每日复盘，或盘中大盘走势与板块异动快照；分析市场情绪、主线板块、产业链共振、资金延续及龙头中军状态。不适用于盘前预测或近5日轮动复盘。
 ---
 
 # A股每日主线与产业链共振复盘引擎
@@ -33,7 +33,7 @@ description: >-
 
 ## 二、数据获取与数据降级规则
 
-1. **时间锚定**：以最近已收盘交易日（T日 15:00 完场数据）为基准。
+1. **时间锚定**：收盘复盘以最近已收盘交易日（T日 15:00 完场数据）为基准。交易日 09:30–15:00 的大盘走势或板块异动请求使用“盘中快照模式”：`as_of` 标注盘中时点，`status` 为 `partial`，数据不强制向收盘评估台账落盘；待 15:00 完场后再做确定性回测。
 2. **工具调用路由**：优先调用 MCP `get_close_review_context` 一次性获取全景收盘证据（宽基K线、情绪分布、连板天梯、主力资金流向）；未注册 MCP 时平滑降级为定向搜网。具体调用配方与降级细节见 `references/tool-recipes.md`。
 3. **覆盖率审计**：计算 `Data Coverage`（可得权重 ÷ 计划权重），覆盖率低于 70% 时只输出定性观察，不输出精确评分或个性化风险暴露；缺失项按契约重新归一化。
 
@@ -75,13 +75,13 @@ $$\text{情绪总分} = \text{涨跌比得分}(25) + \text{昨涨停溢价}(20) 
 
 ```json
 {
-  "report_type": "close_review",
+  "report_type": "daily",
   "as_of": "YYYY-MM-DD 15:00",
   "source_count": 0,
   "coverage": "0%",
   "scored_weight": "0%",
   "confidence": "高 | 中 | 低 | 数据不足",
-  "regime_namespace": "daily-s0-s6",
+  "regime_namespace": "market-s0-s6",
   "market_regime": "S2",
   "primary_sectors": ["领涨主线1", "领涨主线2"],
   "watchlist": ["龙头标的代码", "中军标的代码"],
@@ -102,5 +102,5 @@ $$\text{情绪总分} = \text{涨跌比得分}(25) + \text{昨涨停溢价}(20) 
 
 1. **台账与标准 Artifact 持久化**：
    - 记录收盘实际表现（自动双写 close_actual Artifact）：`python scripts/stock_prompt.py eval result --date YYYY-MM-DD --z-atr ...`。
-   - 记录每日情绪与主线状态（自动双写 daily_score Artifact）：`python scripts/stock_prompt.py eval record-daily --date YYYY-MM-DD --sentiment-score ...`。
+   - 记录每日情绪与主线状态（自动双写 daily_score Artifact）：`python scripts/stock_prompt.py eval record-daily --date YYYY-MM-DD --sentiment-total ...`。
 2. **可选战报长图**：用户要求生成卡片时，调用 `python scripts/generate_report_card.py --type daily --json report.json`。

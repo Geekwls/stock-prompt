@@ -4,6 +4,7 @@ from .market import (
     calculate_atr_state,
     calculate_bayesian_posterior,
     calculate_market_regime,
+    calculate_market_sentiment_score,
     calculate_opportunity_score,
     calculate_price_range,
 )
@@ -16,6 +17,7 @@ from .metrics import (
     calculate_topk_metrics,
 )
 from .sector import (
+    calculate_5d_sentiment_score,
     calculate_capital_continuity,
     calculate_lifecycle_state,
     calculate_rotation_state,

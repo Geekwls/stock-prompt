@@ -213,7 +213,7 @@ Scored Weight = 实际参与评分的原始权重
   "scored_weight": "0%",
   "confidence": "高 | 中 | 低 | 数据不足",
   "regime_namespace": "stock-structure",
-  "market_regime": "S2",
+  "market_regime": "吸筹观察",
   "primary_sectors": ["所属行业"],
   "watchlist": ["股票代码"],
   "risk_flags": ["硬门槛通过", "质押风险正常"],

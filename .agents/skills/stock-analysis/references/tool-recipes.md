@@ -25,9 +25,9 @@
 | 计算目标 | 命令行调用入口 | 核心输入参数 |
 |---|---|---|
 | **双基准相对强度 (RS)** | `python scripts/calculate.py calculate_relative_strength --json '{"stock_pct_5d": 8.5, "sector_pct_5d": 2.1, "index_pct_5d": -0.8, "stock_pct_20d": 18.2, "sector_pct_20d": 6.0, "index_pct_20d": 1.2}'` | 个股、行业、指数的 5日与20日涨跌幅 |
-| **价格均线乖离与位置** | `python scripts/calculate.py calculate_price_position --json '{"close": 15.2, "ma20": 14.1, "ma50": 13.0, "atr14": 0.65}'` | `close`, `ma20`, `ma50`, `atr14` |
-| **盈亏比与空间测算** | `python scripts/calculate.py calculate_risk_reward --json '{"current_price": 15.2, "stop_loss": 14.3, "target_conservative": 17.0}'` | `current_price`, `stop_loss`, `target_conservative` |
-| **行情硬门槛自动校验** | `python scripts/calculate.py validate_stock_hard_gate --json '{"is_st": false, "days_listed": 450, "kline_count": 250, "is_suspended": false}'` | `is_st`, `days_listed`, `kline_count`, `is_suspended` |
+| **价格均线乖离与位置** | `python scripts/calculate.py calculate_price_position --json '{"price": 15.2, "ma20": 14.1, "ma50": 13.0, "atr14": 0.65, "structure_level": 14.3}'` | `price`, `ma20`, `ma50`, `atr14`, `structure_level` |
+| **盈亏比与空间测算** | `python scripts/calculate.py calculate_risk_reward --json '{"entry": 15.2, "stop": 14.3, "targets": [17.0]}'` | `entry`, `stop`, `targets` |
+| **行情硬门槛自动校验** | `python scripts/calculate.py validate_stock_hard_gate --json '{"bar_count": 250, "adjusted": true, "benchmark_complete": true, "industry_complete": true}'` | `bar_count`, `adjusted`, `benchmark_complete`, `industry_complete` |
 
 ---
 
@@ -45,7 +45,7 @@ cat << 'JSON' | python scripts/handoff_store.py write --stdin
   "scored_weight": "100%",
   "confidence": "高",
   "regime_namespace": "stock-structure",
-  "market_regime": "S2",
+  "market_regime": "吸筹观察",
   "primary_sectors": ["农业种植"],
   "watchlist": ["600371"],
   "risk_flags": ["硬门槛正常", "无违规质押"],

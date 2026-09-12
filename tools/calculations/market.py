@@ -16,6 +16,50 @@ REGIME_PRIORS = {
 }
 
 
+def calculate_market_sentiment_score(
+        breadth_score=None, limit_score=None, ladder_score=None, blown_score=None,
+        amount_score=None, shrinking_rise=False, amount_ratio=None,
+        breadth_ratio=None, volume_dev=None, up_ratio=None, input_snapshot_id=None):
+    """计算收盘五项情绪分，并对缩量上涨执行 60 分封顶。"""
+    weights = {
+        "breadth_score": 0.25,
+        "limit_score": 0.20,
+        "ladder_score": 0.20,
+        "blown_score": 0.20,
+        "amount_score": 0.15,
+    }
+    values = {
+        "breadth_score": breadth_score,
+        "limit_score": limit_score,
+        "ladder_score": ladder_score,
+        "blown_score": blown_score,
+        "amount_score": amount_score,
+    }
+    missing = [name for name, value in values.items() if value is None]
+    available = {name: value for name, value in values.items() if value is not None}
+    if not available:
+        return result("N/A", "market-sentiment-v1", input_snapshot_id, missing, "unavailable")
+    for name, value in available.items():
+        require_range(name, value)
+    scored_weight = sum(weights[name] for name in available)
+    score = sum(float(value) * weights[name] for name, value in available.items()) / scored_weight
+    shrinking_rise = bool(shrinking_rise) or (
+        amount_ratio is not None and float(amount_ratio) < 1
+        and breadth_ratio is not None and float(breadth_ratio) > 50
+    ) or (
+        volume_dev is not None and float(volume_dev) < 0
+        and up_ratio is not None and float(up_ratio) > 50
+    )
+    cap_applied = shrinking_rise and score > 60
+    if cap_applied:
+        score = 60.0
+    return result(
+        round(score, 4), "market-sentiment-v1", input_snapshot_id, missing,
+        scored_weight=round(scored_weight * 100, 2),
+        shrinking_rise=shrinking_rise, cap_applied=cap_applied,
+    )
+
+
 def calculate_atr_state(close, previous_close, atr14, input_snapshot_id=None):
     if atr14 is None or atr14 <= 0:
         return result("N/A", "atr-state-v1", input_snapshot_id, ["atr14"], "unavailable", z_atr=None)
@@ -87,7 +131,12 @@ def calculate_bayesian_posterior(prior, likelihoods, input_snapshot_id=None, str
 def calculate_opportunity_score(probabilities=None, space_up=None, space_down=None, mainline_quality=None,
                                 capital_continuity=None, crowding=None, coverage=100.0,
                                 mode="preopen", divergence_penalty=0.0, brake_flags=0,
-                                input_snapshot_id=None):
+                                input_snapshot_id=None, p_up=None, p_side=None, p_down=None,
+                                sentiment_score=None):
+    if probabilities is None and any(value is not None for value in (p_up, p_side, p_down)):
+        probabilities = {"up": p_up, "side": p_side, "down": p_down}
+    if mode == "close" and probabilities is None:
+        probabilities = sentiment_score
     require_range("coverage", coverage)
     if coverage < 70:
         return result("N/A", f"opportunity-{mode}-v1", input_snapshot_id, ["coverage>=70"], "unavailable", coverage=coverage)
@@ -105,7 +154,7 @@ def calculate_opportunity_score(probabilities=None, space_up=None, space_down=No
         return result(round(score, 4), "opportunity-close-v1", input_snapshot_id, brake_applied=brake_flags >= 4)
 
     components = {}
-    if isinstance(probabilities, dict) and all(key in probabilities for key in ("up", "side", "down")):
+    if isinstance(probabilities, dict) and all(probabilities.get(key) is not None for key in ("up", "side", "down")):
         for state in ("up", "side", "down"):
             require_range(f"probabilities.{state}", probabilities[state])
         if abs(sum(probabilities[state] for state in ("up", "side", "down")) - 100.0) > 0.05:
@@ -134,7 +183,12 @@ def calculate_opportunity_score(probabilities=None, space_up=None, space_down=No
     return result(round(100.0 * product, 4), "opportunity-preopen-v1", input_snapshot_id, missing, factors=sorted(components))
 
 
-def calculate_price_range(price, atr14, regular_multiplier=0.8, extreme_multiplier=1.5, input_snapshot_id=None):
+def calculate_price_range(price=None, atr14=None, regular_multiplier=0.8, extreme_multiplier=1.5,
+                          input_snapshot_id=None, current_price=None, **kwargs):
+    if price is None:
+        price = current_price
+    if price is None:
+        return result("N/A", "price-range-atr-v1", input_snapshot_id, ["price"], "unavailable")
     if atr14 is None or atr14 <= 0:
         return result("N/A", "price-range-atr-v1", input_snapshot_id, ["atr14"], "unavailable")
     price, atr14 = float(price), float(atr14)

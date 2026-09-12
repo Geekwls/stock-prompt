@@ -82,7 +82,7 @@ description: >-
   "coverage": "0%",
   "scored_weight": "0%",
   "confidence": "高 | 中 | 低 | 数据不足",
-  "regime_namespace": "preopen-s0-s6",
+  "regime_namespace": "market-s0-s6",
   "market_regime": "S2",
   "primary_sectors": ["候选主线1", "候选主线2"],
   "watchlist": ["先锋龙头代码", "容量中军代码"],

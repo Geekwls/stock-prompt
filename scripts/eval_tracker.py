@@ -55,6 +55,14 @@ ERROR_REASONS = {
 EVIDENCE_STANCES = ("强偏多", "偏多", "中性", "偏空", "强偏空")
 EVIDENCE_CLUSTERS = ("e1", "e2", "e3", "e4")
 MAINLINE_STATES = ("启动", "强化", "加速", "分歧", "弱化", "退潮")
+MAINLINE_STATE_ALIASES = {
+    "启动期": "启动", "强化期": "强化", "加速期": "加速", "分歧期": "分歧",
+    "衰竭期": "退潮", "弱化期": "弱化", "退潮期": "退潮",
+}
+
+
+def normalize_mainline_state(value):
+    return MAINLINE_STATE_ALIASES.get(value, value)
 
 
 def opportunity_bucket(score):
@@ -385,7 +393,7 @@ def cmd_record_daily(args):
         "capital_continuity": args.capital_continuity,
         "opportunity": args.opportunity,
     }
-    mainline_state = getattr(args, "mainline_state", None)
+    mainline_state = normalize_mainline_state(getattr(args, "mainline_state", None))
     mainline_sector = getattr(args, "mainline_sector", "") or ""
     sei = getattr(args, "sei", None)
     if mainline_state and not mainline_sector:
@@ -1006,12 +1014,13 @@ def main():
     p_drec.add_argument("--promotion", type=float, help="连板晋级率%%")
     p_drec.add_argument("--break-rate", type=float, help="全市场炸板率%%")
     p_drec.add_argument("--volume-dev", type=float, help="两市成交额较5日均量偏离%%")
-    p_drec.add_argument("--sentiment-total", type=float, help="情绪总分 0-100")
-    p_drec.add_argument("--capital-continuity", type=float, help="资金延续评分 0-100")
-    p_drec.add_argument("--opportunity", type=float, help="机会评分 0-100")
+    p_drec.add_argument("--sentiment-total", "--sentiment-score", dest="sentiment_total", type=float, help="情绪总分 0-100")
+    p_drec.add_argument("--capital-continuity", "--continuity-score", dest="capital_continuity", type=float, help="资金延续评分 0-100")
+    p_drec.add_argument("--opportunity", "--opportunity-score", dest="opportunity", type=float, help="机会评分 0-100")
     p_drec.add_argument("--top-sector", default="", help="第一主线板块名称")
     p_drec.add_argument("--mainline-sector", default="", help="当日第一主线板块（主线状态台账）")
-    p_drec.add_argument("--mainline-state", choices=MAINLINE_STATES,
+    p_drec.add_argument("--mainline-state", "--mainline-stage", dest="mainline_state",
+                        choices=MAINLINE_STATES + tuple(MAINLINE_STATE_ALIASES),
                         help="主线生命周期状态：启动/强化/加速/分歧/弱化/退潮")
     p_drec.add_argument("--sei", type=float, help="主线衰竭指数 SEI 0-100")
     p_drec.add_argument("--model-version", default=discover_model_version(), help="模型版本，默认读取当前项目版本")

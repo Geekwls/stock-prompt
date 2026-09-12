@@ -24,9 +24,9 @@
 |---|---|---|
 | **ATR 三态归类** | `python scripts/calculate.py calculate_atr_state --json '{"close": 3940, "previous_close": 3932, "atr14": 35}'` | `close`, `previous_close`, `atr14` |
 | **贝叶斯后验概率** | `python scripts/calculate.py calculate_bayesian_posterior --json '{"prior": {"up": 0.3, "side": 0.5, "down": 0.2}, "likelihoods": [{"up": 1.25, "side": 1.0, "down": 0.8}]}'` | `prior`, `likelihoods` |
-| **空间点位与盈亏比** | `python scripts/calculate.py calculate_price_range --json '{"current_price": 3940, "atr14": 35, "ma5": 3912, "ma20": 3968}'` | `current_price`, `atr14`, `ma5`, `ma20` |
-| **机会函数得分** | `python scripts/calculate.py calculate_opportunity_score --json '{"p_up": 36, "p_side": 48, "space_up": 0.70, "space_down": 0.72, "mainline_quality": 80, "capital_continuity": 75, "crowding": 35}'` | `p_up`, `p_side`, `space_up`, `space_down`, `mainline_quality`, `capital_continuity`, `crowding` |
-| **主线资金延续分** | `python scripts/calculate.py calculate_capital_continuity --json '{"turnover_ratio": 1.05, "blown_ratio": 0.34}'` | `turnover_ratio`, `blown_ratio` |
+| **空间点位与盈亏比** | `python scripts/calculate.py calculate_price_range --json '{"price": 3940, "atr14": 35}'` | `price`, `atr14` |
+| **机会函数得分** | `python scripts/calculate.py calculate_opportunity_score --json '{"probabilities": {"up": 36, "side": 48, "down": 16}, "space_up": 0.70, "space_down": 0.72, "mainline_quality": 80, "capital_continuity": 75, "crowding": 35}'` | `probabilities`, `space_up`, `space_down`, `mainline_quality`, `capital_continuity`, `crowding` |
+| **主线资金延续分** | `python scripts/calculate.py calculate_capital_continuity --json '{"amount_ratio": 1.05, "break_rate": 0.34, "trigger_count": 5}'` | `amount_ratio`, `break_rate`, `trigger_count` |
 
 ---
 

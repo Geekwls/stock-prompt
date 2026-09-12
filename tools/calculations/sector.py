@@ -3,8 +3,38 @@
 from .common import clamp, require_range, result
 
 
-def calculate_capital_continuity(amount_ratio, break_rate=None, trigger_count=None, auction_adjustment=0,
-                                 input_snapshot_id=None):
+def calculate_5d_sentiment_score(daily_scores, weights=None, input_snapshot_id=None):
+    weights = weights or [0.05, 0.05, 0.20, 0.30, 0.40]
+    if not isinstance(daily_scores, (list, tuple)) or not isinstance(weights, (list, tuple)):
+        raise ValueError("daily_scores 与 weights 必须为数组")
+    if len(daily_scores) != len(weights) or not daily_scores:
+        raise ValueError("daily_scores 与 weights 必须非空且长度一致")
+    available = []
+    missing = []
+    for index, (score, weight) in enumerate(zip(daily_scores, weights)):
+        if score is None:
+            missing.append(f"day_{index + 1}")
+            continue
+        require_range(f"daily_scores[{index}]", score)
+        if isinstance(weight, bool) or not isinstance(weight, (int, float)) or weight < 0:
+            raise ValueError("weights 必须为非负数")
+        available.append((float(score), float(weight)))
+    if len(available) < 3 or sum(weight for _, weight in available) <= 0:
+        return result("N/A", "sentiment-5d-v1", input_snapshot_id,
+                      missing + ["available_days>=3"], "unavailable",
+                      available_days=len(available))
+    weight_sum = sum(weight for _, weight in available)
+    score = sum(score * weight for score, weight in available) / weight_sum
+    return result(round(score, 4), "sentiment-5d-v1", input_snapshot_id, missing,
+                  available_days=len(available), scored_weight=round(weight_sum * 100, 2))
+
+
+def calculate_capital_continuity(amount_ratio=None, break_rate=None, trigger_count=None, auction_adjustment=0,
+                                 input_snapshot_id=None, turnover_ratio=None, blown_ratio=None):
+    if amount_ratio is None:
+        amount_ratio = turnover_ratio
+    if break_rate is None:
+        break_rate = blown_ratio
     missing = []
     volume = clamp(amount_ratio, 0, 1) * 100 if amount_ratio is not None else None
     quality = None
@@ -29,7 +59,20 @@ def calculate_capital_continuity(amount_ratio, break_rate=None, trigger_count=No
     return result(round(score, 4), "capital-continuity-v1", input_snapshot_id, missing, volume_score=volume, quality_score=quality)
 
 
-def calculate_sector_exhaustion(price_volume_divergence, relay_risk, capital_spillover, input_snapshot_id=None):
+def calculate_sector_exhaustion(price_volume_divergence=None, relay_risk=None, capital_spillover=None,
+                                input_snapshot_id=None, price_divergence=None, capital_overflow=None):
+    if price_volume_divergence is None:
+        price_volume_divergence = price_divergence
+    if capital_spillover is None:
+        capital_spillover = capital_overflow
+    values = {
+        "price_volume_divergence": price_volume_divergence,
+        "relay_risk": relay_risk,
+        "capital_spillover": capital_spillover,
+    }
+    missing = [name for name, value in values.items() if value is None]
+    if missing:
+        return result("N/A", "sector-exhaustion-v1", input_snapshot_id, missing, "unavailable")
     require_range("price_volume_divergence", price_volume_divergence, 0, 40)
     require_range("relay_risk", relay_risk, 0, 30)
     require_range("capital_spillover", capital_spillover, 0, 30)

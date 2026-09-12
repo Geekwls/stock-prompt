@@ -24,9 +24,9 @@
 
 | 计算目标 | 命令行调用入口 | 核心输入参数 |
 |---|---|---|
-| **主线衰竭指数 (SEI)** | `python scripts/calculate.py calculate_sector_exhaustion --json '{"price_divergence": 28, "relay_risk": 22, "capital_overflow": 14}'` | `price_divergence` (0-40), `relay_risk` (0-30), `capital_overflow` (0-30) |
+| **主线衰竭指数 (SEI)** | `python scripts/calculate.py calculate_sector_exhaustion --json '{"price_volume_divergence": 28, "relay_risk": 22, "capital_spillover": 14}'` | `price_volume_divergence` (0-40), `relay_risk` (0-30), `capital_spillover` (0-30) |
 | **5日情绪温度加权分** | `python scripts/calculate.py calculate_5d_sentiment_score --json '{"daily_scores": [50, 65, 55, 70, 68], "weights": [0.05, 0.05, 0.20, 0.30, 0.40]}'` | `daily_scores`, `weights` |
-| **资金延续性打分** | `python scripts/calculate.py calculate_capital_continuity --json '{"turnover_ratio": 1.08, "blown_ratio": 0.28}'` | `turnover_ratio`, `blown_ratio` |
+| **资金延续性打分** | `python scripts/calculate.py calculate_capital_continuity --json '{"amount_ratio": 1.08, "break_rate": 0.28, "trigger_count": 5}'` | `amount_ratio`, `break_rate`, `trigger_count` |
 
 ---
 

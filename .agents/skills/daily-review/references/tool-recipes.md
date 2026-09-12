@@ -32,6 +32,6 @@ python scripts/stock_prompt.py eval result --date YYYY-MM-DD --z-atr 0.22 \
 
 # 记录每日情绪与主线状态转移（自动双写 daily_score Artifact）
 python scripts/stock_prompt.py eval record-daily --date YYYY-MM-DD \
-    --sentiment-score 68 --continuity-score 75 --opportunity-score 54 \
-    --mainline-sector 农业种植 --mainline-stage 强化期
+    --sentiment-total 68 --capital-continuity 75 --opportunity 54 \
+    --mainline-sector 农业种植 --mainline-state 强化
 ```

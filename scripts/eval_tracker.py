@@ -136,8 +136,13 @@ def record_version(rec):
 
 
 def default_ledger():
-    """固定锚点台账路径；测试与自定义环境可用 STOCK_PROMPT_EVAL_DIR 重定向根目录。"""
-    base = os.environ.get("STOCK_PROMPT_EVAL_DIR") or os.path.expanduser("~")
+    """固定锚点台账路径；测试与自定义环境可用 STOCK_PROMPT_HOME / STOCK_PROMPT_EVAL_DIR 重定向根目录。"""
+    if "STOCK_PROMPT_EVAL_DIR" in os.environ:
+        return os.path.join(os.environ["STOCK_PROMPT_EVAL_DIR"], ".stock-prompt", "eval", "predictions.jsonl")
+    home = os.environ.get("STOCK_PROMPT_HOME")
+    if home:
+        return os.path.join(home, "eval", "predictions.jsonl")
+    base = os.path.expanduser("~")
     return os.path.join(base, ".stock-prompt", "eval", "predictions.jsonl")
 
 

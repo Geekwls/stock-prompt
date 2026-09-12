@@ -65,7 +65,7 @@ def cache_path():
     override = os.environ.get("STOCK_PROMPT_UPDATE_CACHE")
     if override:
         return Path(override)
-    state = Path(os.environ.get("STOCK_PROMPT_STATE_HOME", Path.home() / ".stock-prompt"))
+    state = Path(os.environ.get("STOCK_PROMPT_HOME") or os.environ.get("STOCK_PROMPT_STATE_HOME") or (Path.home() / ".stock-prompt"))
     return state / CACHE_NAME
 
 

@@ -115,7 +115,7 @@ def thesis_status(state_base):
 
 def collect_status():
     skills = {item["id"]: resolve_path(item["source"]).is_dir() for item in REGISTRY["skills"]}
-    state_base = Path(os.environ.get("STOCK_PROMPT_STATE_HOME", Path.home() / ".stock-prompt"))
+    state_base = Path(os.environ.get("STOCK_PROMPT_STATE_HOME") or os.environ.get("STOCK_PROMPT_HOME") or (Path.home() / ".stock-prompt"))
     parity_errors = collect_errors()
     return {
         "project_version": REGISTRY["project"]["version"],

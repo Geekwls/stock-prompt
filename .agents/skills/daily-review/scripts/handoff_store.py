@@ -52,7 +52,12 @@ def state_root(explicit=None):
     if explicit:
         return Path(explicit).expanduser()
     override = os.environ.get("STOCK_PROMPT_STATE_DIR")
-    return Path(override).expanduser() if override else Path.home() / ".stock-prompt" / "state"
+    if override:
+        return Path(override).expanduser()
+    home = os.environ.get("STOCK_PROMPT_HOME") or os.environ.get("STOCK_PROMPT_STATE_HOME")
+    if home:
+        return Path(home).expanduser() / "state"
+    return Path.home() / ".stock-prompt" / "state"
 
 
 def dual_write_artifact(payload):

@@ -1,6 +1,7 @@
 import argparse
 import importlib.util
 import json
+import os
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -15,6 +16,18 @@ SPEC.loader.exec_module(TRACKER)
 
 
 class EvalTrackerVersioningTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._prev = os.environ.get("STOCK_PROMPT_ARTIFACT_DIR")
+        os.environ["STOCK_PROMPT_ARTIFACT_DIR"] = str(Path(self._tmp.name) / "artifacts")
+
+    def tearDown(self):
+        if self._prev is None:
+            os.environ.pop("STOCK_PROMPT_ARTIFACT_DIR", None)
+        else:
+            os.environ["STOCK_PROMPT_ARTIFACT_DIR"] = self._prev
+        self._tmp.cleanup()
+
     def test_record_writes_version_metadata(self):
         with tempfile.TemporaryDirectory() as temporary:
             ledger = str(Path(temporary) / "predictions.jsonl")

@@ -26,6 +26,20 @@ class CalculationAliasesTest(unittest.TestCase):
         self.assertEqual(calculate_capital_continuity(turnover_ratio=1.2, blown_ratio=.25)["value"], 90.0)
         self.assertEqual(calculate_sector_exhaustion(price_divergence=30, relay_risk=20, capital_overflow=15)["value"], 65.0)
 
+    def test_opportunity_score_probability_guards(self):
+        with self.assertRaisesRegex(ValueError, "三态概率合计必须为 100"):
+            calculate_opportunity_score(p_up=60, p_side=50, space_up=10, space_down=10, mainline_quality=60, capital_continuity=60)
+        with self.assertRaisesRegex(ValueError, "三态概率合计必须为 100"):
+            calculate_opportunity_score(probabilities={"up": 60, "side": 50}, space_up=10, space_down=10, mainline_quality=60, capital_continuity=60)
+        with self.assertRaisesRegex(ValueError, "三态概率合计必须为 100"):
+            calculate_opportunity_score(p_up=60, p_side=30, p_down=20, space_up=10, space_down=10, mainline_quality=60, capital_continuity=60)
+        derived = calculate_opportunity_score(p_up=60, p_side=30, space_up=10, space_down=10, mainline_quality=60, capital_continuity=60, crowding=30)
+        self.assertEqual(derived["status"], "complete")
+        self.assertEqual(derived["missing"], [])
+        single = calculate_opportunity_score(p_up=60, space_up=10, space_down=10, mainline_quality=60, capital_continuity=60, crowding=30)
+        self.assertEqual(single["status"], "partial")
+        self.assertIn("direction", single["missing"])
+
     def test_five_day_sentiment(self):
         self.assertAlmostEqual(calculate_5d_sentiment_score([50, 65, 55, 70, 68])["value"], 64.95)
         self.assertEqual(calculate_5d_sentiment_score([None, None, 55, 70, None])["status"], "unavailable")

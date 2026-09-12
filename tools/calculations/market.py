@@ -143,8 +143,6 @@ def calculate_opportunity_score(probabilities=None, space_up=None, space_down=No
                                 input_snapshot_id=None, p_up=None, p_side=None, p_down=None,
                                 sentiment_score=None):
     if probabilities is None and any(value is not None for value in (p_up, p_side, p_down)):
-        if p_down is None and p_up is not None and p_side is not None and float(p_up) + float(p_side) <= 100:
-            p_down = round(100.0 - float(p_up) - float(p_side), 4)
         probabilities = {"up": p_up, "side": p_side, "down": p_down}
     if mode == "close" and probabilities is None:
         probabilities = sentiment_score
@@ -165,6 +163,31 @@ def calculate_opportunity_score(probabilities=None, space_up=None, space_down=No
         return result(round(score, 4), "opportunity-close-v1", input_snapshot_id, brake_applied=brake_flags >= 4)
 
     components = {}
+    if isinstance(probabilities, dict):
+        for state in ("up", "side", "down"):
+            if probabilities.get(state) is not None:
+                require_range(f"probabilities.{state}", probabilities[state])
+        up = probabilities.get("up")
+        side = probabilities.get("side")
+        down = probabilities.get("down")
+        non_null = [v for v in (up, side, down) if v is not None]
+        if len(non_null) == 2:
+            val1, val2 = float(non_null[0]), float(non_null[1])
+            if val1 + val2 > 100.05:
+                raise ValueError("三态概率合计必须为 100")
+            if down is None and up is not None and side is not None:
+                probabilities = dict(probabilities)
+                probabilities["down"] = round(100.0 - float(up) - float(side), 4)
+            elif side is None and up is not None and down is not None:
+                probabilities = dict(probabilities)
+                probabilities["side"] = round(100.0 - float(up) - float(down), 4)
+            elif up is None and side is not None and down is not None:
+                probabilities = dict(probabilities)
+                probabilities["up"] = round(100.0 - float(side) - float(down), 4)
+        elif len(non_null) == 3:
+            if abs(sum(float(v) for v in (up, side, down)) - 100.0) > 0.05:
+                raise ValueError("三态概率合计必须为 100")
+
     if isinstance(probabilities, dict) and all(probabilities.get(key) is not None for key in ("up", "side", "down")):
         for state in ("up", "side", "down"):
             require_range(f"probabilities.{state}", probabilities[state])

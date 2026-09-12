@@ -77,7 +77,7 @@ Scored Weight = 实际参与评分的原始权重
 - 每个 Artifact 至少包含 `artifact_type`、`schema_version`、`snapshot_id`、`trading_date`、`as_of`、`data_status`、`coverage`、`evidence_ids`、`formula_version` 和 `status`；具体字段以 `contracts/artifacts/*.schema.json` 为准。
 - 可执行脚本时，先用 `artifact_store.py validate --input <file>` 校验，再用 `save` 不可变落盘；同一 `snapshot_id` 禁止覆盖。无法执行或写入失败时，报告仍完成，并标记 `artifact_status=emitted_only|failed`。
 - ATR 三态、贝叶斯后验、机会分、资金延续、SEI、RS、赔率与评估指标在计算工具可用时必须调用当前 Skill `scripts/calculate.py`，不得由模型重新发明公式。工具不可用时仍允许 Skill 独立完成报告，但必须沿用本 Skill 明示公式、披露 `calculation_status=manual_fallback`，并在输入不完整时输出 `N/A`。
-- 计算结果必须保留 `formula_version`、`input_snapshot_id`、`missing` 与 `status`；威科夫计算只输出量价特征，结构阶段和竞争假设仍由模型结合证据裁决。
+- 计算结果必须保留 `formula_version`、`input_snapshot_id`、`missing` 与 `status`；盘前机会函数（Opportunity）若 `missing` 包含 `direction`，说明核心方向概率缺失或非法，其数值仅为残缺偏置分（`status=partial`），严禁直接作为正式机会评分引用；威科夫计算只输出量价特征，结构阶段和竞争假设仍由模型结合证据裁决。
 
 报告末尾输出可复用的交接摘要；没有对应内容时使用空数组或 `N/A`，不得补造：
 
@@ -108,7 +108,7 @@ Scored Weight = 实际参与评分的原始权重
 
 兼容读取历史交接时，将 `report_type=close_review` 归一化为 `daily`，并将 `regime_namespace=daily-s0-s6|preopen-s0-s6` 归一化为 `market-s0-s6`；新写入和新报告只使用标准值。
 
-- 可持久化时用 `handoff_store.py write --stdin` 校验并落盘；不可持久化时保留报告内 JSON 并输出 `handoff_status=emitted_only`。路径优先级为 `--state-dir`、`STOCK_PROMPT_STATE_DIR`、默认 `~/.stock-prompt/state`。
+- 可持久化时用 `handoff_store.py write --stdin` 校验并落盘；不可持久化时保留报告内 JSON 并输出 `handoff_status=emitted_only`。存储路径优先级为命令行参数 > 模块专属环境变量（`STOCK_PROMPT_STATE_DIR` / `STOCK_PROMPT_ARTIFACT_DIR` 等） > 统一根目录 `STOCK_PROMPT_HOME` > 默认 `~/.stock-prompt/`。
 - 预测、收盘事实和每日评分先作为报告 Artifact 生成，再由可用的 `eval_tracker.py` 后处理器写入台账。后处理失败输出 `evaluation_status=emitted_only|failed`，不影响分析完成。台账路径可由命令行参数或相关环境变量配置。
 - `daily-review` 提供收盘市场状态、主线和次日验证变量。
 - `market-prediction` 读取最近收盘交接摘要，并根据隔夜与竞价证据更新。

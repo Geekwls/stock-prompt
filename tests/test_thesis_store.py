@@ -26,6 +26,26 @@ def payload():
 
 
 class ThesisStoreTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._prev = {k: os.environ.get(k) for k in ("STOCK_PROMPT_THESIS_DIR", "STOCK_PROMPT_HOME", "STOCK_PROMPT_ARTIFACT_DIR")}
+        os.environ["STOCK_PROMPT_THESIS_DIR"] = str(Path(self._tmp.name) / "theses")
+        os.environ["STOCK_PROMPT_ARTIFACT_DIR"] = str(Path(self._tmp.name) / "artifacts")
+
+    def tearDown(self):
+        for k, v in self._prev.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        self._tmp.cleanup()
+
+    def test_state_root_with_stock_prompt_home(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            os.environ["STOCK_PROMPT_HOME"] = temporary
+            os.environ.pop("STOCK_PROMPT_THESIS_DIR", None)
+            self.assertEqual(STORE.state_root(), Path(temporary) / "theses")
+
     def test_write_update_preserves_history_and_permissions(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "theses"

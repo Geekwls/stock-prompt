@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import tempfile
 import unittest
 from datetime import date
@@ -32,6 +33,26 @@ def payload(as_of="2026-09-04 15:00 +08:00", report_type="daily"):
 
 
 class HandoffStoreTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._prev = {k: os.environ.get(k) for k in ("STOCK_PROMPT_STATE_DIR", "STOCK_PROMPT_HOME", "STOCK_PROMPT_ARTIFACT_DIR")}
+        os.environ["STOCK_PROMPT_STATE_DIR"] = str(Path(self._tmp.name) / "state")
+        os.environ["STOCK_PROMPT_ARTIFACT_DIR"] = str(Path(self._tmp.name) / "artifacts")
+
+    def tearDown(self):
+        for k, v in self._prev.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        self._tmp.cleanup()
+
+    def test_state_root_with_stock_prompt_home(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            os.environ["STOCK_PROMPT_HOME"] = temporary
+            os.environ.pop("STOCK_PROMPT_STATE_DIR", None)
+            self.assertEqual(STORE.state_root(), Path(temporary) / "state")
+
     def test_prepare_and_atomic_write(self):
         prepared = STORE.prepare_handoff(payload(), model_version="7.0.0")
         with tempfile.TemporaryDirectory() as temporary:

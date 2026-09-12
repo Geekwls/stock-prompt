@@ -23,6 +23,27 @@ def load_fresh():
     return module
 
 
+_MODULE_TMP = None
+_PREV_ARTIFACT_DIR = None
+
+
+def setUpModule():
+    global _MODULE_TMP, _PREV_ARTIFACT_DIR
+    _MODULE_TMP = tempfile.TemporaryDirectory()
+    _PREV_ARTIFACT_DIR = os.environ.get("STOCK_PROMPT_ARTIFACT_DIR")
+    os.environ["STOCK_PROMPT_ARTIFACT_DIR"] = str(Path(_MODULE_TMP.name) / "artifacts")
+
+
+def tearDownModule():
+    global _MODULE_TMP, _PREV_ARTIFACT_DIR
+    if _PREV_ARTIFACT_DIR is None:
+        os.environ.pop("STOCK_PROMPT_ARTIFACT_DIR", None)
+    else:
+        os.environ["STOCK_PROMPT_ARTIFACT_DIR"] = _PREV_ARTIFACT_DIR
+    if _MODULE_TMP:
+        _MODULE_TMP.cleanup()
+
+
 class LedgerResolutionTest(unittest.TestCase):
     def setUp(self):
         self._env = {"STOCK_PROMPT_EVAL_DIR": os.environ.get("STOCK_PROMPT_EVAL_DIR"),
@@ -52,6 +73,14 @@ class LedgerResolutionTest(unittest.TestCase):
             self.assertEqual(module.resolve_ledger("custom.json"), "custom.json")
             os.environ["STOCK_PROMPT_LEDGER"] = "env-ledger.jsonl"
             self.assertEqual(module.resolve_ledger(), "env-ledger.jsonl")
+
+    def test_default_ledger_with_stock_prompt_home(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            os.environ["STOCK_PROMPT_HOME"] = temporary
+            os.environ.pop("STOCK_PROMPT_EVAL_DIR", None)
+            module = load_fresh()
+            ledger = module.resolve_ledger()
+            self.assertEqual(Path(ledger), Path(temporary) / "eval" / "predictions.jsonl")
 
     def test_legacy_ledger_is_migrated_to_anchor(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -88,6 +88,18 @@ class ValidateOpportunityTest(unittest.TestCase):
 
 
 class EvidenceClusterTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._prev = os.environ.get("STOCK_PROMPT_ARTIFACT_DIR")
+        os.environ["STOCK_PROMPT_ARTIFACT_DIR"] = str(Path(self._tmp.name) / "artifacts")
+
+    def tearDown(self):
+        if self._prev is None:
+            os.environ.pop("STOCK_PROMPT_ARTIFACT_DIR", None)
+        else:
+            os.environ["STOCK_PROMPT_ARTIFACT_DIR"] = self._prev
+        self._tmp.cleanup()
+
     def test_record_stores_and_report_reads_stances(self):
         with tempfile.TemporaryDirectory() as temporary:
             ledger = str(Path(temporary) / "predictions.jsonl")
@@ -117,6 +129,18 @@ class EvidenceClusterTest(unittest.TestCase):
 
 
 class MainlineLedgerTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._prev = os.environ.get("STOCK_PROMPT_ARTIFACT_DIR")
+        os.environ["STOCK_PROMPT_ARTIFACT_DIR"] = str(Path(self._tmp.name) / "artifacts")
+
+    def tearDown(self):
+        if self._prev is None:
+            os.environ.pop("STOCK_PROMPT_ARTIFACT_DIR", None)
+        else:
+            os.environ["STOCK_PROMPT_ARTIFACT_DIR"] = self._prev
+        self._tmp.cleanup()
+
     def test_record_daily_mainline_and_transition_matrix(self):
         with tempfile.TemporaryDirectory() as temporary:
             daily = str(Path(temporary) / "daily_scores.jsonl")

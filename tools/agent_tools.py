@@ -149,7 +149,12 @@ def _report_root(explicit=None) -> Path:
     if explicit:
         return Path(explicit).expanduser()
     override = os.environ.get("STOCK_PROMPT_REPORT_DIR")
-    return Path(override).expanduser() if override else Path.home() / ".stock-prompt" / "reports"
+    if override:
+        return Path(override).expanduser()
+    home = os.environ.get("STOCK_PROMPT_HOME")
+    if home:
+        return Path(home).expanduser() / "reports"
+    return Path.home() / ".stock-prompt" / "reports"
 
 
 def _markdown_report(artifact: Dict[str, Any]) -> str:

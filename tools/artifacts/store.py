@@ -133,7 +133,12 @@ def state_root(explicit=None):
     if explicit:
         return Path(explicit).expanduser()
     override = os.environ.get("STOCK_PROMPT_ARTIFACT_DIR")
-    return Path(override).expanduser() if override else Path.home() / ".stock-prompt" / "artifacts"
+    if override:
+        return Path(override).expanduser()
+    home = os.environ.get("STOCK_PROMPT_HOME")
+    if home:
+        return Path(home).expanduser() / "artifacts"
+    return Path.home() / ".stock-prompt" / "artifacts"
 
 
 def save_artifact(payload, root=None):

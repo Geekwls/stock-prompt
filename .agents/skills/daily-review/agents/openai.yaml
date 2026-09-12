@@ -1,4 +1,4 @@
 interface:
   display_name: "A股每日复盘"
-  short_description: "收盘后复盘市场情绪、主线板块、产业链共振与资金延续状态"
-  default_prompt: "使用 $daily-review 完成今日A股收盘复盘。"
+  short_description: "盘中跟踪异动，收盘后复盘市场情绪、主线与资金延续"
+  default_prompt: "使用 $daily-review 根据当前时点完成A股盘中快照或收盘复盘。"

@@ -106,6 +106,8 @@ Scored Weight = 实际参与评分的原始权重
 }
 ```
 
+兼容读取历史交接时，将 `report_type=close_review` 归一化为 `daily`，并将 `regime_namespace=daily-s0-s6|preopen-s0-s6` 归一化为 `market-s0-s6`；新写入和新报告只使用标准值。
+
 - 可持久化时用 `handoff_store.py write --stdin` 校验并落盘；不可持久化时保留报告内 JSON 并输出 `handoff_status=emitted_only`。路径优先级为 `--state-dir`、`STOCK_PROMPT_STATE_DIR`、默认 `~/.stock-prompt/state`。
 - 预测、收盘事实和每日评分先作为报告 Artifact 生成，再由可用的 `eval_tracker.py` 后处理器写入台账。后处理失败输出 `evaluation_status=emitted_only|failed`，不影响分析完成。台账路径可由命令行参数或相关环境变量配置。
 - `daily-review` 提供收盘市场状态、主线和次日验证变量。
@@ -141,8 +143,6 @@ Scored Weight = 实际参与评分的原始权重
 
 - 明确提到盘前、8:30–9:15 或 9:25 竞价：选择 `market-prediction`。
 - 明确提到今日收盘、盘后或每日复盘：选择 `daily-review`。
-- 交易日 09:30–15:00 询问盘中大盘走势或板块异动：选择 `daily-review` 的盘中快照模式；`as_of` 标注盘中时点、`status=partial`，不强制写收盘评估台账，待 15:00 后再确定性回测。
-- 交易日 09:30–15:00 询问盘中大盘走势或板块异动：选择 `daily-review` 的盘中快照模式；`as_of` 标注盘中时点、`status=partial`，不强制写收盘评估台账，待 15:00 后再确定性回测。
 - 交易日 09:30–15:00 询问盘中大盘走势或板块异动：选择 `daily-review` 的盘中快照模式；`as_of` 标注盘中时点、`status=partial`，不强制写收盘评估台账，待 15:00 后再确定性回测。
 - 明确提到近5日、周末复盘、板块轮动：选择 `sector-rotation`。
 - 明确给出股票代码、名称或要求诊断个股：选择 `stock-analysis`。

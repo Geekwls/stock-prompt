@@ -11,14 +11,20 @@ def validate_stock_hard_gate(bar_count=None, adjusted=None, benchmark_complete=N
     if bar_count is None:
         bar_count = kline_count
     if shortcut_mode:
-        if is_st is True:
+        if is_st is not False:
             missing.append("not_st")
-        if days_listed is not None and days_listed < 60:
+        if days_listed is None or days_listed < 60:
             missing.append("days_listed>=60")
-        if is_suspended is True:
+        if is_suspended is not False:
             missing.append("not_suspended")
         if bar_count is None or bar_count < 120:
             missing.append("adjusted_bars>=120")
+        if adjusted is not True:
+            missing.append("adjustment_method")
+        if benchmark_complete is not True:
+            missing.append("broad_market_baseline")
+        if industry_complete is not True:
+            missing.append("industry_baseline")
         return result(not missing, "stock-hard-gate-v1", input_snapshot_id, missing,
                       "complete" if not missing else "failed")
     if bar_count is None:
@@ -41,14 +47,23 @@ def _window_return(series, window):
     return (series[-1] / series[-window - 1] - 1) * 100
 
 
-def calculate_relative_strength(stock_close=None, benchmark_close=None, industry_close=None,
-                                windows=(5, 20), input_snapshot_id=None, **returns):
+def calculate_relative_strength(
+        stock_close=None, benchmark_close=None, industry_close=None, windows=(5, 20), input_snapshot_id=None,
+        stock_pct_5d=None, sector_pct_5d=None, index_pct_5d=None,
+        stock_pct_20d=None, sector_pct_20d=None, index_pct_20d=None,
+        benchmark_pct_5d=None, industry_pct_5d=None, benchmark_pct_20d=None, industry_pct_20d=None):
+    direct_returns = {
+        "stock_pct_5d": stock_pct_5d, "sector_pct_5d": sector_pct_5d, "index_pct_5d": index_pct_5d,
+        "stock_pct_20d": stock_pct_20d, "sector_pct_20d": sector_pct_20d, "index_pct_20d": index_pct_20d,
+        "benchmark_pct_5d": benchmark_pct_5d, "industry_pct_5d": industry_pct_5d,
+        "benchmark_pct_20d": benchmark_pct_20d, "industry_pct_20d": industry_pct_20d,
+    }
     value, missing = {}, []
     for window in windows:
         direct = (
-            returns.get(f"stock_pct_{window}d"),
-            returns.get(f"index_pct_{window}d", returns.get(f"benchmark_pct_{window}d")),
-            returns.get(f"sector_pct_{window}d", returns.get(f"industry_pct_{window}d")),
+            direct_returns.get(f"stock_pct_{window}d"),
+            direct_returns.get(f"index_pct_{window}d") if direct_returns.get(f"index_pct_{window}d") is not None else direct_returns.get(f"benchmark_pct_{window}d"),
+            direct_returns.get(f"sector_pct_{window}d") if direct_returns.get(f"sector_pct_{window}d") is not None else direct_returns.get(f"industry_pct_{window}d"),
         )
         if all(item is not None for item in direct):
             window_returns = [float(item) for item in direct]

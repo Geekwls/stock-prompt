@@ -106,6 +106,8 @@ Scored Weight = 实际参与评分的原始权重
 }
 ```
 
+兼容读取历史交接时，将 `report_type=close_review` 归一化为 `daily`，并将 `regime_namespace=daily-s0-s6|preopen-s0-s6` 归一化为 `market-s0-s6`；新写入和新报告只使用标准值。
+
 - 可持久化时用 `handoff_store.py write --stdin` 校验并落盘；不可持久化时保留报告内 JSON 并输出 `handoff_status=emitted_only`。路径优先级为 `--state-dir`、`STOCK_PROMPT_STATE_DIR`、默认 `~/.stock-prompt/state`。
 - 预测、收盘事实和每日评分先作为报告 Artifact 生成，再由可用的 `eval_tracker.py` 后处理器写入台账。后处理失败输出 `evaluation_status=emitted_only|failed`，不影响分析完成。台账路径可由命令行参数或相关环境变量配置。
 - `daily-review` 提供收盘市场状态、主线和次日验证变量。
@@ -214,6 +216,7 @@ Scored Weight = 实际参与评分的原始权重
   "confidence": "高 | 中 | 低 | 数据不足",
   "regime_namespace": "stock-structure",
   "market_regime": "吸筹观察",
+  "structure_position": "吸筹观察",
   "primary_sectors": ["所属行业"],
   "watchlist": ["股票代码"],
   "risk_flags": ["硬门槛通过", "质押风险正常"],

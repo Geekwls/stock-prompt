@@ -23,12 +23,26 @@ SCHEMA_VERSION = "1.0"
 REPORT_TYPES = {"prediction", "daily", "rotation", "stock"}
 CONFIDENCE_LEVELS = {"高", "中", "低", "数据不足"}
 TRIGGER_STATUSES = {"pending", "confirmed", "failed", "expired", "unverifiable"}
+HANDOFF_STATUSES = {"complete", "partial", "degraded", "failed", "emitted_only"}
 REGIME_NAMESPACES = {"market-s0-s6", "rotation-state-1-4", "stock-structure", "not-applicable"}
+REPORT_TYPE_ALIASES = {"close_review": "daily"}
+REGIME_NAMESPACE_ALIASES = {"daily-s0-s6": "market-s0-s6", "preopen-s0-s6": "market-s0-s6"}
 REQUIRED_FIELDS = (
     "report_type", "as_of", "source_count", "coverage", "scored_weight",
     "confidence", "market_regime", "primary_sectors", "watchlist",
     "risk_flags", "next_triggers",
 )
+
+
+def normalize_handoff_aliases(payload):
+    """将历史枚举映射为当前标准值；不修改调用方对象。"""
+    if not isinstance(payload, dict):
+        return payload
+    normalized = dict(payload)
+    normalized["report_type"] = REPORT_TYPE_ALIASES.get(normalized.get("report_type"), normalized.get("report_type"))
+    if "regime_namespace" in normalized:
+        normalized["regime_namespace"] = REGIME_NAMESPACE_ALIASES.get(normalized["regime_namespace"], normalized["regime_namespace"])
+    return normalized
 PERCENT_RE = re.compile(r"^(?:N/A|[0-9]+(?:\.[0-9]+)?%)$")
 DATE_RE = re.compile(r"^([0-9]{4})-?([0-9]{2})-?([0-9]{2})")
 SUBJECT_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
@@ -77,6 +91,7 @@ def parse_trading_date(value):
 
 
 def validate_handoff(payload):
+    payload = normalize_handoff_aliases(payload)
     errors = []
     if not isinstance(payload, dict):
         return ["根节点必须是对象"]
@@ -102,6 +117,8 @@ def validate_handoff(payload):
         errors.append("market_regime 必须是字符串")
     if "regime_namespace" in payload and payload["regime_namespace"] not in REGIME_NAMESPACES:
         errors.append("regime_namespace 不在允许枚举内")
+    if "status" in payload and payload["status"] not in HANDOFF_STATUSES:
+        errors.append("status 不在允许枚举内")
     for field in ("primary_sectors", "watchlist", "risk_flags", "next_triggers"):
         if not isinstance(payload[field], list):
             errors.append(f"{field} 必须是数组")
@@ -144,7 +161,7 @@ def load_json(path=None, from_stdin=False):
 
 
 def prepare_handoff(payload, model_version=None):
-    prepared = dict(payload)
+    prepared = normalize_handoff_aliases(payload)
     trading_date = parse_trading_date(prepared.get("trading_date") or prepared.get("as_of"))
     prepared.setdefault("schema_version", SCHEMA_VERSION)
     prepared.setdefault("model_version", model_version or discover_model_version())
@@ -200,7 +217,7 @@ def valid_records(root):
     records = []
     for path in sorted(root.glob("handoff-*.json")) if root.exists() else []:
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload = normalize_handoff_aliases(json.loads(path.read_text(encoding="utf-8")))
             errors = validate_handoff(payload)
             if errors:
                 continue
@@ -377,7 +394,7 @@ def main():
         failures = 0
         for path in paths:
             try:
-                errors = validate_handoff(json.loads(path.read_text(encoding="utf-8")))
+                errors = validate_handoff(normalize_handoff_aliases(json.loads(path.read_text(encoding="utf-8"))))
             except (OSError, ValueError) as exc:
                 errors = [str(exc)]
             print(f"[{'OK' if not errors else 'FAIL'}] {path}" + (f": {'；'.join(errors)}" if errors else ""))

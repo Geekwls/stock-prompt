@@ -1,8 +1,8 @@
 {
-  "latest": "7.5.0",
+  "latest": "7.6.0",
   "channel": "stable",
-  "release_date": "2026-09-11",
+  "release_date": "2026-09-12",
   "repo": "Geekwls/stock-prompt",
-  "release_url": "https://github.com/Geekwls/stock-prompt/releases/tag/v7.5.0",
+  "release_url": "https://github.com/Geekwls/stock-prompt/releases/tag/v7.6.0",
   "changelog_url": "https://github.com/Geekwls/stock-prompt/blob/main/CHANGELOG.md"
 }

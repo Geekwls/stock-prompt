@@ -19,7 +19,7 @@ REGIME_PRIORS = {
 def calculate_market_sentiment_score(
         breadth_score=None, limit_score=None, ladder_score=None, blown_score=None,
         amount_score=None, shrinking_rise=False, amount_ratio=None,
-        breadth_ratio=None, volume_dev=None, up_ratio=None, input_snapshot_id=None):
+        breadth_ratio=None, volume_dev=None, up_ratio=None, coverage=None, input_snapshot_id=None):
     """计算收盘五项情绪分，并对缩量上涨执行 60 分封顶。"""
     weights = {
         "breadth_score": 0.25,
@@ -42,6 +42,14 @@ def calculate_market_sentiment_score(
     for name, value in available.items():
         require_range(name, value)
     scored_weight = sum(weights[name] for name in available)
+    effective_coverage = scored_weight * 100
+    if coverage is not None:
+        require_range("coverage", coverage)
+        effective_coverage = min(effective_coverage, float(coverage))
+    if effective_coverage < 70:
+        return result("N/A", "market-sentiment-v1", input_snapshot_id,
+                      missing + ["coverage>=70"], "unavailable",
+                      scored_weight=round(scored_weight * 100, 2), coverage=round(effective_coverage, 2))
     score = sum(float(value) * weights[name] for name, value in available.items()) / scored_weight
     shrinking_rise = bool(shrinking_rise) or (
         amount_ratio is not None and float(amount_ratio) < 1
@@ -56,6 +64,7 @@ def calculate_market_sentiment_score(
     return result(
         round(score, 4), "market-sentiment-v1", input_snapshot_id, missing,
         scored_weight=round(scored_weight * 100, 2),
+        coverage=round(effective_coverage, 2),
         shrinking_rise=shrinking_rise, cap_applied=cap_applied,
     )
 
@@ -184,7 +193,7 @@ def calculate_opportunity_score(probabilities=None, space_up=None, space_down=No
 
 
 def calculate_price_range(price=None, atr14=None, regular_multiplier=0.8, extreme_multiplier=1.5,
-                          input_snapshot_id=None, current_price=None, **kwargs):
+                          input_snapshot_id=None, current_price=None, ma5=None, ma20=None):
     if price is None:
         price = current_price
     if price is None:

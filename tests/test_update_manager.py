@@ -31,7 +31,8 @@ class UpdateManagerTest(unittest.TestCase):
         self.assertEqual(UPDATER.version_key("invalid"), ())
 
     def test_check_uses_daily_cache(self):
-        remote = json.dumps({"latest": "7.6.0", "channel": "stable"}).encode()
+        current_major = UPDATER.version_key(UPDATER.runtime_metadata()["version"])[0]
+        remote = json.dumps({"latest": f"{current_major + 1}.0.0", "channel": "stable"}).encode()
         with patch.object(UPDATER, "fetch_bytes", return_value=remote) as fetch:
             first = UPDATER.check_update(force=False, max_age_hours=24)
             second = UPDATER.check_update(force=False, max_age_hours=24)

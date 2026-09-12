@@ -289,6 +289,16 @@ class ReportOutputTest(unittest.TestCase):
 
 
 class DailyScoresLedgerTest(unittest.TestCase):
+    def test_load_daily_ledger_normalizes_legacy_state_suffix(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            daily = Path(temporary) / "daily_scores.jsonl"
+            daily.write_text(json.dumps({
+                "type": "daily_review", "date": "2026-09-04",
+                "mainline_sector": "半导体", "mainline_state": "强化期",
+            }, ensure_ascii=False) + "\n", encoding="utf-8")
+            records = TRACKER.load_daily_ledger(str(daily))
+            self.assertEqual(records[0]["mainline_state"], "强化")
+
     def test_record_daily_writes_metrics(self):
         with tempfile.TemporaryDirectory() as temporary:
             daily = str(Path(temporary) / "daily_scores.jsonl")

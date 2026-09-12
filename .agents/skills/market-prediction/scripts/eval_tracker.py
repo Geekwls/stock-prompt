@@ -358,6 +358,9 @@ def load_daily_ledger(path, model_version=None):
                 except json.JSONDecodeError:
                     continue
                 if rec.get("type") == "daily_review" and rec.get("date"):
+                    if rec.get("mainline_state"):
+                        rec = dict(rec)
+                        rec["mainline_state"] = normalize_mainline_state(rec["mainline_state"])
                     if model_version and record_version(rec) != model_version:
                         continue
                     daily[rec["date"]] = rec

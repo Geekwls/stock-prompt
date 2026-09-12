@@ -13,7 +13,10 @@
     "model_version": {"type": "string", "minLength": 1},
     "created_at": {"type": "string", "minLength": 10},
     "trading_date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
-    "report_type": {"enum": ["prediction", "daily", "rotation", "stock"]},
+    "report_type": {
+      "enum": ["prediction", "daily", "rotation", "stock", "close_review"],
+      "description": "close_review 为只读兼容别名，写入时规范化为 daily。"
+    },
     "as_of": {"type": "string", "minLength": 10},
     "source_count": {"type": "integer", "minimum": 0},
     "independent_source_count": {"type": "integer", "minimum": 0},
@@ -22,7 +25,11 @@
     "scored_weight": {"type": "string", "pattern": "^(N/A|[0-9]+(?:\\.[0-9]+)?%)$"},
     "confidence": {"enum": ["高", "中", "低", "数据不足"]},
     "market_regime": {"type": "string"},
-    "regime_namespace": {"enum": ["market-s0-s6", "rotation-state-1-4", "stock-structure", "not-applicable"]},
+    "regime_namespace": {
+      "enum": ["market-s0-s6", "rotation-state-1-4", "stock-structure", "not-applicable", "daily-s0-s6", "preopen-s0-s6"],
+      "description": "daily-s0-s6 与 preopen-s0-s6 为只读兼容别名，写入时规范化为 market-s0-s6。"
+    },
+    "status": {"enum": ["complete", "partial", "degraded", "failed", "emitted_only"]},
     "primary_sectors": {"type": "array"},
     "watchlist": {"type": "array"},
     "risk_flags": {"type": "array"},

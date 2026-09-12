@@ -4,11 +4,16 @@ from .common import clamp, require_range, result
 
 
 def calculate_5d_sentiment_score(daily_scores, weights=None, input_snapshot_id=None):
-    weights = weights or [0.05, 0.05, 0.20, 0.30, 0.40]
+    if weights is None:
+        weights = [0.05, 0.05, 0.20, 0.30, 0.40]
     if not isinstance(daily_scores, (list, tuple)) or not isinstance(weights, (list, tuple)):
         raise ValueError("daily_scores 与 weights 必须为数组")
-    if len(daily_scores) != len(weights) or not daily_scores:
-        raise ValueError("daily_scores 与 weights 必须非空且长度一致")
+    if len(daily_scores) != 5 or len(weights) != 5:
+        raise ValueError("daily_scores 与 weights 必须各含 5 个按 T-4 至 T 排列的元素")
+    if any(isinstance(weight, bool) or not isinstance(weight, (int, float)) or not 0 <= weight <= 1 for weight in weights):
+        raise ValueError("weights 每项必须在 0–1 之间")
+    if abs(sum(weights) - 1.0) > 1e-9:
+        raise ValueError("weights 合计必须为 1")
     available = []
     missing = []
     for index, (score, weight) in enumerate(zip(daily_scores, weights)):
@@ -16,14 +21,18 @@ def calculate_5d_sentiment_score(daily_scores, weights=None, input_snapshot_id=N
             missing.append(f"day_{index + 1}")
             continue
         require_range(f"daily_scores[{index}]", score)
-        if isinstance(weight, bool) or not isinstance(weight, (int, float)) or weight < 0:
-            raise ValueError("weights 必须为非负数")
         available.append((float(score), float(weight)))
-    if len(available) < 3 or sum(weight for _, weight in available) <= 0:
+    available_weight = sum(weight for _, weight in available)
+    if len(available) < 3 or available_weight < 0.70:
+        gates = []
+        if len(available) < 3:
+            gates.append("available_days>=3")
+        if available_weight < 0.70:
+            gates.append("scored_weight>=70%")
         return result("N/A", "sentiment-5d-v1", input_snapshot_id,
-                      missing + ["available_days>=3"], "unavailable",
-                      available_days=len(available))
-    weight_sum = sum(weight for _, weight in available)
+                      missing + gates, "unavailable",
+                      available_days=len(available), scored_weight=round(available_weight * 100, 2))
+    weight_sum = available_weight
     score = sum(score * weight for score, weight in available) / weight_sum
     return result(round(score, 4), "sentiment-5d-v1", input_snapshot_id, missing,
                   available_days=len(available), scored_weight=round(weight_sum * 100, 2))

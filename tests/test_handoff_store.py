@@ -41,6 +41,20 @@ class HandoffStoreTest(unittest.TestCase):
             self.assertEqual(saved["trading_date"], "2026-09-04")
             self.assertEqual(saved["model_version"], "7.0.0")
 
+    def test_legacy_enums_are_normalized_on_write_and_read(self):
+        legacy = payload(report_type="close_review")
+        legacy["regime_namespace"] = "daily-s0-s6"
+        prepared = STORE.prepare_handoff(legacy, model_version="7.0.0")
+        self.assertEqual(prepared["report_type"], "daily")
+        self.assertEqual(prepared["regime_namespace"], "market-s0-s6")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / "handoff-20260904-close_review.json"
+            path.write_text(json.dumps(legacy, ensure_ascii=False), encoding="utf-8")
+            latest = STORE.select_latest(root, within_trading_days=2, reference=date(2026, 9, 7))
+            self.assertEqual(latest["handoff"]["report_type"], "daily")
+            self.assertEqual(latest["handoff"]["regime_namespace"], "market-s0-s6")
+
     def test_invalid_payload_is_rejected(self):
         bad = payload()
         bad["coverage"] = "很多"
@@ -73,6 +87,12 @@ class HandoffStoreTest(unittest.TestCase):
         item["next_triggers"] = [{"id": "T1", "condition": "放量突破", "status": "pending"}]
         self.assertEqual(STORE.validate_handoff(item), [])
         item["next_triggers"][0]["status"] = "maybe"
+        self.assertTrue(any("status" in error for error in STORE.validate_handoff(item)))
+
+    def test_optional_handoff_status_is_validated(self):
+        item = payload() | {"status": "partial"}
+        self.assertEqual(STORE.validate_handoff(item), [])
+        item["status"] = "unknown"
         self.assertTrue(any("status" in error for error in STORE.validate_handoff(item)))
 
     def test_latest_skips_corrupt_and_uses_weekday_window(self):

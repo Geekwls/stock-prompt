@@ -181,12 +181,21 @@ def _diagnostic_layers(payload):
     return layers
 
 
+def _stock_structure_position(payload):
+    explicit = payload.get("structure_position")
+    if explicit:
+        return explicit
+    if payload.get("regime_namespace") == "stock-structure" and payload.get("market_regime"):
+        return payload["market_regime"]
+    return "暂不评级"
+
+
 def _summary_card(payload, subject, triggers):
     """生成 Agent 首屏消费的稳定摘要卡；不替模型补造结论。"""
     return {
         "summary": str(payload.get("summary") or "N/A"),
         "logic_health": str(payload.get("logic_health") or "暂不评级"),
-        "structure_position": str(payload.get("structure_position") or "暂不评级"),
+        "structure_position": str(_stock_structure_position(payload)),
         "confidence": str(payload.get("confidence") or "数据不足"),
         "coverage": str(payload.get("coverage") or "N/A"),
         "data_status": str(payload.get("data_status") or "partial"),
@@ -227,7 +236,7 @@ def mirror_handoff(payload):
             "subject": {"type": "stock", "id": str(subject["id"]), "name": str(subject.get("name", ""))},
             "layers": _diagnostic_layers(payload),
             "logic_health": str(payload.get("logic_health") or "暂不评级"),
-            "structure_position": str(payload.get("structure_position") or "暂不评级"),
+            "structure_position": str(_stock_structure_position(payload)),
             "confidence": str(payload.get("confidence", "数据不足")),
             "confirmation_conditions": pending,
             "invalidation_conditions": [str(flag) for flag in payload.get("risk_flags", [])],

@@ -46,6 +46,7 @@ cat << 'JSON' | python scripts/handoff_store.py write --stdin
   "confidence": "高",
   "regime_namespace": "stock-structure",
   "market_regime": "吸筹观察",
+  "structure_position": "吸筹观察",
   "primary_sectors": ["农业种植"],
   "watchlist": ["600371"],
   "risk_flags": ["硬门槛正常", "无违规质押"],

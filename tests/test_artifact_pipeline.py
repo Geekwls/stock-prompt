@@ -63,7 +63,8 @@ def stock_handoff(subject_id, name):
     return {
         "report_type": "stock", "as_of": f"2026-09-08 16:00 +08:00",
         "source_count": 6, "coverage": "82%", "scored_weight": "80%",
-        "confidence": "中", "market_regime": "N/A", "primary_sectors": ["半导体"],
+        "confidence": "中", "regime_namespace": "stock-structure",
+        "market_regime": "吸筹观察", "primary_sectors": ["半导体"],
         "watchlist": [subject_id], "risk_flags": ["质押偏高"],
         "next_triggers": [{"id": "TRG-1", "condition": "站稳MA5", "status": "pending",
                            "deadline": "2026-09-10T15:00:00+08:00"}],
@@ -121,6 +122,8 @@ class ArtifactPipelineE2E(unittest.TestCase):
         self.assertEqual(second[0]["subject"]["id"], "600519")
         self.assertEqual(set(first[0]["layers"]), {f"L{i}" for i in range(1, 9)})
         self.assertEqual(first[0]["layers"]["L1"]["status"], "unavailable")
+        self.assertEqual(first[0]["structure_position"], "吸筹观察")
+        self.assertEqual(first[0]["summary_card"]["structure_position"], "吸筹观察")
 
     def test_low_coverage_suppresses_precise_scores(self):
         """场景3：覆盖率不足时 Artifact 不得携带精确概率与机会分。"""

@@ -1,7 +1,7 @@
 # 📈 A股量化分析 AI 提示词与 Skill 体系库 (`stock-prompt`)
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Release-v7.5.0-blue.svg" alt="Release v7.5.0" />
+  <img src="https://img.shields.io/badge/Release-v7.6.0-blue.svg" alt="Release v7.6.0" />
   <img src="https://img.shields.io/badge/Tests-CI%20Passing-brightgreen.svg" alt="Tests Passing" />
   <img src="https://img.shields.io/badge/Architecture-5%20Skills%20%2B%2017%20MCP%20Tools-orange.svg" alt="Architecture" />
   <img src="https://img.shields.io/badge/Zero--Config-Built--in%20MarketGraph%20MCP-success.svg" alt="Zero-Config MCP" />
@@ -15,9 +15,9 @@
 
 ---
 
-## ⚡ v7.5.0 核心亮点
+## ⚡ v7.6.0 核心亮点
 
-> v7.5.0 新增 Git/Release ZIP 双来源更新管理器、24 小时非打扰版本提醒、安装来源追踪，以及带 SHA-256 校验的自动发布资产。
+> v7.6.0 统一五大 Skill 契约与确定性计算口径，补齐盘中快照模式、低覆盖率降级、个股硬门槛和历史 Handoff 兼容，并保留 Git/Release ZIP 安全更新闭环。
 
 1. **🔌 内置 21 个结构化数据与研究闭环 MCP 工具 (`marketgraph-mcp`)**
    - 零注册、免 Token；MCP 核心使用 Python 3.10+ 标准库实现，报告卡依赖 Pillow。

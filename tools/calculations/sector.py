@@ -48,9 +48,7 @@ def calculate_capital_continuity(amount_ratio=None, break_rate=None, trigger_cou
     volume = clamp(amount_ratio, 0, 1) * 100 if amount_ratio is not None else None
     quality = None
     if break_rate is not None and (trigger_count is None or trigger_count >= 3):
-        if 1 < break_rate <= 100:
-            break_rate = break_rate / 100.0
-        require_range("break_rate", break_rate, 0, 1)
+        break_rate = _ratio(break_rate, "break_rate")
         quality = (1 - break_rate) * 100
     else:
         missing.append("sector_break_rate_sample>=3")
@@ -69,11 +67,38 @@ def calculate_capital_continuity(amount_ratio=None, break_rate=None, trigger_cou
 
 
 def _ratio(value, name):
-    """接受 0–1 比例或 0–100 百分比，统一为 0–1。"""
+    """接受 0–1 比例或带 % 字符串，统一归一化为 0–1。
+
+    支持：
+    - 字符串百分比（如 '1%', '12%', '0.5%', '100%'），无歧义解析；
+    - 0–1 标准小数比例（如 0.01 表示 1%，0.4 表示 40%）；
+    - > 1 的百分比数值（如 1.5 表示 1.5%，12 表示 12%，100 表示 100%）。
+    若恰好传入未带单位的裸数值 1 或 1.0，存在 1% 与 100% 的 100 倍严重比例歧义，
+    系统拒绝隐式猜测并抛出 ValueError，强制显式指定。
+    """
     if value is None:
         return None
+    if isinstance(value, str):
+        val_str = value.strip()
+        if val_str.endswith("%"):
+            try:
+                num = float(val_str[:-1].strip())
+            except ValueError as exc:
+                raise ValueError(f"{name} 必须为合法的百分比或数值") from exc
+            require_range(name, num, 0, 100)
+            return num / 100.0
+        try:
+            value = float(val_str)
+        except ValueError as exc:
+            raise ValueError(f"{name} 必须为合法的百分比或数值") from exc
     require_range(name, value, 0, 100)
-    return float(value) / 100.0 if value > 1 else float(value)
+    num = float(value)
+    if num == 1.0:
+        raise ValueError(
+            f"{name} 传入了数值 1（或 1.0），存在 1% 与 100% 的 100 倍比例歧义。"
+            f"若表示 1% 请传 0.01 或 '1%'；若表示 100% 请传 100 或 '100%'"
+        )
+    return num / 100.0 if num > 1.0 else num
 
 
 def calculate_sector_exhaustion(price_volume_divergence=None, relay_risk=None, capital_spillover=None,

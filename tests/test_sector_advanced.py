@@ -1,6 +1,7 @@
 import unittest
 
 from tools.calculations.sector import (
+    calculate_capital_continuity,
     calculate_ladder_health,
     calculate_sector_cannibalization,
     calculate_sector_exhaustion,
@@ -67,6 +68,61 @@ class SectorAdvancedCalculationTest(unittest.TestCase):
         self.assertEqual(objective["value"], direct["value"])
         self.assertEqual(objective["derivation"], "objective")
         self.assertEqual(calculate_sector_exhaustion(auto_derive=True)["value"], "N/A")
+
+    def test_ratio_disambiguation(self):
+        # 1. 裸数值 1 或 1.0 必须熔断报错，防止 100 倍歧义
+        with self.assertRaises(ValueError) as ctx:
+            calculate_sector_exhaustion(divergence_ratio=1, auto_derive=True)
+        self.assertIn("存在 1% 与 100% 的 100 倍比例歧义", str(ctx.exception))
+
+        with self.assertRaises(ValueError) as ctx:
+            calculate_sector_exhaustion(divergence_ratio=1.0, auto_derive=True)
+        self.assertIn("存在 1% 与 100% 的 100 倍比例歧义", str(ctx.exception))
+
+        with self.assertRaises(ValueError) as ctx:
+            calculate_capital_continuity(amount_ratio=1.0, break_rate=1)
+        self.assertIn("存在 1% 与 100% 的 100 倍比例歧义", str(ctx.exception))
+
+        # 2. 百分比字符串无歧义解析：'1%' 严格等同于 0.01
+        res_pct_str = calculate_sector_exhaustion(
+            new_high_shrink_days=0,
+            relay_risk=0,
+            capital_spillover=0,
+            divergence_ratio="1%",
+            auto_derive=True,
+        )
+        res_decimal = calculate_sector_exhaustion(
+            new_high_shrink_days=0,
+            relay_risk=0,
+            capital_spillover=0,
+            divergence_ratio=0.01,
+            auto_derive=True,
+        )
+        self.assertEqual(res_pct_str["value"], res_decimal["value"])
+        self.assertAlmostEqual(res_pct_str["value"], 0.2, places=3)
+
+        # 3. 100% 的明确形式：100 与 '100%' 均解析为 1.0
+        res_100_num = calculate_sector_exhaustion(
+            new_high_shrink_days=0,
+            relay_risk=0,
+            capital_spillover=0,
+            divergence_ratio=100,
+            auto_derive=True,
+        )
+        res_100_str = calculate_sector_exhaustion(
+            new_high_shrink_days=0,
+            relay_risk=0,
+            capital_spillover=0,
+            divergence_ratio="100%",
+            auto_derive=True,
+        )
+        self.assertEqual(res_100_num["value"], 20.0)
+        self.assertEqual(res_100_str["value"], 20.0)
+
+        # 4. calculate_capital_continuity 支持带 % 字符串
+        cap_pct = calculate_capital_continuity(amount_ratio=1.0, break_rate="25%")
+        cap_dec = calculate_capital_continuity(amount_ratio=1.0, break_rate=0.25)
+        self.assertEqual(cap_pct["value"], cap_dec["value"])
 
 
 if __name__ == "__main__":

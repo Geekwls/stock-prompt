@@ -70,6 +70,14 @@
       },
       "additionalProperties": true
     },
+    "tactical_gate": {
+      "type": "object",
+      "properties": {
+        "blocked": {"type": "boolean"}, "entry_allowed": {"type": "boolean"},
+        "position_cap": {"type": ["number", "null"]}, "blocked_reason": {"type": ["string", "null"]}
+      },
+      "additionalProperties": true
+    },
     "summary_card": {
       "type": "object",
       "description": "Agent 首屏展示摘要；只承载已确认字段和可继续操作，不替代完整证据链。",

@@ -13,6 +13,7 @@ from .market import (
     calculate_price_range,
     calculate_sentiment_opportunity_score,
     filter_intraday_impulse,
+    reconcile_watchlist_triggers,
 )
 from .metrics import (
     calculate_calibration_curve,

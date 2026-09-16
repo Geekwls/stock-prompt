@@ -6,6 +6,7 @@
 - 分析推理事件（start_preopen / update_auction / run_close_review / run_rotation / diagnose_stock）定向分发至专业 Skill。
 """
 
+from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
 from tools.agent_tools import (
@@ -47,6 +48,47 @@ EVENT_TO_SKILL = {
     "run_rotation": "sector-rotation",
     "diagnose_stock": "stock-analysis",
 }
+
+INTRADAY_PHASES = ("preopen", "auction", "intraday", "close_review", "rotation")
+
+
+def resolve_intraday_phase(timestamp: str) -> Dict[str, Any]:
+    """将带时区或本地时间解析为可审计的五阶段节点，不负责自动执行交易。"""
+    try:
+        value = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return {"phase": "unknown", "status": "unavailable", "reason": "invalid_timestamp"}
+    minutes = value.hour * 60 + value.minute
+    if 8 * 60 + 30 <= minutes < 9 * 60 + 25:
+        phase = "preopen"
+    elif 9 * 60 + 25 <= minutes < 9 * 60 + 30:
+        phase = "auction"
+    elif 9 * 60 + 30 <= minutes < 15 * 60:
+        phase = "intraday"
+    elif 15 * 60 <= minutes < 18 * 60:
+        phase = "close_review"
+    elif minutes >= 18 * 60 or minutes < 8 * 60 + 30:
+        phase = "rotation"
+    else:
+        phase = "unknown"
+    return {"phase": phase, "status": "complete", "timestamp": value.isoformat()}
+
+
+def validate_phase_event(event: Dict[str, Any]) -> List[str]:
+    """校验事件是否与其时间节点一致；未知/跨日研究事件允许宿主显式覆盖。"""
+    errors = validate_ui_event(event)
+    if errors:
+        return errors
+    phase = resolve_intraday_phase(event["timestamp"])
+    if phase["status"] != "complete":
+        return ["timestamp 无法解析为有效交易阶段"]
+    expected = {
+        "start_preopen": "preopen", "update_auction": "auction",
+        "run_close_review": "close_review", "run_rotation": "rotation",
+    }.get(event["event"])
+    if expected and phase["phase"] != expected and not (event.get("context") or {}).get("allow_phase_override"):
+        return [f"事件 {event['event']} 不在允许阶段 {expected}，当前为 {phase['phase']}"]
+    return []
 
 
 def validate_ui_event(event: Dict[str, Any]) -> List[str]:

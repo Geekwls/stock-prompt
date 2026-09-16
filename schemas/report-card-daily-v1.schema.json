@@ -7,7 +7,11 @@
     "title": {"type": "string"}, "date": {"type": "string"}, "regime": {"type": "string"},
     "sentiment_score": {"type": "number"}, "retention": {"type": "number"}, "opportunity_score": {"type": "number"},
     "sentiment_breakdown": {"type": "array"}, "sectors_daily": {"type": "array"}, "stocks_pool": {"type": "array"},
-    "scenarios": {"type": "array"}, "risk_line": {"type": "string"}
+    "scenarios": {"type": "array"}, "risk_line": {"type": "string"},
+    "next_day_watchlist": {
+      "type": "array",
+      "items": {"type": "object", "required": ["symbol", "entry_trigger", "defense_line", "invalidation_condition"]}
+    }
   },
   "additionalProperties": true
 }

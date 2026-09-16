@@ -42,6 +42,28 @@
     "status": {"enum": ["complete", "partial", "degraded", "failed", "emitted_only"]},
     "primary_sectors": {"type": "array"},
     "watchlist": {"type": "array"},
+    "next_day_watchlist": {
+      "type": "array",
+      "description": "收盘复盘生成的次日候选池；兼容旧 Handoff 时可缺省。",
+      "items": {
+        "type": "object",
+        "required": ["symbol", "role", "entry_trigger", "defense_line", "invalidation_condition"],
+        "properties": {
+          "symbol": {"type": "string"}, "role": {"type": "string"},
+          "entry_trigger": {"type": "string"}, "defense_line": {"type": "string"},
+          "invalidation_condition": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "tactical_gate": {
+      "type": "object",
+      "properties": {
+        "blocked": {"type": "boolean"}, "entry_allowed": {"type": "boolean"},
+        "position_cap": {"type": ["number", "null"]}, "blocked_reason": {"type": ["string", "null"]}
+      },
+      "additionalProperties": true
+    },
     "risk_flags": {"type": "array"},
     "next_triggers": {
       "type": "array",

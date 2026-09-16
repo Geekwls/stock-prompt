@@ -6,6 +6,7 @@
 
 - 分别调用 `get_index_kline`、`get_market_breadth`、`get_market_sentiment`、`get_sector_fund_flow`，必要时用 `get_stock_quote` 核验异动标的。
 - 所有结论以当前 `as_of` 为截止点，`status=partial`；调用 `filter_intraday_impulse` 识别 10:00 分水岭真伪脉冲；不写 `result` / `record-daily` 收盘台账。
+- 收盘作战池写入 `next_day_watchlist`；次日由 `reconcile_watchlist_triggers` 按触发器和观测证据核销，不将自然语言建议当作已执行状态。
 
 ### 收盘事实（15:00 后）
 

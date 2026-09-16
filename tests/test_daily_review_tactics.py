@@ -3,6 +3,7 @@ import unittest
 from tools.calculations.market import (
     calculate_market_divergence_index,
     filter_intraday_impulse,
+    reconcile_watchlist_triggers,
 )
 from tools.calculations.stock import validate_stock_hard_gate
 
@@ -63,6 +64,18 @@ class DailyReviewTacticsTest(unittest.TestCase):
         self.assertTrue(res["value"]["is_valid"])
         self.assertIn("日内真实强势主线", res["value"]["tactical_guidance"])
 
+    def test_filter_intraday_impulse_before_ten_is_not_confirmed(self):
+        res = filter_intraday_impulse(current_time="09:35", sector_gain=3.0)
+        self.assertEqual(res["value"]["gate_status"], "pre_threshold")
+        self.assertFalse(res["value"]["is_valid"])
+
+    def test_watchlist_reconciliation_is_deterministic(self):
+        res = reconcile_watchlist_triggers(
+            [{"id": "A"}, {"id": "B"}, {"id": "C"}],
+            {"A": {"met": True}, "B": {"broken": True}, "C": {"met": False}},
+        )
+        self.assertEqual(res["value"]["counts"], {"confirmed": 1, "abandoned": 1, "stop_loss": 1, "unverifiable": 0})
+
     def test_validate_stock_hard_gate_tactical_retreat_block(self):
         # 所属板块处于退潮期，触发战术硬拦截
         res = validate_stock_hard_gate(
@@ -75,6 +88,8 @@ class DailyReviewTacticsTest(unittest.TestCase):
         self.assertEqual(res["status"], "failed")
         self.assertFalse(res["value"])
         self.assertTrue(res["tactical_gate_blocked"])
+        self.assertFalse(res["entry_allowed"])
+        self.assertEqual(res["position_cap"], 0)
         self.assertIn("sector_not_in_retreat", res["missing"])
         self.assertIn("退潮衰竭期", res["tactical_warning"])
 

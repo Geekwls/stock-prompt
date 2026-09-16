@@ -341,9 +341,16 @@ def validate_stock_hard_gate(bar_count=None, adjusted=None, benchmark_complete=N
         missing.append("not_acceleration_follower")
 
     passed = mode["value"]["mode"] == "full" and not missing and not tactical_blocked
+    entry_allowed = bool(passed and not tactical_blocked)
+    blocked_reason = (
+        "sector_retreat" if sec_state in ("退潮期", "retreat", "state_4", "ice_point") else
+        "acceleration_follower" if tactical_blocked else None
+    )
     return result(passed, "stock-hard-gate-v2", input_snapshot_id, missing,
                   "complete" if passed else "failed", data_mode=mode["value"]["mode"],
-                  tactical_gate_blocked=tactical_blocked, tactical_warning=tactical_warning)
+                  tactical_gate_blocked=tactical_blocked, tactical_warning=tactical_warning,
+                  entry_allowed=entry_allowed, position_cap=0 if tactical_blocked else None,
+                  blocked_reason=blocked_reason)
 
 
 def _window_return(series, window):

@@ -505,12 +505,24 @@ def filter_intraday_impulse(
     - 日内确认强势 (confirmed_intraday_strength): 回踩分时均线站稳不破，且放量持续换手。
     """
     try:
+        time_text = str(current_time).strip()
+        hour, minute = (int(part) for part in time_text.split(":", 1))
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise ValueError
         gain = float(sector_gain) if sector_gain is not None else 0.0
         above_vwap = bool(is_above_vwap)
         increasing = bool(turnover_increasing)
         broken = bool(pullback_broken)
     except (TypeError, ValueError):
-        return result("N/A", "intraday-impulse-v1", input_snapshot_id, ["numeric_parameters"], "unavailable")
+        return result("N/A", "intraday-impulse-v1", input_snapshot_id, ["current_time_HH:MM"], "unavailable")
+
+    minutes = hour * 60 + minute
+    if minutes < 10 * 60 and not (broken or not above_vwap):
+        return result({
+            "impulse_quality": "pre_10am_observation", "is_valid": False,
+            "gate_status": "pre_threshold", "current_time": time_text,
+            "tactical_guidance": "尚未到 10:00 分水岭，仅记录脉冲，不确认强弱或允许追价。",
+        }, "intraday-impulse-v2", input_snapshot_id, ["10:00_threshold"], "partial")
 
     if broken or not above_vwap:
         quality = "early_morning_trap"
@@ -532,6 +544,7 @@ def filter_intraday_impulse(
     value = {
         "impulse_quality": quality,
         "is_valid": is_valid,
+        "gate_status": "post_threshold",
         "current_time": str(current_time),
         "tactical_guidance": guidance,
         "metrics": {
@@ -541,6 +554,31 @@ def filter_intraday_impulse(
             "pullback_broken": broken,
         },
     }
-    return result(value, "intraday-impulse-v1", input_snapshot_id)
+    return result(value, "intraday-impulse-v2", input_snapshot_id)
 
 
+def reconcile_watchlist_triggers(triggers, observations, input_snapshot_id=None):
+    """按昨日触发器与 9:25 观测值逐条核销，禁止模型凭空推断状态。"""
+    if not isinstance(triggers, list) or not isinstance(observations, dict):
+        return result("N/A", "watchlist-reconcile-v1", input_snapshot_id, ["triggers_and_observations"], "unavailable")
+    rows = []
+    for index, trigger in enumerate(triggers):
+        if not isinstance(trigger, dict) or not trigger.get("id"):
+            rows.append({"id": f"unknown-{index + 1}", "status": "unverifiable", "reason": "invalid_trigger"})
+            continue
+        trigger_id = str(trigger["id"])
+        observed = observations.get(trigger_id)
+        row = {"id": trigger_id, "status": "unverifiable", "observed_value": None, "evidence_id": None}
+        if isinstance(observed, dict):
+            row["observed_value"] = observed.get("observed_value")
+            row["evidence_id"] = observed.get("evidence_id")
+            if observed.get("broken") is True or observed.get("status") in {"stop_loss", "破位止损"}:
+                row["status"] = "stop_loss"
+            elif observed.get("met") is True or observed.get("status") in {"confirmed", "达标执行"}:
+                row["status"] = "confirmed"
+            elif observed.get("met") is False or observed.get("status") in {"failed", "失效放弃"}:
+                row["status"] = "abandoned"
+        rows.append(row)
+    counts = {status: sum(row["status"] == status for row in rows) for status in ("confirmed", "abandoned", "stop_loss", "unverifiable")}
+    return result({"items": rows, "counts": counts, "decision": "actionable" if rows and counts["unverifiable"] == 0 else "conditional"},
+                  "watchlist-reconcile-v1", input_snapshot_id, [] if rows else ["non_empty_triggers"], "complete" if rows else "unavailable")

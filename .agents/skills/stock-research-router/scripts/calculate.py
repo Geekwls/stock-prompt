@@ -20,6 +20,7 @@ EXPLICIT_OPERATIONS = {
     "assess_wyckoff_applicability",
     "classify_stock_archetype",
     "filter_intraday_impulse",
+    "reconcile_watchlist_triggers",
     "resolve_rotation_timeframe",
     "resolve_stock_data_mode",
     "select_stock_model",

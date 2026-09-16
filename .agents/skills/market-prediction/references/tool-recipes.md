@@ -16,6 +16,7 @@
 - 调用 MCP `get_stock_timeline(symbol)` 获取第一主线龙头及容量中军的 `morning_call_auction` 字段；
 - 计算龙头与指数的开盘涨跌幅、竞价量比与核按钮家数；
 - 调用 `calculate_auction_traffic_light` 秒级匹配红绿灯信号与作战剧本，输出 5 行极简决策卡。
+- 读取昨日 `next_triggers` 后调用 `reconcile_watchlist_triggers`，用 9:25 观测值逐条输出 `confirmed / abandoned / stop_loss / unverifiable`，不可凭文本猜测核销结果。
 
 ---
 

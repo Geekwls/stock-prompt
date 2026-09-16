@@ -4,7 +4,7 @@
 import unittest
 import json
 from pathlib import Path
-from tools.orchestration import execute_ui_event, route_ui_event, validate_ui_event
+from tools.orchestration import execute_ui_event, resolve_intraday_phase, route_ui_event, validate_phase_event, validate_ui_event
 from tools.orchestration.event_router import VALID_EVENTS
 
 
@@ -66,6 +66,11 @@ class UIEventRouterTest(unittest.TestCase):
         res2 = route_ui_event({"event": "diagnose_stock", "timestamp": "2026-09-11", "payload": {}})
         self.assertFalse(res2["valid"])
         self.assertTrue(any("symbol" in err for err in res2["errors"]))
+
+    def test_intraday_phase_and_event_time_guard(self):
+        self.assertEqual(resolve_intraday_phase("2026-09-16T09:26:00+08:00")["phase"], "auction")
+        errors = validate_phase_event({"event": "update_auction", "timestamp": "2026-09-16T10:00:00+08:00", "payload": {}})
+        self.assertTrue(errors)
 
 
 if __name__ == "__main__":

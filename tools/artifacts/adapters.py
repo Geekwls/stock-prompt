@@ -253,6 +253,8 @@ def mirror_handoff(payload):
             "wyckoff_applicability": str(payload.get("wyckoff_applicability") or "partial"),
             "scenario_plans": list(payload.get("scenario_plans") or []),
             "microstructure": dict(payload.get("microstructure") or {}),
+            "tactical_gate": dict(payload.get("tactical_gate") or {}),
+            "next_day_watchlist": list(payload.get("next_day_watchlist") or []),
             "confirmation_conditions": pending,
             "invalidation_conditions": [str(flag) for flag in payload.get("risk_flags", [])],
             "summary_card": _summary_card(payload, subject, pending),

@@ -1,7 +1,7 @@
 # 📈 A股量化分析 AI 提示词与 Skill 体系库 (`stock-prompt`)
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Release-v7.7.0-blue.svg" alt="Release v7.7.0" />
+  <img src="https://img.shields.io/badge/Release-v8.0.0-blue.svg" alt="Release v8.0.0" />
   <img src="https://img.shields.io/badge/Tests-CI%20Passing-brightgreen.svg" alt="Tests Passing" />
   <img src="https://img.shields.io/badge/Architecture-5%20Skills%20%2B%2021%20MCP%20Tools-orange.svg" alt="Architecture" />
   <img src="https://img.shields.io/badge/Zero--Config-Built--in%20MarketGraph%20MCP-success.svg" alt="Zero-Config MCP" />
@@ -15,9 +15,9 @@
 
 ---
 
-## ⚡ v7.7.0 核心亮点
+## ⚡ v8.0.0 核心亮点
 
-> v7.7.0 将个股分析从“一套八层模型套所有股票”升级为先分型、再选模型、最后按用户持仓状态输出可证伪的条件方案。
+> v8.0.0 将项目从“研究报告生成器”推进为“日内实战闭环”：盘前谋定、竞价核销、盘中拦截、收盘复盘和跨周轮动共享可审计状态。
 
 1. **🔌 内置 21 个结构化数据与研究闭环 MCP 工具 (`marketgraph-mcp`)**
    - 零注册、免 Token；MCP 核心使用 Python 3.10+ 标准库实现，报告卡依赖 Pillow。
@@ -37,6 +37,10 @@
    - 盘前推演概率与收盘实际表现自动落盘至 `~/.stock-prompt/eval/predictions.jsonl`，滚动统计方向命中率、Brier Score、主线 Top3 命中率与空间有效率；情绪五项分自动落盘并支持历史滚动 P 分位自校准。
 7. **🛡️ 防漂移测试套件**
    - 自动化测试覆盖行情门槛、数据降级审计、Artifact/Schema 合规性、状态隔离、确定性计算、版本防漂移与断路器容灾机制；实时数量以 CI 为准，避免文档计数漂移。
+8. **⚔️ 日内实战闭环与战术门禁**
+   - `daily-review` 审计二八撕裂、假阳线和 10:00 分水岭脉冲，并输出次日候选作战池。
+   - `market-prediction` 可按昨日触发器逐条核销 9:25 竞价结果；`reconcile_watchlist_triggers` 只接受可追溯观测证据。
+   - `stock-analysis` 对退潮期和加速期后排跟风返回 `entry_allowed=false`、`position_cap=0`；Router 校验事件是否处于对应交易时段。
 
 ---
 

@@ -65,6 +65,14 @@ def stock_handoff(subject_id, name):
         "source_count": 6, "coverage": "82%", "scored_weight": "80%",
         "confidence": "中", "regime_namespace": "stock-structure",
         "market_regime": "吸筹观察", "primary_sectors": ["半导体"],
+        "summary": "机构趋势仍在，等待结构确认", "logic_health": "稳定",
+        "archetype": "institutional_trend", "archetype_confidence": "高",
+        "archetype_alternatives": [], "archetype_evidence": ["capacity_anchor_role"],
+        "model_selected": "institutional-trend-v1", "data_mode": "full",
+        "position_context": {"position_state": "watching", "holding_horizon": "trend", "risk_tolerance": "medium"},
+        "wyckoff_applicability": "applicable",
+        "scenario_plans": [{"trigger": "站稳确认位", "evidence_meaning": "趋势延续", "conditional_action": "观察回踩承接"}],
+        "microstructure": {"chip_structure": {"status": "unavailable"}, "seat_evidence": {"status": "partial"}},
         "watchlist": [subject_id], "risk_flags": ["质押偏高"],
         "next_triggers": [{"id": "TRG-1", "condition": "站稳MA5", "status": "pending",
                            "deadline": "2026-09-10T15:00:00+08:00"}],
@@ -124,6 +132,10 @@ class ArtifactPipelineE2E(unittest.TestCase):
         self.assertEqual(first[0]["layers"]["L1"]["status"], "unavailable")
         self.assertEqual(first[0]["structure_position"], "吸筹观察")
         self.assertEqual(first[0]["summary_card"]["structure_position"], "吸筹观察")
+        self.assertEqual(first[0]["archetype"]["primary"], "institutional_trend")
+        self.assertEqual(first[0]["summary_card"]["model_selected"], "institutional-trend-v1")
+        self.assertEqual(first[0]["position_context"]["position_state"], "watching")
+        self.assertEqual(first[0]["scenario_plans"][0]["trigger"], "站稳确认位")
 
     def test_low_coverage_suppresses_precise_scores(self):
         """场景3：覆盖率不足时 Artifact 不得携带精确概率与机会分。"""

@@ -13,7 +13,7 @@
     "subject": {"type": "object", "required": ["type", "id", "name"]},
     "layers": {
       "type": "object",
-      "description": "L1–L8 八层证据。每层记录事实、推断、反证、来源、时点与覆盖率；缺失时使用 N/A/unavailable，不得补造结论。",
+      "description": "L1–L8 证据目录。每层记录事实、推断、反证、来源、时点与覆盖率；由所选分型模型决定模块解释和权重，缺失时使用 N/A/unavailable。",
       "properties": {
         "L1": {"$ref": "#/$defs/layer"}, "L2": {"$ref": "#/$defs/layer"},
         "L3": {"$ref": "#/$defs/layer"}, "L4": {"$ref": "#/$defs/layer"},
@@ -24,6 +24,52 @@
     }, "logic_health": {"type": "string"},
     "structure_position": {"type": "string"}, "confidence": {"type": "string"},
     "confirmation_conditions": {"type": "array"}, "invalidation_conditions": {"type": "array"},
+    "archetype": {
+      "type": "object",
+      "required": ["primary", "confidence", "alternatives", "evidence"],
+      "properties": {
+        "primary": {"enum": ["sentiment_leader", "institutional_trend", "dividend_value", "event_special", "N/A"]},
+        "confidence": {"enum": ["高", "中", "低", "数据不足"]},
+        "alternatives": {"type": "array"},
+        "evidence": {"type": "array"}
+      },
+      "additionalProperties": true
+    },
+    "model_selected": {"type": "string"},
+    "data_mode": {"enum": ["full", "reduced", "event"]},
+    "position_context": {
+      "type": "object",
+      "properties": {
+        "position_state": {"enum": ["watching", "holding_profit", "holding_loss", "unknown"]},
+        "cost_price": {"type": ["number", "null"]},
+        "position_ratio": {"type": ["number", "null"]},
+        "holding_horizon": {"enum": ["intraday", "short_swing", "trend", null]},
+        "risk_tolerance": {"enum": ["low", "medium", "high", null]}
+      },
+      "additionalProperties": true
+    },
+    "wyckoff_applicability": {"enum": ["applicable", "partial", "not_applicable"]},
+    "scenario_plans": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["trigger", "evidence_meaning", "conditional_action"],
+        "properties": {
+          "trigger": {"type": "string"},
+          "evidence_meaning": {"type": "string"},
+          "conditional_action": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "microstructure": {
+      "type": "object",
+      "properties": {
+        "chip_structure": {},
+        "seat_evidence": {}
+      },
+      "additionalProperties": true
+    },
     "summary_card": {
       "type": "object",
       "description": "Agent 首屏展示摘要；只承载已确认字段和可继续操作，不替代完整证据链。",
@@ -31,6 +77,8 @@
       "properties": {
         "summary": {"type": "string"}, "logic_health": {"type": "string"},
         "structure_position": {"type": "string"}, "confidence": {"type": "string"},
+        "archetype": {"type": "string"}, "model_selected": {"type": "string"},
+        "data_mode": {"enum": ["full", "reduced", "event"]},
         "coverage": {"type": "string"}, "data_status": {"type": "string"},
         "subject": {"type": "object"}, "risk_flags": {"type": "array"},
         "next_actions": {"type": "array"}, "next_triggers": {"type": "array"}

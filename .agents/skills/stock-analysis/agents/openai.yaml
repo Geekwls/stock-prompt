@@ -1,4 +1,4 @@
 interface:
   display_name: "A股个股诊断"
-  short_description: "以八层证据完整诊断个股逻辑、量价结构、公司质量与风险空间"
-  default_prompt: "使用 $stock-analysis 完整诊断这只A股标的。"
+  short_description: "先识别股票生态和数据模式，再生成可证伪的个股诊断与持仓场景"
+  default_prompt: "使用 $stock-analysis 分型诊断这只A股标的，并按我的持仓状态给出条件方案。"

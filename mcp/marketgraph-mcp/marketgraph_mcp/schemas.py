@@ -17,7 +17,7 @@ AVAILABLE_TOOLS = [
     },
     {
         "name": "get_stock_kline",
-        "description": "获取 A 股个股 750 日 (3年) 连续前复权日K线、全套均线矩阵 (MA20/50/120/250/500)、3年宏观时空坐标、内存无损周线共振与三层威科夫时空模型（宏观牛熊阶段+周线大势+微观60日交易区间与量价触发）（支持代码或中文名，完全满足行情硬门槛）",
+        "description": "获取 A 股个股 750 日 (3年) 连续前复权日K线、全套均线矩阵 (MA20/50/120/250/500)、3年宏观时空坐标、内存无损周线共振与三层威科夫时空模型（宏观牛熊阶段+周线大势+微观60日交易区间与量价触发），供 full/reduced/event 数据模式裁定",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -307,7 +307,7 @@ AVAILABLE_TOOLS = [
     },
     {
         "name": "get_stock_diagnostic_context",
-        "description": "获取 A 股个股八层诊断标准化上下文证据包：聚合实时行情估值、120/750日复权K线结构与威科夫特征、基本面财务与商誉质押质量、分时与竞价承接力、龙虎榜席位以及对标基准相对强度 RS 支撑数据",
+        "description": "获取 A 股个股分型诊断证据包：聚合行情、财务、分时、席位与双基准，并预计算 full/reduced/event 数据模式、生态模型、威科夫适用性和持仓场景",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -319,6 +319,18 @@ AVAILABLE_TOOLS = [
                     "type": "string",
                     "description": "对标基准指数代码，默认 'CSIALL'（中证全指）或 'SHCI'（上证指数）",
                     "default": "CSIALL",
+                },
+                "sector": {
+                    "type": "string",
+                    "description": "所属行业板块名称或 BK 代码；提供后用于行业基准和 full 模式判定",
+                },
+                "archetype_hints": {
+                    "type": "object",
+                    "description": "可核验的分型线索，例如 limit_up_streak、sector_role、days_listed、event_driven、dividend_yield；不得填写猜测",
+                },
+                "position_context": {
+                    "type": "object",
+                    "description": "用户状态：position_state、cost_price、position_ratio、holding_horizon、risk_tolerance",
                 },
             },
             "required": ["symbol"],

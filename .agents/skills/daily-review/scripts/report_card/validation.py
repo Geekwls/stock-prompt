@@ -7,7 +7,7 @@ REQUIRED_FIELDS = {
     "prediction": {"title", "date", "regime", "sentiment_score", "position", "opportunity_score", "top_sector", "evidence", "indices_full", "sectors_full", "chain_lines", "seat_lines", "trade_lines", "watchlist_full", "eval_summary", "risk_warning"},
     "daily": {"title", "date", "regime", "sentiment_score", "top_sector", "retention", "opportunity_score", "sentiment_breakdown", "regime_notes", "sectors_daily", "resonance_cards", "chain_lines", "stocks_pool", "opportunity_line", "strategy_line", "scenarios", "risk_line"},
     "rotation": {"title", "date_range", "summary", "volume_5d", "fund_flow", "institution_lines", "hotmoney_lines", "sei_breakdown", "chain_lines", "sentiment_5d", "zhongjun_anchor", "longtou_anchor", "watchlist"},
-    "stock": {"stock_name", "stock_code", "date", "price", "coverage", "market_wind", "sector_role", "catalyst_level", "rs_rank", "wyckoff_phase", "position_status", "risk_reward_ratio", "logic_health", "structure_timing", "company_risk_status", "company_details", "hard_gate_status", "technical_layers_scored", "composite_score_status", "coverage_breakdown", "audit_status", "pledge_details", "dilution_status", "confidence_level", "research_status", "core_logic", "market_details", "sector_details", "catalyst_details", "rs_details", "wyckoff_details", "position_table", "rr_details", "evidence_map", "fusion_scores", "trade_strategy", "exit_plan", "falsification_rule", "next_review_triggers", "evidence_freshness"},
+    "stock": {"stock_name", "stock_code", "date", "price", "coverage", "archetype", "model_selected", "data_mode", "position_state", "wyckoff_applicability", "market_wind", "sector_role", "catalyst_level", "rs_rank", "wyckoff_phase", "position_status", "risk_reward_ratio", "logic_health", "structure_timing", "company_risk_status", "company_details", "hard_gate_status", "technical_layers_scored", "composite_score_status", "coverage_breakdown", "audit_status", "pledge_details", "dilution_status", "confidence_level", "research_status", "core_logic", "market_details", "sector_details", "catalyst_details", "rs_details", "wyckoff_details", "position_table", "rr_details", "evidence_map", "fusion_scores", "trade_strategy", "exit_plan", "falsification_rule", "next_review_triggers", "evidence_freshness"},
 }
 
 
@@ -23,19 +23,34 @@ def validate_report_data(report_type, data):
         return
     if data["company_risk_status"] not in {"低", "中", "高", "极高", "N/A"}:
         raise ValueError("company_risk_status 只能为: 低 / 中 / 高 / 极高 / N/A")
-    if data["hard_gate_status"] not in {"通过", "失败"}:
-        raise ValueError("hard_gate_status 只能为: 通过 / 失败")
+    if data["hard_gate_status"] not in {"通过", "降级", "事件模式", "失败"}:
+        raise ValueError("hard_gate_status 只能为: 通过 / 降级 / 事件模式 / 失败")
+    if data["archetype"] not in {"sentiment_leader", "institutional_trend", "dividend_value", "event_special", "N/A"}:
+        raise ValueError("archetype 不符合允许枚举")
+    if data["data_mode"] not in {"full", "reduced", "event"}:
+        raise ValueError("data_mode 只能为: full / reduced / event")
+    if data["position_state"] not in {"watching", "holding_profit", "holding_loss", "unknown"}:
+        raise ValueError("position_state 不符合允许枚举")
+    if data["wyckoff_applicability"] not in {"applicable", "partial", "not_applicable"}:
+        raise ValueError("wyckoff_applicability 不符合允许枚举")
     if data["composite_score_status"] not in {"calculated", "not_applicable"}:
         raise ValueError("composite_score_status 只能为: calculated / not_applicable")
     if not isinstance(data["technical_layers_scored"], bool):
         raise ValueError("technical_layers_scored 必须为布尔值")
+    expected_gate = {"full": "通过", "reduced": "降级", "event": "事件模式"}[data["data_mode"]]
+    if data["hard_gate_status"] != "失败" and data["hard_gate_status"] != expected_gate:
+        raise ValueError(f"data_mode={data['data_mode']} 时 hard_gate_status 应为 {expected_gate}")
     if data["hard_gate_status"] == "失败":
         if data["technical_layers_scored"]:
-            raise ValueError("行情硬门槛失败时 technical_layers_scored 必须为 false")
+            raise ValueError("数据不可用时 technical_layers_scored 必须为 false")
         if data["composite_score_status"] != "not_applicable":
-            raise ValueError("行情硬门槛失败时不得计算综合评分")
+            raise ValueError("数据不可用时不得计算综合评分")
         if data["structure_timing"] != "暂不评级" or data["confidence_level"] != "数据不足":
-            raise ValueError("行情硬门槛失败时结构必须暂不评级且证据置信度必须为数据不足")
+            raise ValueError("数据不可用时结构必须暂不评级且证据置信度必须为数据不足")
+    if data["data_mode"] in {"reduced", "event"} and data["composite_score_status"] != "not_applicable":
+        raise ValueError("reduced/event 模式不得计算综合评分")
+    if data["wyckoff_applicability"] == "not_applicable" and "Confirmed" in str(data.get("wyckoff_phase", "")):
+        raise ValueError("威科夫不适用时不得输出 Confirmed 阶段")
     coverage = str(data["coverage"])
     if not re.fullmatch(r"(?:100|\d{1,2})(?:\.\d+)?%", coverage):
         raise ValueError("coverage 必须为可复算的精确百分比，例如 75% 或 72.5%")

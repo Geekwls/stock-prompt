@@ -16,7 +16,13 @@ def valid_stock_data():
     data.update({
         "coverage": "75%",
         "company_risk_status": "高",
-        "hard_gate_status": "失败",
+        "archetype": "event_special",
+        "model_selected": "event-special-v1",
+        "data_mode": "event",
+        "position_state": "unknown",
+        "wyckoff_applicability": "not_applicable",
+        "wyckoff_phase": "N/A",
+        "hard_gate_status": "事件模式",
         "technical_layers_scored": False,
         "composite_score_status": "not_applicable",
         "structure_timing": "暂不评级",
@@ -34,14 +40,21 @@ def valid_stock_data():
 
 
 class StockReportValidationTest(unittest.TestCase):
-    def test_failed_market_gate_blocks_technical_scoring(self):
+    def test_event_mode_blocks_composite_scoring(self):
         data = valid_stock_data()
         data["technical_layers_scored"] = True
-        with self.assertRaisesRegex(ValueError, "technical_layers_scored"):
+        data["composite_score_status"] = "calculated"
+        with self.assertRaisesRegex(ValueError, "reduced/event"):
             REPORT.validate_report_data("stock", data)
 
-    def test_failed_market_gate_accepts_not_applicable_score(self):
+    def test_event_mode_accepts_not_applicable_score(self):
         REPORT.validate_report_data("stock", valid_stock_data())
+
+    def test_data_mode_and_gate_label_must_match(self):
+        data = valid_stock_data()
+        data["hard_gate_status"] = "降级"
+        with self.assertRaisesRegex(ValueError, "hard_gate_status"):
+            REPORT.validate_report_data("stock", data)
 
     def test_approximate_coverage_is_rejected(self):
         data = valid_stock_data()

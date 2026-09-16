@@ -14,7 +14,20 @@ for parent in script_path.parents:
 import tools.calculations as calculations
 
 
-OPERATIONS = {name: getattr(calculations, name) for name in dir(calculations) if name.startswith("calculate_") or name == "validate_stock_hard_gate"}
+EXPLICIT_OPERATIONS = {
+    "assess_wyckoff_applicability",
+    "classify_stock_archetype",
+    "resolve_stock_data_mode",
+    "select_stock_model",
+    "summarize_seat_evidence",
+    "validate_position_context",
+    "validate_stock_hard_gate",
+}
+OPERATIONS = {
+    name: getattr(calculations, name)
+    for name in dir(calculations)
+    if name.startswith("calculate_") or name in EXPLICIT_OPERATIONS
+}
 
 
 def main(argv=None):

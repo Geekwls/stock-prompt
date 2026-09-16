@@ -2,10 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Stock analysis report card input v1",
   "type": "object",
-  "required": ["stock_name", "stock_code", "date", "price", "coverage", "market_wind", "sector_role", "catalyst_level", "rs_rank", "wyckoff_phase", "position_status", "risk_reward_ratio", "logic_health", "structure_timing", "company_risk_status", "company_details", "hard_gate_status", "technical_layers_scored", "composite_score_status", "coverage_breakdown", "audit_status", "pledge_details", "dilution_status", "confidence_level", "research_status", "core_logic", "market_details", "sector_details", "catalyst_details", "rs_details", "wyckoff_details", "position_table", "rr_details", "evidence_map", "fusion_scores", "trade_strategy", "exit_plan", "falsification_rule", "next_review_triggers", "evidence_freshness"],
+  "required": ["stock_name", "stock_code", "date", "price", "coverage", "archetype", "model_selected", "data_mode", "position_state", "wyckoff_applicability", "market_wind", "sector_role", "catalyst_level", "rs_rank", "wyckoff_phase", "position_status", "risk_reward_ratio", "logic_health", "structure_timing", "company_risk_status", "company_details", "hard_gate_status", "technical_layers_scored", "composite_score_status", "coverage_breakdown", "audit_status", "pledge_details", "dilution_status", "confidence_level", "research_status", "core_logic", "market_details", "sector_details", "catalyst_details", "rs_details", "wyckoff_details", "position_table", "rr_details", "evidence_map", "fusion_scores", "trade_strategy", "exit_plan", "falsification_rule", "next_review_triggers", "evidence_freshness"],
   "properties": {
     "stock_name": {"type": "string"}, "stock_code": {"type": "string"}, "date": {"type": "string"},
-    "coverage": {"type": "string"}, "hard_gate_status": {"enum": ["通过", "失败"]},
+    "coverage": {"type": "string"},
+    "archetype": {"enum": ["sentiment_leader", "institutional_trend", "dividend_value", "event_special", "N/A"]},
+    "model_selected": {"type": "string"}, "data_mode": {"enum": ["full", "reduced", "event"]},
+    "position_state": {"enum": ["watching", "holding_profit", "holding_loss", "unknown"]},
+    "wyckoff_applicability": {"enum": ["applicable", "partial", "not_applicable"]},
+    "hard_gate_status": {"enum": ["通过", "降级", "事件模式", "失败"]},
     "technical_layers_scored": {"type": "boolean"}, "composite_score_status": {"enum": ["calculated", "not_applicable"]},
     "coverage_breakdown": {"type": "array"}, "next_review_triggers": {"type": "array", "minItems": 2}
   },

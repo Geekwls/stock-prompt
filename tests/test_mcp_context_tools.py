@@ -135,21 +135,30 @@ class MCPContextToolsTest(unittest.TestCase):
 
     def test_stock_diagnostic_context_aggregation(self):
         """测试 get_stock_diagnostic_context 聚合个股八层诊断所需数据。"""
-        mock_quote = {"source": "P3_Tencent_Public_Gateway", "data_status": "ok", "date": "2026-09-10", "current_price": 50.0}
-        mock_kline = {"source": "P3_Tencent_Qfq_Kline", "data_status": "ok", "latest_kline_date": "2026-09-10", "valid_bars": 750}
-        mock_quality = {"source": "P3_Eastmoney_Financial_Quality", "data_status": "ok", "roe": 18.5}
+        mock_quote = {"source": "P3_Tencent_Public_Gateway", "data_status": "ok", "date": "2026-09-10", "current_price": 50.0, "turnover_rate": "4.2%"}
+        mock_kline = {"source": "P3_Tencent_Qfq_Kline", "data_status": "ok", "latest_kline_date": "2026-09-10", "valid_bars": 750, "adjustment": "qfq", "weekly_timeframe": {"weekly_alignment": "bullish"}}
+        mock_quality = {"source": "P3_Eastmoney_Financial_Quality", "data_status": "ok", "roe": 18.5, "financial_summary": {"net_profit_yoy": "18.0%"}}
         mock_timeline = {"source": "P3_Eastmoney_Intraday_Timeline", "data_status": "ok"}
         mock_lhb = {"source": "P3_Eastmoney_Longhubang", "data_status": "ok"}
-        mock_idx = {"source": "P3_Tencent_Index_KLine", "data_status": "ok"}
+        mock_idx = {"source": "P3_Tencent_Index_KLine", "data_status": "ok", "indices": {"CSIALL": {"close": 5200.0}}}
+        mock_sector = {"source": "P3_Eastmoney_Sector_KLine", "data_status": "ok", "sector": "通信设备"}
 
         with patch.object(SERVER, "fetch_stock_quote", return_value=mock_quote), \
              patch.object(SERVER, "fetch_stock_kline", return_value=mock_kline), \
              patch.object(SERVER, "fetch_company_quality", return_value=mock_quality), \
              patch.object(SERVER, "fetch_stock_timeline", return_value=mock_timeline), \
              patch.object(SERVER, "fetch_longhubang_detail", return_value=mock_lhb), \
-             patch.object(SERVER, "fetch_index_kline", return_value=mock_idx):
+             patch.object(SERVER, "fetch_index_kline", return_value=mock_idx), \
+             patch.object(SERVER, "fetch_sector_kline", return_value=mock_sector):
 
-            res = SERVER.fetch_stock_diagnostic_context("300308", benchmark="CSIALL")
+            res = SERVER.fetch_stock_diagnostic_context(
+                "300308", benchmark="CSIALL", sector="通信设备",
+                archetype_hints={"sector_role": "capacity_anchor", "range_days": 60},
+                position_context={
+                    "position_state": "watching", "holding_horizon": "trend",
+                    "risk_tolerance": "medium", "ignored_extension": "safe",
+                },
+            )
             self.assertEqual(res["data_status"], "ok")
             self.assertEqual(res["source"], "P3_MarketGraph_Stock_Diagnostic")
             self.assertIn("quote", res["payload"])
@@ -158,6 +167,11 @@ class MCPContextToolsTest(unittest.TestCase):
             self.assertIn("timeline", res["payload"])
             self.assertIn("longhubang", res["payload"])
             self.assertIn("benchmark_kline", res["payload"])
+            self.assertEqual(res["payload"]["data_mode"]["value"]["mode"], "full")
+            self.assertEqual(res["payload"]["archetype"]["value"]["archetype"], "institutional_trend")
+            self.assertEqual(res["payload"]["selected_model"]["value"]["model_selected"], "institutional-trend-v1")
+            self.assertEqual(res["payload"]["position_context"]["value"]["scenario"], "entry_observation_plan")
+            self.assertEqual(res["payload"]["wyckoff_applicability"]["value"]["applicability"], "applicable")
 
     def test_partial_failure_graceful_degradation(self):
         """测试子数据源部分故障时标记 partial 且记录 missing 列表。"""
@@ -204,6 +218,11 @@ class MCPContextToolsTest(unittest.TestCase):
         # 4. preopen_context indices 非数组
         err4 = SERVER._dispatch_tool_call("get_preopen_context", {"indices": "SHCI"})
         self.assertIn("indices", err4.get("error", ""))
+
+        err5 = SERVER._dispatch_tool_call(
+            "get_stock_diagnostic_context", {"symbol": "300308", "position_context": "watching"}
+        )
+        self.assertIn("position_context", err5.get("error", ""))
 
     def test_handle_tool_call_envelope_integration(self):
         """测试 handle_tool_call 返回规范的 v2 信封结构。"""

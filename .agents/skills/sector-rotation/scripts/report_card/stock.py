@@ -70,16 +70,16 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
     draw_pill(draw, f"Coverage: {coverage_str}", (W - 500, 40), bg_color="#ecfdf5" if is_light else "#064e3b", text_color=COLOR_DOWN, font=font_micro)
     draw.line([(60, 85), (W - 60, 85)], fill=BORDER_DIVIDER, width=1)
 
-    # 2. 8大核心速览卡片
+    # 2. 分型与用户场景速览卡片
     top_metrics = [
-        ("市场大势", data.get("market_wind", "顺风驱动 [顺]"), PRIMARY),
-        ("板块主线", data.get("sector_role", "核心主线 [中军]"), COLOR_DOWN),
-        ("催化等级", data.get("catalyst_level", "S级 [长周期]"), COLOR_UP),
-        ("RS 强度", data.get("rs_rank", "Top 12% [极强]"), COLOR_UP),
-        ("威科夫阶段", data.get("wyckoff_phase", "Markup 主升"), PRIMARY),
+        ("生态分型", data.get("archetype", "N/A"), PRIMARY),
+        ("诊断模型", data.get("model_selected", "N/A"), COLOR_DOWN),
+        ("数据模式", data.get("data_mode", "reduced"), COLOR_WARN),
+        ("用户场景", data.get("position_state", "unknown"), PRIMARY),
+        ("逻辑健康", data.get("logic_health", "暂不评级"), COLOR_DOWN),
         ("位置状态", data.get("position_status", "安全支撑区 [优]"), COLOR_DOWN),
         ("公司风险", data.get("company_risk_status", "N/A"), COLOR_WARN),
-        ("赔率空间", data.get("risk_reward_ratio", "3.8 : 1 [优]"), COLOR_WARN),
+        ("证据置信", data.get("confidence_level", "数据不足"), COLOR_WARN),
     ]
 
     draw_metric_cards(
@@ -196,14 +196,15 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
     draw.text((60, curr_y), rs_narrative, fill=TEXT_SUB, font=font_micro)
     curr_y += 30
 
-    # 5. 模块 03：量价行为与威科夫结构
-    curr_y = draw_section_header("04  量价行为与威科夫结构深度解析 (Wyckoff & VSA 供求机制)", curr_y)
+    # 5. 模块 03：模型专属量价结构
+    curr_y = draw_section_header("04  模型专属量价结构与竞争假设", curr_y)
     wyckoff = data.get("wyckoff_details", {}) or {}
     phase = wyckoff.get("phase", "Markup 主升推进阶段 (突破蓄势中继)")
     events = wyckoff.get("events", "前期完成 Spring (Confirmed) 与 Test (Confirmed)，随后放量大阳线打出 SOS (Confirmed)")
     vsa = wyckoff.get("vsa", "突破阻力位时成交量显著放大(努力有结果)，随后回踩 MA20 极度缩量(供应枯竭，浮筹锁定)")
     narrative = wyckoff.get("narrative", "当前结构属于标准的突破后 LPS (Confirmed) 良性回踩蓄势，未见 UT 假突破或派发迹象")
-    draw.text((60, curr_y), f"[宏观结构阶段] {phase}", fill=PRIMARY, font=font_h3)
+    applicability = data.get("wyckoff_applicability", "partial")
+    draw.text((60, curr_y), f"[威科夫适用性] {applicability}  |  [结构解释] {phase}", fill=PRIMARY, font=font_h3)
     draw.text((60, curr_y + 24), f"• 关键事件识别 (证据等级): {events}", fill=TEXT_MAIN, font=font_micro)
     draw.text((60, curr_y + 44), f"• 努力与结果 (VSA): {vsa}", fill=TEXT_MAIN, font=font_micro)
     draw.text((60, curr_y + 64), f"• 市场行为叙事: {narrative}", fill=COLOR_DOWN, font=font_micro)
@@ -270,19 +271,19 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
 
     curr_y += 15
 
-    # 8. 模块 07：8层证据采集与融合裁决
-    curr_y = draw_section_header("07  8层证据采集与融合裁决 (8-Layer Decision & Tiered Exit)", curr_y)
+    # 8. 模块 07：模型内证据采集与融合裁决
+    curr_y = draw_section_header("07  模型内证据融合与条件化执行", curr_y)
 
     # 左右两栏布局：左侧加权融合评分表，右侧全景证据看板
     fusion_scores = data.get("fusion_scores", [
         ["L1 市场环境", "10%", "B (70–84)", "7.0–8.4"],
-        ["L2 板块主线", "12%", "B (70–84)", "8.4–10.1"],
-        ["L3 催化剂质量", "10%", "B (70–84)", "7.0–8.4"],
-        ["L4 RS 强度", "10%", "B (70–84)", "7.0–8.4"],
-        ["L5 威科夫量价", "18%", "C (55–69)", "9.9–12.4"],
+        ["L2 行业周期", "15%", "B (70–84)", "10.5–12.6"],
+        ["L3 催化与业绩", "15%", "B (70–84)", "10.5–12.6"],
+        ["L4 RS 强度", "15%", "B (70–84)", "10.5–12.6"],
+        ["L5 趋势与量价", "15%", "C (55–69)", "8.3–10.4"],
         ["L6 位置过热", "10%", "B (70–84)", "7.0–8.4"],
         ["L7 赔率空间", "10%", "C (55–69)", "5.5–6.9"],
-        ["L8 公司质量", "20%", "C (55–69)", "11.0–13.8"],
+        ["L8 公司质量", "10%", "C (55–69)", "5.5–6.9"],
         ["加权融合总分", "100%", "区间评级", "62.8–76.8"]
     ])
     evidence_map = data.get("evidence_map", [
@@ -300,7 +301,8 @@ def render_stock_analysis_card(data=None, output_path="stock_analysis_card.png",
     col_w = (W - 120 - 40) // 2
 
     # 左侧：8层加权融合评分表
-    draw.text((60, curr_y), "[8 层加权融合评分] (A–E 区间 / 缺失=N/A)", fill=PRIMARY, font=font_h3)
+    score_note = "仅同模型同版本可比" if data.get("data_mode") == "full" else "当前模式仅输出条件情景，不计算综合分"
+    draw.text((60, curr_y), f"[模型内证据权重] {score_note}", fill=PRIMARY, font=font_h3)
     fu_y = curr_y + 22
     fu_col_x = [60, 200, 310, 440]
     for h, x in zip(["研判层级", "权重", "得分(定性)", "加权分"], fu_col_x):

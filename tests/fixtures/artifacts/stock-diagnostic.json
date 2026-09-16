@@ -4,5 +4,11 @@
   "coverage": "82%", "evidence_ids": ["F05", "F06"], "formula_version": "stock-v1", "status": "partial",
   "subject": {"type": "stock", "id": "300308", "name": "中际旭创"}, "layers": {"L1": "S2", "L2": "强化"},
   "logic_health": "强化", "structure_position": "偏热", "confidence": "中",
+  "archetype": {"primary": "institutional_trend", "confidence": "中", "alternatives": [], "evidence": ["capacity_anchor_role"]},
+  "model_selected": "institutional-trend-v1", "data_mode": "full",
+  "position_context": {"position_state": "watching", "cost_price": null, "position_ratio": null, "holding_horizon": "trend", "risk_tolerance": "medium"},
+  "wyckoff_applicability": "applicable",
+  "scenario_plans": [{"trigger": "放量站稳结构确认位", "evidence_meaning": "趋势延续得到确认", "conditional_action": "继续观察回踩承接"}],
+  "microstructure": {"chip_structure": {"status": "unavailable"}, "seat_evidence": {"status": "partial"}},
   "confirmation_conditions": ["放量站稳结构确认位"], "invalidation_conditions": ["跌破假设失效位"]
 }

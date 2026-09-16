@@ -199,6 +199,9 @@ def _summary_card(payload, subject, triggers):
         "confidence": str(payload.get("confidence") or "数据不足"),
         "coverage": str(payload.get("coverage") or "N/A"),
         "data_status": str(payload.get("data_status") or "partial"),
+        "archetype": str(payload.get("archetype") or "N/A"),
+        "model_selected": str(payload.get("model_selected") or "N/A"),
+        "data_mode": str(payload.get("data_mode") or "reduced"),
         "subject": {"id": str(subject["id"]), "name": str(subject.get("name") or "")},
         "risk_flags": [str(flag) for flag in payload.get("risk_flags", [])],
         "next_actions": [
@@ -229,7 +232,7 @@ def mirror_handoff(payload):
         if not subject.get("id"):
             raise ValueError("stock 交接镜像需要 subject.id")
         common = _common(payload, "stock_diagnostic", _digest(subject.get("id"), payload.get("as_of")),
-                         "stock-v1")
+                         "stock-v2")
         triggers = payload.get("next_triggers", [])
         pending = [t.get("condition", str(t)) if isinstance(t, dict) else str(t) for t in triggers]
         common.update({
@@ -238,6 +241,18 @@ def mirror_handoff(payload):
             "logic_health": str(payload.get("logic_health") or "暂不评级"),
             "structure_position": str(_stock_structure_position(payload)),
             "confidence": str(payload.get("confidence", "数据不足")),
+            "archetype": {
+                "primary": str(payload.get("archetype") or "N/A"),
+                "confidence": str(payload.get("archetype_confidence") or "数据不足"),
+                "alternatives": list(payload.get("archetype_alternatives") or []),
+                "evidence": list(payload.get("archetype_evidence") or []),
+            },
+            "model_selected": str(payload.get("model_selected") or "N/A"),
+            "data_mode": str(payload.get("data_mode") or "reduced"),
+            "position_context": dict(payload.get("position_context") or {"position_state": "unknown"}),
+            "wyckoff_applicability": str(payload.get("wyckoff_applicability") or "partial"),
+            "scenario_plans": list(payload.get("scenario_plans") or []),
+            "microstructure": dict(payload.get("microstructure") or {}),
             "confirmation_conditions": pending,
             "invalidation_conditions": [str(flag) for flag in payload.get("risk_flags", [])],
             "summary_card": _summary_card(payload, subject, pending),

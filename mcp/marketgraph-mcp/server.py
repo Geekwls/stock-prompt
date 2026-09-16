@@ -51,6 +51,14 @@ from tools.agent_tools import (
     render_report_tool,
     save_artifact_tool,
 )
+from tools.calculations.stock import (
+    assess_wyckoff_applicability,
+    classify_stock_archetype,
+    resolve_stock_data_mode,
+    select_stock_model,
+    summarize_seat_evidence,
+    validate_position_context,
+)
 
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
@@ -494,7 +502,7 @@ def compute_wyckoff_signals(
 def fetch_stock_kline(symbol: str, count: int = 750, compact: bool = True) -> Dict[str, Any]:
     """
     获取 750 日 (约3年) 前复权日K线、全套均线矩阵 (MA20/50/120/250/500)、3年宏观时空坐标、内存周线共振与双层威科夫模型
-    默认开启 compact=True 瘦身模式（保留3年宏观全景指标、周线共振趋势与最近30日微观K线），直接完美满足行情硬门槛
+    默认开启 compact=True 瘦身模式（保留3年宏观全景指标、周线共振趋势与最近30日微观K线），供 full/reduced/event 数据模式裁定
     """
     ts_code = normalize_symbol(symbol)
     cache_key = f"kline_{ts_code}_{count}_{compact}"
@@ -617,7 +625,7 @@ def fetch_stock_kline(symbol: str, count: int = 750, compact: bool = True) -> Di
             "volume_percentile_120d": volume_percentile_120d,
             "weekly_timeframe": weekly_analysis,
             "wyckoff_multi_timeframe": wyckoff_signals,
-            "bars_summary": f"已检验 {valid_count} 根前复权日K线 (覆盖3年宏观时空，含MA120/MA250/MA500均线矩阵及周线共振)，完全通过行情硬门槛" + (" [精简视图：附最近30日K线]" if compact else " [完整视图：附全量K线]"),
+            "bars_summary": f"已检验 {valid_count} 根前复权日K线 (覆盖3年宏观时空，含MA120/MA250/MA500均线矩阵及周线共振)，可供数据模式裁定" + (" [精简视图：附最近30日K线]" if compact else " [完整视图：附全量K线]"),
         }
 
         # Token 瘦身模式：精简模式下返回最近 30 根 K 线 (约6周，完整展现局部 TR 结构)
@@ -2297,8 +2305,11 @@ def fetch_rotation_context(
 def fetch_stock_diagnostic_context(
     symbol: str,
     benchmark: str = "CSIALL",
+    sector: Optional[str] = None,
+    archetype_hints: Optional[Dict[str, Any]] = None,
+    position_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """聚合 A 股个股八层诊断标准化证据包：实时报价、750日复权K线与威科夫结构、财务与商誉质押、分时竞价、龙虎榜席位与对标基准"""
+    """聚合个股证据并预计算数据模式、生态分型、威科夫适用性和持仓场景。"""
     missing: List[str] = []
     conflicts: List[str] = []
     payload: Dict[str, Any] = {}
@@ -2362,6 +2373,86 @@ def fetch_stock_diagnostic_context(
     except Exception as exc:
         missing.append(f"benchmark_kline({exc})")
 
+    if sector:
+        try:
+            sector_res = fetch_sector_kline(sector, count=130)
+            if isinstance(sector_res, dict) and sector_res.get("data_status") != "unavailable" and not sector_res.get("error"):
+                payload["sector_kline"] = sector_res
+            else:
+                missing.append("sector_kline")
+        except Exception as exc:
+            missing.append(f"sector_kline({exc})")
+    else:
+        missing.append("sector_kline(sector_not_provided)")
+
+    kline = payload.get("kline_structure", {})
+    quote = payload.get("quote", {})
+    timeline = payload.get("timeline", {})
+    hints = dict(archetype_hints or {})
+    turnover = safe_float(str(quote.get("turnover_rate", "")).rstrip("%"), None)
+    weekly = kline.get("weekly_timeframe", {}) if isinstance(kline, dict) else {}
+    financial = (payload.get("company_quality", {}) or {}).get("financial_summary", {})
+    earnings_growth = safe_float(str(financial.get("net_profit_yoy", "")).rstrip("%"), None)
+    hints.setdefault("turnover_rate", turnover)
+    hints.setdefault("trend_alignment", weekly.get("weekly_alignment"))
+    hints.setdefault("earnings_growth", earnings_growth)
+
+    data_mode = resolve_stock_data_mode(
+        bar_count=kline.get("valid_bars"),
+        adjusted=kline.get("adjustment") == "qfq",
+        benchmark_complete=bool(payload.get("benchmark_kline")),
+        industry_complete=bool(payload.get("sector_kline")),
+        days_listed=hints.get("days_listed"),
+        event_driven=bool(hints.get("event_driven", False)),
+        resumed_recently=bool(hints.get("resumed_recently", False)),
+        quote_available=bool(quote), timeline_available=bool(timeline),
+        turnover_available=turnover is not None,
+    )
+    payload["data_mode"] = data_mode
+
+    archetype = classify_stock_archetype(**{
+        key: hints.get(key) for key in (
+            "limit_up_streak", "recent_limit_up_count", "turnover_rate", "sector_role",
+            "trend_alignment", "institutional_net_buy", "earnings_growth", "dividend_yield",
+            "payout_stable", "operating_cashflow_positive", "event_driven", "resumed_recently", "days_listed",
+        )
+    })
+    payload["archetype"] = archetype
+    if archetype.get("value") != "N/A":
+        payload["selected_model"] = select_stock_model(
+            archetype["value"]["archetype"], data_mode["value"]["mode"]
+        )
+    else:
+        missing.append("archetype_evidence")
+
+    payload["wyckoff_applicability"] = assess_wyckoff_applicability(
+        data_mode["value"]["mode"], range_days=hints.get("range_days"),
+        limit_up_streak=hints.get("limit_up_streak"),
+        event_driven=bool(hints.get("event_driven", False)),
+        one_word_limit_days=hints.get("one_word_limit_days"),
+    )
+    allowed_position_fields = {
+        "position_state", "cost_price", "position_ratio", "holding_horizon", "risk_tolerance"
+    }
+    position_args = {
+        key: value for key, value in (position_context or {}).items()
+        if key in allowed_position_fields
+    }
+    payload["position_context"] = validate_position_context(**position_args)
+
+    lhb = payload.get("longhubang", {})
+    seat_entries = []
+    if isinstance(lhb, dict):
+        for key in ("buy_seats", "sell_seats", "org_seat_net_details", "seats"):
+            value = lhb.get(key)
+            if isinstance(value, list):
+                seat_entries.extend(item for item in value if isinstance(item, dict))
+    payload["seat_evidence"] = summarize_seat_evidence(seat_entries)
+    payload["chip_structure"] = {
+        "status": "unavailable",
+        "reason": "当前公开 MCP 未提供可审计筹码峰/获利盘分布；不得估算或用换手率替代",
+    }
+
     return _make_context_envelope("Stock_Diagnostic", payload, missing, conflicts, data_date)
 
 
@@ -2370,7 +2461,7 @@ def fetch_stock_diagnostic_context(
 # -----------------------------------------------------------------------------
 SERVER_INFO = {
     "name": "marketgraph-data",
-    "version": "2.0.0",
+    "version": "2.1.0",
 }
 
 def _dispatch_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -2406,6 +2497,9 @@ def _dispatch_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     if name == "get_stock_diagnostic_context":
         if not isinstance(arguments.get("symbol"), str) or not arguments["symbol"].strip():
             return {"error": "symbol 必须是非空字符串", "data_status": "unavailable"}
+        for field in ("archetype_hints", "position_context"):
+            if arguments.get(field) is not None and not isinstance(arguments[field], dict):
+                return {"error": f"{field} 必须是对象", "data_status": "unavailable"}
     if name == "get_rotation_context":
         if arguments.get("days", 5) is not None and (not isinstance(arguments.get("days", 5), int) or not 2 <= arguments.get("days", 5) <= 10):
             return {"error": "days 必须是 2 至 10 的整数", "data_status": "unavailable"}
@@ -2482,6 +2576,9 @@ def _dispatch_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         return fetch_stock_diagnostic_context(
             arguments.get("symbol", ""),
             arguments.get("benchmark", "CSIALL"),
+            arguments.get("sector"),
+            arguments.get("archetype_hints"),
+            arguments.get("position_context"),
         )
     elif name == "save_artifact":
         return save_artifact_tool(arguments["artifact"])

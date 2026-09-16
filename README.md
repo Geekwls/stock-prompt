@@ -1,9 +1,9 @@
 # 📈 A股量化分析 AI 提示词与 Skill 体系库 (`stock-prompt`)
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Release-v7.6.0-blue.svg" alt="Release v7.6.0" />
+  <img src="https://img.shields.io/badge/Release-v7.7.0-blue.svg" alt="Release v7.7.0" />
   <img src="https://img.shields.io/badge/Tests-CI%20Passing-brightgreen.svg" alt="Tests Passing" />
-  <img src="https://img.shields.io/badge/Architecture-5%20Skills%20%2B%2017%20MCP%20Tools-orange.svg" alt="Architecture" />
+  <img src="https://img.shields.io/badge/Architecture-5%20Skills%20%2B%2021%20MCP%20Tools-orange.svg" alt="Architecture" />
   <img src="https://img.shields.io/badge/Zero--Config-Built--in%20MarketGraph%20MCP-success.svg" alt="Zero-Config MCP" />
   <img src="https://img.shields.io/badge/Platform-Antigravity%20%7C%20Cursor%20%7C%20Claude%20%7C%20Gemini%20%7C%20Codex-purple.svg" alt="Platform" />
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License MIT" />
@@ -15,24 +15,27 @@
 
 ---
 
-## ⚡ v7.6.0 核心亮点
+## ⚡ v7.7.0 核心亮点
 
-> v7.6.0 统一五大 Skill 契约与确定性计算口径，补齐盘中快照模式、低覆盖率降级、个股硬门槛和历史 Handoff 兼容，并保留 Git/Release ZIP 安全更新闭环。
+> v7.7.0 将个股分析从“一套八层模型套所有股票”升级为先分型、再选模型、最后按用户持仓状态输出可证伪的条件方案。
 
 1. **🔌 内置 21 个结构化数据与研究闭环 MCP 工具 (`marketgraph-mcp`)**
    - 零注册、免 Token；MCP 核心使用 Python 3.10+ 标准库实现，报告卡依赖 Pillow。
    - 直连腾讯证券与东方财富公开网络节点，涵盖 750 日 K 线、周线共振、当日分时、龙虎榜席位、行业资金流及等权篮子容灾；所有输出仍按 P3 公开网关证据记录，显著降低而不能宣称彻底消除幻觉风险。
 2. **🔤 纯中文股票名秒级智能联想解析**
    - 无论输入数字代码（`301489`）、带前后缀代码（`sz301489`, `600519.SH`）还是**纯中文股票名称**（如“贵州茅台”、“中际旭创”），底层毫秒级自动解析标准化，彻底告别繁琐代码查找。
-3. **💬 散户友好：首屏「30 秒大白话速览」与术语强制通俗注释**
+3. **🎯 四类股票生态分型 + 三档数据模式**
+   - 自动识别情绪连板、机构趋势、红利价值、事件特型，分别使用不同模块权重；威科夫仅在适用时参与研判。
+   - `full / reduced / event` 模式避免用 120 根 K 线一刀切次新与复牌股；降级模式只给条件情景，不给虚假精确分。
+4. **💬 散户友好：首屏「30 秒大白话速览」与持仓场景分流**
    - **结论前置**：研报第一屏直截了当回答 3 句话——*“现在发生了什么 / 为什么这么看 / 什么情况说明判断错了（认赔止损点）”*，大白话决策一目了然。
    - **通俗比喻**：首次出现的威科夫技术黑话强制附带生活化比喻（如 Bias 偏离 ➡️ 像皮筋拉伸；ATR 波动率 ➡️ 股票单日心跳振幅；Spring 弹簧 ➡️ 假摔诱空坑），在八层量化证据纪律不减分毫的前提下，让小白也能轻松读懂。
-4. **🧭 全流程 5 大 Skill 协同编排与程序化交接 (`stock-research-router`)**
+5. **🧭 全流程 5 大 Skill 协同编排与程序化交接 (`stock-research-router`)**
    - 新增总控路由 Skill，自动协调 **盘前推演 ➡️ 盘中竞价 ➡️ 收盘复盘 ➡️ 5日轮动 ➡️ 穿透个股诊断** 的跨时段闭环。
    - 跨技能交接升级为程序化强校验的 `handoff_store.py` 与 Schema 资产，市场与板块结论无缝向下游继承，避免重复分析。
-5. **📊 盘前 ↔ 盘后自校准评估台账 (Brier Loop)**
+6. **📊 盘前 ↔ 盘后自校准评估台账 (Brier Loop)**
    - 盘前推演概率与收盘实际表现自动落盘至 `~/.stock-prompt/eval/predictions.jsonl`，滚动统计方向命中率、Brier Score、主线 Top3 命中率与空间有效率；情绪五项分自动落盘并支持历史滚动 P 分位自校准。
-6. **🛡️ 防漂移测试套件**
+7. **🛡️ 防漂移测试套件**
    - 自动化测试覆盖行情门槛、数据降级审计、Artifact/Schema 合规性、状态隔离、确定性计算、版本防漂移与断路器容灾机制；实时数量以 CI 为准，避免文档计数漂移。
 
 ---
@@ -53,7 +56,7 @@ stock-prompt/
 │   ├── market-prediction/             # 🌅 技能 1：A股盘前研判 (08:30-09:15 / 09:25 竞价)
 │   ├── daily-review/                  # 🌇 技能 2：A股每日复盘 (15:00 收盘后)
 │   ├── sector-rotation/               # 🔄 技能 3：A股板块轮动 (近 5 日 / 周末)
-│   ├── stock-analysis/                # 🔍 技能 4：A股个股诊断 (八层证据 + 威科夫结构)
+│   ├── stock-analysis/                # 🔍 技能 4：A股个股分型诊断 (四类模型 + 条件化执行)
 │   └── stock-research-router/         # 🧭 技能 5：跨阶段编排与交接总控路由
 │       （每个技能含 SKILL.md + references/ 契约 + agents/ 元数据 + scripts/ 捆绑脚本）
 │
@@ -108,14 +111,14 @@ stock-prompt/
 
 ---
 
-## 🔌 MarketGraph MCP 13 大结构化公开数据工具
+## 🔌 MarketGraph MCP 21 个结构化公开数据与研究闭环工具
 
 服务端基于标准 JSON-RPC 2.0 stdio 协议运行，内置 3 分钟盘中轻量缓存与历史数据 24 小时长缓存，内置请求频控与断路器熔断机制：
 
 | 工具名称 | 核心能力与输出指标 | 典型适配场景 |
 | :--- | :--- | :--- |
 | `get_stock_quote` | 实时价格、PE(TTM)、PB、总/流通市值、换手率、五档盘口、纯中文名自动联想 | 任意时段实时估值与微观盘口 |
-| `get_stock_kline` | 默认 750 日（3 年）前复权日 K 线，MA20/50/120/250/500、ATR14、Bias、周线共振（MA10/30、52周区间）、三层威科夫时空模型、量比分位；附 30 日精简 K 线（省 85% Token） | `stock-analysis` 行情硬门槛与中长期结构研判 |
+| `get_stock_kline` | 默认 750 日（3 年）前复权日 K 线，MA20/50/120/250/500、ATR14、Bias、周线共振（MA10/30、52周区间）、三层威科夫时空模型、量比分位；附 30 日精简 K 线（省 85% Token） | `stock-analysis` 数据模式裁定与中长期结构研判 |
 | `get_stock_timeline` | 当日 240 分钟分时全景、分时均价线 (VWAP)、盘中放量脉冲时刻 Top 3、9:25 集合竞价成交与开盘涨跌幅 | `market-prediction` 竞价承接力 / 盘中异动分析 |
 | `get_index_kline` | 核心指数（上证/深证/创业板/全指/沪深300）最近 N 日收盘、ATR14（盘前 Z_ATR 判档）、MA5/20/60 与 20 日高低点 | `market-prediction` 点位计算与相对强度基准 |
 | `get_market_breadth` | 全市场上涨/平盘/下跌家数与红盘率（东财快照），历史日期以打板池与指数替代并明确标注精度 | `daily-review` 市场整体赚钱效应审计 |
@@ -232,7 +235,7 @@ Agent 客户端会自动读取根目录 [AGENTS.md](AGENTS.md)，按交易时段
 2. **贝叶斯先验与机会函数双解耦**：大盘四维立体空间点位（ATR波动率 + 筹码POC + 期权对冲墙）界定安全边际，机会评分 (Opportunity Score) 解耦方向与盈亏比。
 3. **多维闭环自检**：盘前预测与收盘实际统一落盘评估台账，滚动追踪 Brier Score、校准度 (Calibration)、锐度 (Sharpness) 与主线/点位命中率（用法见下方「盘前 ↔ 盘后评估闭环」一节）。
 4. **跨 Skill 交接与穿透**：每份报告末尾输出标准化交接摘要 JSON，市场与板块结论可被后续技能直接继承；复盘标的支持 `诊断 <代码>` 一键穿透至个股八层诊断。
-5. **个股行情硬门槛**：缺少120日复权OHLCV或同期宽基/行业基准时，L4–L7统一为 `N/A`，不输出威科夫定级、赔率或综合评分。
+5. **个股三档数据模式**：120日复权OHLCV及宽基/行业基准齐全时使用 `full`；20–119日或基准不全使用 `reduced`；次新、复牌和突发事件使用 `event`。后两者保留可核验事实与条件情景，但不输出跨模型综合分或伪精确的长周期结论。
 
 ---
 

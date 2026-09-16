@@ -269,7 +269,7 @@ CLI 作为人工、CI 和故障排查入口；MCP 作为 Agent 入口。
 | MCP 不可用 | 网络检索或 N/A | 关闭精确评分 |
 | Handoff 不可写 | 报告仍完成 | `handoff_status=emitted_only` |
 | 台账不可写 | 报告仍完成 | `evaluation_status=failed` |
-| 行情硬门槛失败 | 保留事实 | 禁止综合评分 |
+| reduced / event 模式 | 保留事实与条件情景 | 禁止综合评分，不等同于股票质量失败 |
 | 来源冲突 | 并列披露 | 降低置信度 |
 | Schema 失败 | 不发布 Artifact | 返回修复错误 |
 

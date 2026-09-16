@@ -114,7 +114,12 @@ def fetch_stock_quote(symbol: str) -> Dict[str, Any]:
         float_market_cap = safe_float(parts[44], None) if len(parts) > 44 else None  # 亿元
         volume_hand = safe_float(parts[6], 0.0)  # 手
         turnover_amount = safe_float(parts[37], 0.0) if len(parts) > 37 else 0.0  # 万元
+        turnover_billion = round(turnover_amount / 10000.0, 2)
         amplitude = safe_float(parts[43], 0.0) if len(parts) > 43 else 0.0
+        # 容量中军特征: 流通市值/总市值 >= 200 亿且日成交额 >= 15 亿 (大额流动性承接)
+        cap_val = float_market_cap if float_market_cap is not None else total_market_cap
+        is_capacity_core = bool(cap_val is not None and cap_val >= 200.0 and turnover_billion >= 15.0)
+        core_role_tag = "容量中军" if is_capacity_core else ("小盘高弹性" if cap_val is not None and cap_val < 50.0 else "常规标的")
 
         res = {
             "source": "P3_Tencent_Public_Gateway",
@@ -133,10 +138,13 @@ def fetch_stock_quote(symbol: str) -> Dict[str, Any]:
             "amplitude": f"{amplitude:.2f}%",
             "volume_hand": volume_hand,
             "turnover_cny_wan": turnover_amount,
+            "turnover_billion": turnover_billion,
             "pe_ttm": pe_ttm,
             "pb": pb,
             "total_market_cap_billion": total_market_cap,
             "float_market_cap_billion": float_market_cap,
+            "is_capacity_core": is_capacity_core,
+            "core_role_tag": core_role_tag,
             "as_of": parts[30] if len(parts) > 30 and len(parts[30]) >= 8 else datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
         set_cached(cache_key, res)
@@ -866,10 +874,19 @@ def fetch_limit_up_ladder(date_str: Optional[str] = None) -> Dict[str, Any]:
         summary = []
         for h in sorted(ladder.keys(), reverse=True):
             stocks = ladder[h]
+            all_leader_strs = [f"{s['name']}({s['code']})" for s in stocks]
+            ind_counts: Dict[str, int] = {}
+            for s in stocks:
+                ind = s.get("industry", "其他")
+                ind_counts[ind] = ind_counts.get(ind, 0) + 1
+            top_industries = [f"{k}({v}家)" for k, v in sorted(ind_counts.items(), key=lambda x: x[1], reverse=True)[:5]]
+
             summary.append({
                 "height": f"{h} 连板",
                 "count": len(stocks),
-                "leaders": [f"{s['name']}({s['code']})" for s in stocks[:5]],
+                "leaders": all_leader_strs if (h > 1 or len(stocks) <= 12) else all_leader_strs[:10],
+                "all_leaders": all_leader_strs,
+                "industry_distribution": top_industries,
             })
 
         res = {
@@ -944,9 +961,10 @@ def fetch_sector_limit_quality(sector: str, date_str: Optional[str] = None) -> D
         boards = fetch_industry_board_list()
     except Exception as exc:
         return {"error": f"行业板块表不可用: {type(exc).__name__}", "data_status": "unavailable"}
-    target = next((b for b in boards if b["code"] == sector_code), None)
+    target = next((b for b in boards if b["code"] == sector_code or b["name"] == clean), None)
     if not target:
         return {"error": f"{sector_code} 不在东财行业板块表内 (仅支持行业板块, 概念板块无 hybk 归属)", "data_status": "unavailable"}
+    sector_code = target["code"]
 
     cache_key = f"sector_limit_quality_{sector_code}_{compact_date}"
     cached = get_cached(cache_key)
@@ -1072,8 +1090,36 @@ def fetch_market_breadth(days: int = 5) -> Dict[str, Any]:
         flat = sum(v for k, v in fenbu.items() if str(k) == "0")
         total = up + down + flat
         if total > 0:
-            exact = {"up_count": up, "down_count": down, "flat_count": flat,
-                     "total_stocks": total, "red_rate": round(up / total * 100.0, 2)}
+            bins_order = [
+                ("-11", -11.0, -10.0), ("-10", -10.0, -9.0), ("-9", -9.0, -8.0), ("-8", -8.0, -7.0),
+                ("-7", -7.0, -6.0), ("-6", -6.0, -5.0), ("-5", -5.0, -4.0), ("-4", -4.0, -3.0),
+                ("-3", -3.0, -2.0), ("-2", -2.0, -1.0), ("-1", -1.0, 0.0), ("0", 0.0, 0.0),
+                ("1", 0.0, 1.0), ("2", 1.0, 2.0), ("3", 2.0, 3.0), ("4", 3.0, 4.0),
+                ("5", 4.0, 5.0), ("6", 5.0, 6.0), ("7", 6.0, 7.0), ("8", 7.0, 8.0),
+                ("9", 8.0, 9.0), ("10", 9.0, 10.0), ("11", 10.0, 11.0)
+            ]
+            target = total / 2.0
+            cum = 0
+            median_val = 0.0
+            for b_key, low, high in bins_order:
+                cnt = fenbu.get(b_key, 0) or fenbu.get(int(b_key), 0)
+                if not cnt:
+                    continue
+                if cum + cnt >= target:
+                    if low == high:
+                        median_val = low
+                    else:
+                        fraction = (target - cum) / cnt
+                        median_val = round(low + fraction * (high - low), 2)
+                    break
+                cum += cnt
+
+            exact = {
+                "up_count": up, "down_count": down, "flat_count": flat,
+                "total_stocks": total, "red_rate": round(up / total * 100.0, 2),
+                "median_change_pct": f"{median_val:+.2f}%",
+                "median_pct": median_val,
+            }
             exact_date = f"{qdate[:4]}-{qdate[4:6]}-{qdate[6:8]}" if len(qdate) == 8 else None
     except Exception as exc:
         unavailable_sources.append(f"涨跌分布快照: {type(exc).__name__}")
@@ -1099,6 +1145,8 @@ def fetch_market_breadth(days: int = 5) -> Dict[str, Any]:
                 "flat_count": exact["flat_count"],
                 "total_stocks": exact["total_stocks"],
                 "red_rate": f"{exact['red_rate']:.2f}%",
+                "median_change_pct": exact["median_change_pct"],
+                "median_pct": exact["median_pct"],
                 "breadth_precision": "exact",
             })
         try:
@@ -1179,18 +1227,111 @@ def fund_flow_trend_label(hist: List[Dict[str, Any]]) -> str:
     return "净流出转净流入" if signs[-1] > 0 else "净流入转净流出"
 
 
+STATIC_SECTOR_MAP: Dict[str, str] = {
+    "半导体": "BK1036", "芯片": "BK1036", "集成电路": "BK1036",
+    "通信设备": "BK0475", "通信": "BK0475", "5G": "BK0475", "光通信": "BK0475", "CPO": "BK0475",
+    "电子元件": "BK0473", "元件": "BK0473", "PCB": "BK0473", "覆铜板": "BK0473",
+    "消费电子": "BK0474", "果链": "BK0474", "智能穿戴": "BK0474",
+    "光伏设备": "BK0480", "光伏": "BK0480", "太阳能": "BK0480",
+    "风电设备": "BK0481", "风电": "BK0481", "海上风电": "BK0481",
+    "电池": "BK0482", "锂电池": "BK0482", "固态电池": "BK0482", "储能": "BK0482",
+    "电网设备": "BK0483", "特高压": "BK0483", "智能电网": "BK0483",
+    "电力行业": "BK0484", "电力": "BK0484", "绿电": "BK0484",
+    "软件开发": "BK0476", "软件": "BK0476", "信创": "BK0476",
+    "互联网服务": "BK0477", "人工智能": "BK0477", "AI": "BK0477", "大模型": "BK0477",
+    "计算机设备": "BK0450", "算力": "BK0450", "服务器": "BK0450",
+    "游戏": "BK0478", "网络游戏": "BK0478",
+    "光学光电子": "BK0479", "显示面板": "BK0479", "LED": "BK0479",
+    "证券": "BK0473", "券商": "BK0473", "证券行业": "BK0473",
+    "银行": "BK0475", "银行业": "BK0475",
+    "保险": "BK0474", "保险业": "BK0474",
+    "多元金融": "BK0476", "信托": "BK0476", "期货": "BK0476",
+    "汽车零部件": "BK0481", "汽配": "BK0481",
+    "汽车整车": "BK0480", "整车": "BK0480", "新能源汽车": "BK0480",
+    "通用设备": "BK0437", "机器人": "BK0437", "工业母机": "BK0437", "减速器": "BK0437",
+    "专用设备": "BK0440", "半导体设备": "BK0440",
+    "化学制药": "BK0465", "创新药": "BK0465", "医药": "BK0465",
+    "中药": "BK0464", "中药Ⅱ": "BK0464",
+    "生物制品": "BK0465", "疫苗": "BK0465",
+    "医疗器械": "BK0465", "医疗服务": "BK0465",
+    "贵金属": "BK0486", "黄金": "BK0486", "白银": "BK0486",
+    "工业金属": "BK0436", "铜": "BK0436", "铝": "BK0436", "有色金属": "BK0436",
+    "小金属": "BK0436", "稀土": "BK0436",
+    "钢铁行业": "BK0433", "钢铁": "BK0433",
+    "煤炭行业": "BK0425", "煤炭": "BK0425",
+    "石油行业": "BK0496", "采掘行业": "BK0496", "石油": "BK0496", "油气": "BK0496",
+    "白酒": "BK0428", "酿酒行业": "BK0428", "食品饮料": "BK0428",
+    "商业百货": "BK0422", "免税店": "BK0422", "零售": "BK0422",
+    "旅游酒店": "BK0495", "旅游": "BK0495", "酒店餐饮": "BK0495",
+    "文化传媒": "BK0494", "传媒": "BK0494", "影视院线": "BK0494",
+    "房地产开发": "BK0488", "房地产": "BK0488", "地产": "BK0488",
+    "航天航空": "BK0468", "军工": "BK0468", "国防军工": "BK0468",
+    "军工电子": "BK0734",
+    "航运港口": "BK0737", "航运": "BK0737", "港口": "BK0737",
+    "环保行业": "BK0741", "环保": "BK0741",
+    "玻璃玻纤": "BK0503", "玻璃": "BK0503",
+    "农牧饲渔": "BK0424", "农业": "BK0424", "养殖业": "BK0424",
+    "化学制品": "BK0498", "化工": "BK0498", "电子化学品": "BK0498",
+    "建筑装饰": "BK0487", "装修装饰": "BK0487", "工程建设": "BK0470",
+}
+
+# 核心行业权重股等权篮子映射 (当东财板块K线网关不可用时自动作为代理序列源)
+STATIC_SECTOR_BASKETS = {
+    "BK1036": ["688981", "002371", "688256"],  # 半导体
+    "BK0448": ["000063", "600941", "601728"],  # 通信设备
+    "BK0459": ["002475", "300476", "002384"],  # 电子元件 / PCB
+    "BK1031": ["601012", "300274", "688599"],  # 光伏设备
+    "BK1033": ["300750", "300014", "002812"],  # 电池
+    "BK0473": ["600030", "000776", "601688"],  # 证券
+    "BK0451": ["600519", "000858", "000568"],  # 白酒 / 饮料
+    "BK0475": ["600036", "601398", "601288"],  # 银行
+    "BK0474": ["601318", "601628", "601601"],  # 保险
+    "BK0488": ["000002", "600048", "001979"],  # 房地产
+    "BK0480": ["002594", "601238", "600104"],  # 汽车整车
+    "BK0468": ["600760", "600893", "000768"],  # 航天航空/军工
+    "BK0498": ["600309", "002493", "600426"],  # 化学制品
+    "BK0425": ["601088", "601225", "600188"],  # 煤炭
+    "BK0496": ["601857", "600028", "600938"],  # 石油
+    "BK0465": ["600276", "000538", "600085"],  # 医药商业/化学制药
+    "BK0737": ["601919", "600018", "601872"],  # 航运港口
+    "BK0477": ["002230", "300308", "600845"],  # 计算机设备 / 算力
+}
+
+
+
 def resolve_sector_code(keyword: str) -> Optional[str]:
-    """解析板块名称或代码为东财行业板块代码 (BKxxxxxx)；名称走 clist 全量行业板块表模糊匹配"""
+    """解析板块名称或代码为东财行业板块代码 (BKxxxxxx)；支持内置静态字典、在线模糊联想与建议网关"""
     clean = keyword.strip()
     upper = clean.upper().replace("90.", "")
     if upper.startswith("BK") and upper[2:].isdigit():
         return upper
+
+    # 1. 优先查内置高可靠标准板块映射
+    if clean in STATIC_SECTOR_MAP:
+        return STATIC_SECTOR_MAP[clean]
+    stripped = clean.rstrip("行业").rstrip("板块")
+    if stripped in STATIC_SECTOR_MAP:
+        return STATIC_SECTOR_MAP[stripped]
 
     cache_key = f"sector_lookup_{clean}"
     cached = get_cached(cache_key)
     if cached:
         return cached
 
+    # 2. 东财建议网关联想 (轻量稳定)
+    try:
+        suggest_url = f"https://searchapi.eastmoney.com/api/suggest/get?input={urllib.parse.quote(clean)}&type=14"
+        sug_raw = http_get(suggest_url, timeout=3)
+        sug_items = json.loads(sug_raw).get("QuotationCodeTable", {}).get("Data", []) or []
+        for x in sug_items:
+            if x.get("Classify") == "BK" and str(x.get("Code", "")).startswith("BK"):
+                code = str(x["Code"])
+                set_cached(cache_key, code, ttl=86400)
+                return code
+    except Exception:
+        pass
+
+    # 3. 兜底在线 clist 全量行业板块表
     url = (
         "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1"
         "&fltt=2&invt=2&fid=f3&fs=m:90+t:2+f:!50&fields=f12,f14"
@@ -1315,58 +1456,94 @@ def fetch_sector_kline(sector: str, count: int = 130) -> Dict[str, Any]:
     try:
         data = json.loads(http_get(url, timeout=5)).get("data") or {}
         klines = data.get("klines") or []
-        if len(klines) < 2:
-            return {"error": f"未获取到板块日K序列: {sector}", "data_status": "unavailable",
-                    "hint": "东财板块源不可用时, 可改用 get_basket_index 传入板块主要成分股构造等权代理序列 (使用边界见公共研究契约)"}
+        if len(klines) >= 2:
+            rows = []
+            for line in klines[-count:]:
+                parts = line.split(",")
+                if len(parts) >= 13:
+                    rows.append({
+                        "date": parts[0],
+                        "close": safe_float(parts[11], 0.0),
+                        "change_pct": f"{safe_float(parts[12], 0.0):+.2f}%",
+                        "main_net_inflow_billion": round(safe_float(parts[1], 0.0) / 100000000.0, 2),
+                    })
+            closes = [r["close"] for r in rows]
+            n = len(closes)
+            if n >= 2 and closes[-1] > 0:
+                res = {
+                    "source": "P3_Eastmoney_Sector_Kline",
+                    "data_status": "ok",
+                    "ohlc_source": False,
+                    "sector_code": sector_code,
+                    "sector_name": data.get("name", sector),
+                    "valid_bars": n,
+                    "latest_date": rows[-1]["date"],
+                    "latest_close": closes[-1],
+                    "latest_change_pct": rows[-1]["change_pct"],
+                    "ma5": _sector_ma(closes, 5),
+                    "ma10": _sector_ma(closes, 10),
+                    "ma20": _sector_ma(closes, 20),
+                    "ma60": _sector_ma(closes, 60),
+                    "recent_5d_return": _sector_return(closes, 5),
+                    "recent_20d_return": _sector_return(closes, 20),
+                    "recent_60d_return": _sector_return(closes, 60),
+                    "high_close_20d": max(closes[-min(20, n):]),
+                    "low_close_20d": min(closes[-min(20, n):]),
+                    "high_close_60d": max(closes[-min(60, n):]),
+                    "low_close_60d": min(closes[-min(60, n):]),
+                    "cum_main_net_inflow_5d_billion": round(sum(r["main_net_inflow_billion"] for r in rows[-5:]), 2),
+                    "cum_main_net_inflow_20d_billion": round(sum(r["main_net_inflow_billion"] for r in rows[-min(20, n):]), 2),
+                    "note": "收盘序列来自东财板块资金流日K网关 (无盘中高低价与成交额, 高低点为收盘价口径)；近5/20日主力净流入累计为板块资金延续证据",
+                }
+                if n < count:
+                    res["data_status"] = "partial"
+                    res["note"] += f"；实际仅取得 {n} 根 (不足请求的 {count} 根)"
+                set_cached(cache_key, res, ttl=ttl_for_history(rows[-1]["date"]))
+                return res
+    except Exception:
+        pass
 
-        rows = []
-        for line in klines[-count:]:
-            parts = line.split(",")
-            if len(parts) >= 13:
-                rows.append({
-                    "date": parts[0],
-                    "close": safe_float(parts[11], 0.0),
-                    "change_pct": f"{safe_float(parts[12], 0.0):+.2f}%",
-                    "main_net_inflow_billion": round(safe_float(parts[1], 0.0) / 100000000.0, 2),
-                })
-        closes = [r["close"] for r in rows]
-        n = len(closes)
-        if n < 2 or closes[-1] <= 0:
-            return {"error": "板块日K序列不完整", "data_status": "unavailable"}
+    # 兜底2: 若东财板块K线与资金流日K皆不可用，但该板块在 STATIC_SECTOR_BASKETS 中，自动由 fetch_basket_index 构造等权代理日K
+    try:
+        basket_stocks = STATIC_SECTOR_BASKETS.get(sector_code)
+        if not basket_stocks:
+            for k, v in STATIC_SECTOR_MAP.items():
+                if v == sector_code and v in STATIC_SECTOR_BASKETS:
+                    basket_stocks = STATIC_SECTOR_BASKETS[v]
+                    break
+        if basket_stocks:
+            basket_res = fetch_basket_index(basket_stocks, count=min(count, 60))
+            if isinstance(basket_res, dict) and not basket_res.get("error") and basket_res.get("series"):
+                bars = basket_res.get("series", [])
+                closes = [b["level"] for b in bars]
+                n = len(closes)
+                if n >= 2:
+                    res = {
+                        "source": "P3_Constructed_Basket_Proxy",
+                        "data_status": "partial",
+                        "ohlc_source": False,
+                        "sector_code": sector_code,
+                        "sector_name": sector,
+                        "valid_bars": n,
+                        "latest_date": bars[-1]["date"],
+                        "latest_close": closes[-1],
+                        "latest_change_pct": bars[-1].get("change_pct", "0.00%"),
+                        "ma5": _sector_ma(closes, 5),
+                        "ma10": _sector_ma(closes, 10),
+                        "ma20": _sector_ma(closes, 20),
+                        "ma60": _sector_ma(closes, 60),
+                        "recent_5d_return": _sector_return(closes, 5),
+                        "recent_20d_return": _sector_return(closes, 20),
+                        "recent_60d_return": _sector_return(closes, 60),
+                        "note": f"东财板块日K源不可用，已自动采用核心权重股 ({','.join(basket_stocks)}) 等权篮子代理序列（日度再平衡口径，仅供方向参考）",
+                    }
+                    set_cached(cache_key, res, ttl=ttl_for_history(bars[-1]["date"]))
+                    return res
+    except Exception:
+        pass
 
-        res = {
-            "source": "P3_Eastmoney_Sector_Kline",
-            "data_status": "ok",
-            "ohlc_source": False,
-            "sector_code": sector_code,
-            "sector_name": data.get("name", sector),
-            "valid_bars": n,
-            "latest_date": rows[-1]["date"],
-            "latest_close": closes[-1],
-            "latest_change_pct": rows[-1]["change_pct"],
-            "ma5": _sector_ma(closes, 5),
-            "ma10": _sector_ma(closes, 10),
-            "ma20": _sector_ma(closes, 20),
-            "ma60": _sector_ma(closes, 60),
-            "recent_5d_return": _sector_return(closes, 5),
-            "recent_20d_return": _sector_return(closes, 20),
-            "recent_60d_return": _sector_return(closes, 60),
-            "high_close_20d": max(closes[-min(20, n):]),
-            "low_close_20d": min(closes[-min(20, n):]),
-            "high_close_60d": max(closes[-min(60, n):]),
-            "low_close_60d": min(closes[-min(60, n):]),
-            "cum_main_net_inflow_5d_billion": round(sum(r["main_net_inflow_billion"] for r in rows[-5:]), 2),
-            "cum_main_net_inflow_20d_billion": round(sum(r["main_net_inflow_billion"] for r in rows[-min(20, n):]), 2),
-            "note": "收盘序列来自东财板块资金流日K网关 (无盘中高低价与成交额, 高低点为收盘价口径)；近5/20日主力净流入累计为板块资金延续证据",
-        }
-        if n < count:
-            res["data_status"] = "partial"
-            res["note"] += f"；实际仅取得 {n} 根 (不足请求的 {count} 根)"
-        set_cached(cache_key, res, ttl=ttl_for_history(rows[-1]["date"]))
-        return res
-    except Exception as exc:
-        return {"error": f"获取板块日K出错: {type(exc).__name__}", "data_status": "unavailable",
-                "hint": "东财板块源不可用时, 可改用 get_basket_index 传入板块主要成分股构造等权代理序列 (使用边界见公共研究契约)"}
+    return {"error": f"未获取到板块日K序列: {sector}", "data_status": "unavailable",
+            "hint": "东财板块源不可用时, 可改用 get_basket_index 传入板块主要成分股构造等权代理序列 (使用边界见公共研究契约)"}
 
 
 def fetch_basket_index(stocks: List[str], count: int = 20) -> Dict[str, Any]:
@@ -1608,6 +1785,82 @@ def fetch_sector_fund_flow(count: int = 20, days: int = 1) -> Dict[str, Any]:
         set_cached(cache_key, res)
         return res
     except Exception as e:
+        # 降级备源: 新浪全行业 49 大板块实时网关 (总成交额与涨跌排行口径)
+        try:
+            sina_url = "https://money.finance.sina.com.cn/q/view/newSinaHy.php"
+            sina_raw = http_get(sina_url, timeout=5, encoding="gbk")
+            if "=" in sina_raw:
+                payload_str = sina_raw.split("=", 1)[1].strip().rstrip(";")
+                sina_data = json.loads(payload_str)
+                sectors = []
+                for _, val_str in sina_data.items():
+                    parts = val_str.split(",")
+                    if len(parts) >= 13:
+                        s_name = parts[1].strip()
+                        s_code = resolve_sector_code(s_name) or "N/A"
+                        chg = safe_float(parts[5], 0.0)
+                        turnover_b = round(safe_float(parts[7], 0.0) / 100000000.0, 2)
+                        sectors.append({
+                            "code": s_code,
+                            "name": s_name,
+                            "change_pct": f"{chg:+.2f}%",
+                            "change_val": chg,
+                            "turnover_billion": turnover_b,
+                            "net_inflow_billion": 0.0,
+                            "top_stock_name": parts[12].strip(),
+                            "top_stock_code": parts[8].strip(),
+                        })
+                if sectors:
+                    sorted_by_turnover = sorted(sectors, key=lambda x: x["turnover_billion"], reverse=True)
+                    top_turnovers = sorted_by_turnover[:count]
+                    sorted_by_gain = sorted(sectors, key=lambda x: x["change_val"], reverse=True)
+                    top_gainers = sorted_by_gain[:count]
+                    top_losers = sorted_by_gain[-count:][::-1]
+
+                    fallback_res = {
+                        "source": "P3_Sina_Industry_Fallback",
+                        "data_status": "partial",
+                        "note": f"东财主力净流入上游不可用({type(e).__name__})，已无缝降级为新浪行业全景网关(全天总成交额与涨跌排行口径)",
+                        "total_sectors_tracked": len(sectors),
+                        "top_inflow_sectors": [
+                            {
+                                "rank": i + 1,
+                                "name": s["name"],
+                                "code": s["code"],
+                                "change_pct": s["change_pct"],
+                                "turnover_billion": f"{s['turnover_billion']:.2f} 亿",
+                                "net_inflow_billion": "N/A (新浪降级)",
+                                "leading_stock": f"{s['top_stock_name']}({s['top_stock_code']})",
+                            }
+                            for i, s in enumerate(top_turnovers)
+                        ],
+                        "top_gainer_sectors": [
+                            {
+                                "rank": i + 1,
+                                "name": s["name"],
+                                "code": s["code"],
+                                "change_pct": s["change_pct"],
+                                "turnover_billion": f"{s['turnover_billion']:.2f} 亿",
+                                "leader": f"{s['top_stock_name']}({s['top_stock_code']})",
+                            }
+                            for i, s in enumerate(top_gainers)
+                        ],
+                        "top_loser_sectors": [
+                            {
+                                "rank": i + 1,
+                                "name": s["name"],
+                                "code": s["code"],
+                                "change_pct": s["change_pct"],
+                                "turnover_billion": f"{s['turnover_billion']:.2f} 亿",
+                            }
+                            for i, s in enumerate(top_losers)
+                        ],
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                    set_cached(cache_key, fallback_res)
+                    return fallback_res
+        except Exception:
+            pass
         return {"error": f"获取行业资金流向出错: {str(e)}"}
 
 
@@ -1785,12 +2038,36 @@ def fetch_longhubang_detail(symbol: Optional[str] = None, date_str: Optional[str
                     "reason": r.get("EXPLANATION", ""),
                 })
 
+            # 自动为龙虎榜净买入前 3 只核心标的穿透席位画像，避免二次调用导致数据缺失
+            seat_previews = []
+            for item in stocks[:3]:
+                c = item.get("code")
+                if c:
+                    try:
+                        detail = fetch_longhubang_detail(symbol=c, date_str=norm_date)
+                        if isinstance(detail, dict) and not detail.get("error"):
+                            top_b = detail.get("top5_buyers", [{}])[0].get("seat_name") if detail.get("top5_buyers") else "--"
+                            top_s = detail.get("top5_sellers", [{}])[0].get("seat_name") if detail.get("top5_sellers") else "--"
+                            preview = {
+                                "code": c,
+                                "name": item.get("name"),
+                                "org_seat_net": detail.get("org_seat_net_wan"),
+                                "seat_judgment": detail.get("seat_quality_judgment"),
+                                "top_buyer": top_b,
+                                "top_seller": top_s,
+                            }
+                            item["seat_preview"] = preview
+                            seat_previews.append(preview)
+                    except Exception:
+                        pass
+
             res = {
                 "source": "P3_Eastmoney_LHB_Daily_Summary",
                 "data_status": "ok",
                 "date": norm_date or (data_rows[0].get("TRADE_DATE", "")[:10] if data_rows else datetime.now().strftime("%Y-%m-%d")),
                 "total_stocks_on_list": len(stocks),
                 "top_net_buy_stocks": stocks[:10],
+                "core_seat_previews": seat_previews,
             }
             set_cached(cache_key, res, ttl=ttl_for_history(res["date"]))
             return res
@@ -2211,7 +2488,7 @@ def fetch_close_review_context(
     try:
         fund_res = fetch_sector_fund_flow(count=max(top_sectors_count, 1), days=1)
         if isinstance(fund_res, dict) and fund_res.get("data_status") != "unavailable" and not fund_res.get("error"):
-            payload["top_fund_flow_sectors"] = fund_res.get("rankings", [])
+            payload["top_fund_flow_sectors"] = fund_res.get("top_inflow_sectors", []) or fund_res.get("top_gainer_sectors", []) or fund_res.get("rankings", [])
         else:
             missing.append("sector_fund_flow")
     except Exception as exc:
@@ -2225,6 +2502,15 @@ def fetch_close_review_context(
             missing.append("ladder")
     except Exception as exc:
         missing.append(f"ladder({exc})")
+
+    try:
+        lhb_res = fetch_longhubang_detail(date_str=date_str)
+        if isinstance(lhb_res, dict) and lhb_res.get("data_status") != "unavailable" and not lhb_res.get("error"):
+            payload["longhubang"] = lhb_res
+        else:
+            missing.append("longhubang")
+    except Exception as exc:
+        missing.append(f"longhubang({exc})")
 
     rankings = payload.get("top_fund_flow_sectors", [])
     if rankings:

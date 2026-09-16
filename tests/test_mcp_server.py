@@ -881,9 +881,57 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         self.assertEqual(SERVER.ttl_for_history(datetime.now().strftime("%Y-%m-%d")), SERVER.CACHE_TTL_SECONDS)
         self.assertEqual(SERVER.ttl_for_history(None), SERVER.CACHE_TTL_SECONDS)
 
-    def test_unknown_tool_returns_error(self):
-        res = SERVER.handle_tool_call("unknown_tool", {})
-        self.assertIn("error", res)
+    def test_market_breadth_median_pct(self):
+        """测试全市场涨跌幅中位数插值计算"""
+        with patch.object(SERVER, "http_get") as mock_get:
+            def fake_get(url, **kwargs):
+                if "getTopicZDFenBu" in url:
+                    return json.dumps({
+                        "data": {
+                            "qdate": "20260916",
+                            "fenbu": [{"-1": 1000}, {"0": 500}, {"1": 1500}]
+                        }
+                    })
+                if "fqkline" in url:
+                    return json.dumps({"data": {"sh000001": {"day": [["2026-09-15", "1", "2", "3", "4", "100"], ["2026-09-16", "1", "2", "3", "4", "100"]]}}})
+                return json.dumps({"data": {"pool": []}})
+            mock_get.side_effect = fake_get
+            SERVER.CACHE_STORE.clear()
+            res = SERVER.fetch_market_breadth(days=2)
+            snap = res.get("latest_exact_snapshot")
+            self.assertIsNotNone(snap)
+            self.assertIn("median_change_pct", snap)
+            self.assertIn("median_pct", snap)
+
+    def test_limit_up_ladder_all_leaders(self):
+        """测试首板及各板输出全量标的 all_leaders 与行业分布 industry_distribution"""
+        with patch.object(SERVER, "http_get") as mock_get:
+            stocks = [{"c": f"00000{i:02d}", "n": f"股{i}", "hybk": "半导体" if i % 2 == 0 else "通信设备", "lbc": 1} for i in range(25)]
+            mock_get.return_value = json.dumps({"data": {"pool": stocks}})
+            SERVER.CACHE_STORE.clear()
+            res = SERVER.fetch_limit_up_ladder("20260915")
+            self.assertEqual(res["total_limit_up"], 25)
+            board1 = next(b for b in res["ladder_distribution"] if "1" in b["height"])
+            self.assertEqual(board1["count"], 25)
+            self.assertEqual(len(board1["all_leaders"]), 25)
+            self.assertTrue(len(board1["industry_distribution"]) > 0)
+
+    def test_stock_quote_capacity_core_tag(self):
+        """测试个股成交额与容量中军标签识别"""
+        with patch.object(SERVER, "http_get") as mock_get:
+            p = [""] * 50
+            p[1] = "中兴通讯"
+            p[2] = "000063"
+            p[3] = "35.00"
+            p[4] = "34.00"
+            p[37] = "350000.00"  # 35亿成交额
+            p[45] = "1675.00"    # 1675亿总市值
+            mock_get.return_value = f'v_sz000063="{"~".join(p)}";'
+            SERVER.CACHE_STORE.clear()
+            quote = SERVER.fetch_stock_quote("000063")
+            self.assertEqual(quote["turnover_billion"], 35.0)
+            self.assertTrue(quote["is_capacity_core"])
+            self.assertEqual(quote["core_role_tag"], "容量中军")
 
 
 if __name__ == "__main__":

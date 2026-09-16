@@ -233,3 +233,314 @@ def calculate_price_range(price=None, atr14=None, regular_multiplier=0.8, extrem
         "s2": round(price - extreme_multiplier * atr14, 6),
     }
     return result(value, "price-range-atr-v1", input_snapshot_id)
+
+
+def calculate_auction_traffic_light(
+    index_gap=0.0,
+    index_amount_ratio=1.0,
+    leader_gap=0.0,
+    leader_amount_ratio=1.0,
+    nuclear_count=0,
+    limit_up_seal_ratio=0.0,
+    input_snapshot_id=None,
+):
+    """
+    9:25 集合竞价极速红绿灯与剧本匹配纯函数。
+    规则遵循 A 股开盘竞价实战盘口：
+    - 红灯 (red) / 剧本 C (核按钮退潮):
+      * 昨日连板核按钮 (nuclear_count >= 2) 或核心龙头惨遭重挫 (nuclear_count >= 1 且 leader_gap <= -5.0)；
+      * 或指数大幅低开重挫 (index_gap <= -1.0)。
+    - 绿灯 (green) / 剧本 A (超预期强攻):
+      * 无核按钮 (nuclear_count == 0)；
+      * 且龙头超预期抢筹 (leader_gap >= 3.0 或 limit_up_seal_ratio >= 0.05) 且竞价放量 (leader_amount_ratio >= 1.2)；
+      * 且指数未大幅低开拖累 (index_gap >= -0.2)。
+    - 黄灯 (yellow) / 剧本 B (平开分歧震荡):
+      * 其余常态情况。
+    """
+    try:
+        idx_gap = float(index_gap) if index_gap is not None else 0.0
+        idx_amt = float(index_amount_ratio) if index_amount_ratio is not None else 1.0
+        ldr_gap = float(leader_gap) if leader_gap is not None else 0.0
+        ldr_amt = float(leader_amount_ratio) if leader_amount_ratio is not None else 1.0
+        nuc_cnt = int(nuclear_count) if nuclear_count is not None else 0
+        seal_rt = float(limit_up_seal_ratio) if limit_up_seal_ratio is not None else 0.0
+    except (TypeError, ValueError):
+        return result("N/A", "auction-traffic-light-v1", input_snapshot_id, ["numeric_parameters"], "unavailable")
+
+    if nuc_cnt >= 2 or (nuc_cnt >= 1 and ldr_gap <= -5.0) or idx_gap <= -1.0:
+        light = "red"
+        scenario = "C"
+        sentiment = "bearish"
+        action = "恶性退潮确认，严禁开新仓/低吸，持仓若冲高不及预期在9:35前果断止损或减仓防守。"
+    elif nuc_cnt == 0 and (ldr_gap >= 3.0 or seal_rt >= 0.05) and ldr_amt >= 1.2 and idx_gap >= -0.2:
+        light = "green"
+        scenario = "A"
+        sentiment = "bullish"
+        action = "主线超预期强开，允许打板第一身位先锋，持仓享受溢价，切勿盲目追高无承接的后排跟风。"
+    else:
+        light = "yellow"
+        scenario = "B"
+        sentiment = "neutral"
+        action = "平开震荡分歧格局，等待9:45分时均线确认承接，仅在支撑位S1低吸核心，禁止半路追高。"
+
+    value = {
+        "traffic_light": light,
+        "matched_scenario": scenario,
+        "auction_sentiment": sentiment,
+        "action_guidance": action,
+        "metrics": {
+            "index_gap": round(idx_gap, 2),
+            "leader_gap": round(ldr_gap, 2),
+            "leader_amount_ratio": round(ldr_amt, 2),
+            "nuclear_count": nuc_cnt,
+        },
+    }
+    return result(value, "auction-traffic-light-v1", input_snapshot_id)
+
+
+def calculate_sentiment_opportunity_score(
+    ladder_health_score=None,
+    leader_premium=None,
+    limit_up_count=None,
+    nuclear_count=0,
+    emotion_cycle="ferment",
+    coverage=100.0,
+    input_snapshot_id=None,
+):
+    """
+    计算 A 股超短情绪与连板妖股机会分 (0–100)。
+    独立于大盘指数，专门服务于短线打板、龙头接力与弱市妖股抱团穿越。
+    """
+    require_range("coverage", coverage)
+    if coverage < 70:
+        return result("N/A", "opportunity-sentiment-v1", input_snapshot_id, ["coverage>=70"], "unavailable", coverage=coverage)
+
+    values = {
+        "ladder_health_score": ladder_health_score,
+        "leader_premium": leader_premium,
+        "limit_up_count": limit_up_count,
+    }
+    missing = [k for k, v in values.items() if v is None]
+    if missing:
+        return result("N/A", "opportunity-sentiment-v1", input_snapshot_id, missing, "unavailable")
+
+    ladder = float(ladder_health_score)
+    leader = float(leader_premium)
+    limit_cnt = float(limit_up_count)
+    nuc_cnt = int(nuclear_count) if nuclear_count is not None else 0
+
+    require_range("ladder_health_score", ladder)
+    require_range("leader_premium", leader)
+
+    limit_score = clamp(limit_cnt * 1.25, 0.0, 100.0)
+    base_score = 0.35 * ladder + 0.35 * leader + 0.30 * limit_score
+
+    cycle = str(emotion_cycle).lower()
+    cycle_bonus = {
+        "ice_breaking": 15.0,
+        "ferment": 5.0,
+        "climax": -5.0,
+        "divergence": 0.0,
+        "retreat": -25.0,
+    }.get(cycle, 0.0)
+
+    nuclear_penalty = nuc_cnt * 10.0
+    final_score = clamp(base_score + cycle_bonus - nuclear_penalty, 0.0, 100.0)
+
+    return result(
+        round(final_score, 4),
+        "opportunity-sentiment-v1",
+        input_snapshot_id,
+        ladder_health=ladder,
+        leader_premium=leader,
+        emotion_cycle=cycle,
+        nuclear_penalty=nuclear_penalty,
+    )
+
+
+def assess_catalyst_exhaustion(
+    catalyst_level="medium",
+    yesterday_gain=0.0,
+    expected_gap=0.0,
+    consecutive_up_days=1,
+    cumulative_gain=0.0,
+    input_snapshot_id=None,
+):
+    """
+    审计隔夜突发/重磅利好的一致性透支与利好出尽高开低走风险。
+    """
+    try:
+        yest_gain = float(yesterday_gain) if yesterday_gain is not None else 0.0
+        exp_gap = float(expected_gap) if expected_gap is not None else 0.0
+        up_days = int(consecutive_up_days) if consecutive_up_days is not None else 1
+        cum_gain = float(cumulative_gain) if cumulative_gain is not None else 0.0
+    except (TypeError, ValueError):
+        return result("N/A", "catalyst-exhaustion-v1", input_snapshot_id, ["numeric_parameters"], "unavailable")
+
+    cat_lvl = str(catalyst_level).lower()
+
+    is_high_exhaustion = (
+        (yest_gain >= 3.5 or up_days >= 3 or cum_gain >= 10.0)
+        and exp_gap >= 2.0
+        and cat_lvl in ("heavy", "major", "high")
+    )
+    is_low_exhaustion = (
+        up_days <= 1 and cum_gain < 3.0 and yest_gain < 2.0
+    )
+
+    if is_high_exhaustion:
+        risk = "high"
+        fade_warning = True
+        fade_probability = 75.0
+        advice = "利好全网发酵且前期已有显著获利盘，大幅高开极易遭遇潜伏盘兑现砸盘，严禁开盘追高，防冲高回落大阴线。"
+        adjustment = {"up_likelihood_penalty": 0.4, "suggested_action": "avoid_chasing"}
+    elif is_low_exhaustion:
+        risk = "low"
+        fade_warning = False
+        fade_probability = 20.0
+        advice = "利好属于底部首发催化，潜伏盘较少，支持竞价超预期或分时站稳均线后积极跟进。"
+        adjustment = {"up_likelihood_bonus": 0.2, "suggested_action": "follow_opportunity"}
+    else:
+        risk = "medium"
+        fade_warning = False
+        fade_probability = 45.0
+        advice = "利好存在一定预期差，但需观察开盘后5分钟分时均线承接，确认非脉冲后方可介入。"
+        adjustment = {"neutral_bias": 1.0, "suggested_action": "wait_for_confirmation"}
+
+    value = {
+        "exhaustion_risk": risk,
+        "fade_warning": fade_warning,
+        "fade_probability": fade_probability,
+        "tactical_advice": advice,
+        "bayesian_adjustment": adjustment,
+    }
+    return result(value, "catalyst-exhaustion-v1", input_snapshot_id)
+
+
+calculate_catalyst_exhaustion = assess_catalyst_exhaustion
+
+
+def calculate_market_divergence_index(
+    index_pct=0.0,
+    breadth_ratio=50.0,
+    median_pct=0.0,
+    high_low_spread=0.0,
+    is_fake_positive=False,
+    input_snapshot_id=None,
+):
+    """
+    量化全市场二八撕裂与假阳线诱多指数。
+    - 严重二八撕裂 (extreme_polarization): 指数上涨 (index_pct >= 0.2) 但全市场红盘率极低 (breadth_ratio <= 35.0 或 median_pct <= -1.0)；
+    - 假阳线诱多 (fake_positive_trap): 指数收红但日内高开低走大阴线 (is_fake_positive=True 或 high_low_spread >= 1.5)；
+    - 健康普涨 (healthy_broad_rise): 指数收红且红盘率 >= 60.0% 且中位数良好 (median_pct >= 0.5)；
+    - 中性分化 (neutral): 常态震荡。
+    """
+    try:
+        idx_p = float(index_pct) if index_pct is not None else 0.0
+        brd_r = float(breadth_ratio) if breadth_ratio is not None else 50.0
+        med_p = float(median_pct) if median_pct is not None else 0.0
+        hl_spd = float(high_low_spread) if high_low_spread is not None else 0.0
+        fake_p = bool(is_fake_positive)
+    except (TypeError, ValueError):
+        return result("N/A", "market-divergence-v1", input_snapshot_id, ["numeric_parameters"], "unavailable")
+
+    require_range("breadth_ratio", brd_r, 0, 100)
+
+    polarization_base = clamp((idx_p - med_p) * 20.0, 0, 80)
+    breadth_penalty = clamp((50.0 - brd_r) * 0.8, 0, 40) if brd_r < 50.0 else 0.0
+    polarization_index = clamp(polarization_base + breadth_penalty, 0, 100)
+
+    is_extreme = idx_p >= 0.2 and (brd_r <= 35.0 or med_p <= -1.0)
+    is_trap = idx_p > 0 and (fake_p or hl_spd >= 1.5)
+
+    if is_extreme:
+        div_type = "extreme_polarization"
+        penalty = 20.0
+        advice = "大盘指数被权重中字头护盘虚拉，全市场超六成个股阴跌崩盘，呈现极端二八撕裂；触发【权重掩护出货警示】，严禁盲目参考指数点位做多，控制仓位防守。"
+        cap_60 = True
+    elif is_trap:
+        div_type = "fake_positive_trap"
+        penalty = 15.0
+        advice = "指数全天高开低走收假阳大阴线，盘中冲高资金借利好兑现抛压沉重；触发【假阳线诱多警示】，防次日惯性低开杀跌。"
+        cap_60 = True
+    elif idx_p > 0 and brd_r >= 60.0 and med_p >= 0.5:
+        div_type = "healthy_broad_rise"
+        penalty = 0.0
+        advice = "指数与全市场个股形成健康普涨共振，赚钱效应扩散，量价配合良好。"
+        cap_60 = False
+    else:
+        div_type = "neutral"
+        penalty = 0.0
+        advice = "市场涨跌结构中性均衡，按主线板块节奏操作。"
+        cap_60 = False
+
+    value = {
+        "divergence_type": div_type,
+        "polarization_index": round(polarization_index, 2),
+        "score_penalty": penalty,
+        "cap_applied": cap_60,
+        "tactical_guidance": advice,
+        "metrics": {
+            "index_pct": round(idx_p, 2),
+            "breadth_ratio": round(brd_r, 2),
+            "median_pct": round(med_p, 2),
+            "is_fake_positive": fake_p,
+        },
+    }
+    return result(value, "market-divergence-v1", input_snapshot_id)
+
+
+def filter_intraday_impulse(
+    current_time="10:05",
+    sector_gain=2.5,
+    is_above_vwap=True,
+    turnover_increasing=True,
+    pullback_broken=False,
+    input_snapshot_id=None,
+):
+    """
+    盘中快照模式（09:30–15:00）10:00 分水岭真伪脉冲拦截纯函数。
+    - 早盘诱多陷阱 (early_morning_trap): 10:00 前冲高但在回踩时跌破分时黄线 (is_above_vwap=False 或 pullback_broken=True)；
+    - 缩量脉冲废票 (volume_exhaustion): 冲高但成交量急剧萎缩，后续无大单承接 (turnover_increasing=False)；
+    - 日内确认强势 (confirmed_intraday_strength): 回踩分时均线站稳不破，且放量持续换手。
+    """
+    try:
+        gain = float(sector_gain) if sector_gain is not None else 0.0
+        above_vwap = bool(is_above_vwap)
+        increasing = bool(turnover_increasing)
+        broken = bool(pullback_broken)
+    except (TypeError, ValueError):
+        return result("N/A", "intraday-impulse-v1", input_snapshot_id, ["numeric_parameters"], "unavailable")
+
+    if broken or not above_vwap:
+        quality = "early_morning_trap"
+        is_valid = False
+        guidance = "早盘脉冲拉升后回踩跌破分时均价线（分时黄线），确认为【诱多出货陷阱】；禁止追高，已有持仓反抽果断离场。"
+    elif not increasing and gain >= 2.0:
+        quality = "volume_exhaustion"
+        is_valid = False
+        guidance = "拉升缺乏成交量持续放大支撑，量能衰竭无承接，判定为【脉冲冲高回落废票】；等待回踩确认，严禁半路追高。"
+    elif above_vwap and increasing and gain >= 1.5:
+        quality = "confirmed_intraday_strength"
+        is_valid = True
+        guidance = "放量突破且回踩分时均线稳稳站稳，大单承接良好，确认为【日内真实强势主线】；支持沿分时均线逢低试仓。"
+    else:
+        quality = "neutral_observation"
+        is_valid = False
+        guidance = "分时结构中性，尚需观察 10:00 分水岭换手确认。"
+
+    value = {
+        "impulse_quality": quality,
+        "is_valid": is_valid,
+        "current_time": str(current_time),
+        "tactical_guidance": guidance,
+        "metrics": {
+            "sector_gain": round(gain, 2),
+            "is_above_vwap": above_vwap,
+            "turnover_increasing": increasing,
+            "pullback_broken": broken,
+        },
+    }
+    return result(value, "intraday-impulse-v1", input_snapshot_id)
+
+

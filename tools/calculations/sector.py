@@ -321,3 +321,172 @@ def calculate_lifecycle_state(current_state, capital_continuity=None, accepted=F
         next_state, rule = current_state, "hold"
     return result(next_state, "lifecycle-rules-v1", input_snapshot_id, transition_rule=rule)
 
+
+def assess_rotation_effectiveness(
+    active_sectors_count=1,
+    leader_turnover_share=8.0,
+    limit_up_clusters=3,
+    market_amount_ratio=1.0,
+    input_snapshot_id=None,
+):
+    """
+    量化评估日内板块轮动是有效的主线聚焦行情，还是容易套人的电风扇一日游行情。
+    规则遵循 A 股存量博弈盘口：
+    - 电风扇无效轮动 (electric_fan):
+      * 活跃异动板块过多 (active_sectors_count >= 4) 且领涨板块成交占比偏低 (leader_turnover_share < 6.0)；
+      * 或领涨板块涨停家数孤木难支 (limit_up_clusters <= 2) 且成交额占比不足 6.0；
+      * 输出 validity: "ineffective"，提示严禁追高日内脉冲。
+    - 主线聚焦有效轮动 (mainline_focused):
+      * 领涨板块成交占比高 (leader_turnover_share >= 8.0) 且涨停梯队完整 (limit_up_clusters >= 3)；
+      * 输出 validity: "effective"，支持做主线分歧低吸与接力。
+    - 过渡分歧态 (transitional):
+      * 其余中性态。
+    """
+    try:
+        sec_cnt = int(active_sectors_count) if active_sectors_count is not None else 1
+        ldr_share = float(leader_turnover_share) if leader_turnover_share is not None else 8.0
+        lim_cnt = int(limit_up_clusters) if limit_up_clusters is not None else 3
+        mkt_ratio = float(market_amount_ratio) if market_amount_ratio is not None else 1.0
+    except (TypeError, ValueError):
+        return result("N/A", "rotation-effectiveness-v1", input_snapshot_id, ["numeric_parameters"], "unavailable")
+
+    require_range("active_sectors_count", sec_cnt, 0, 100)
+    require_range("leader_turnover_share", ldr_share, 0, 100)
+    require_range("limit_up_clusters", lim_cnt, 0, 1000)
+    require_range("market_amount_ratio", mkt_ratio, 0, 10)
+
+    is_fan = (sec_cnt >= 4 and ldr_share < 6.0) or (lim_cnt <= 2 and ldr_share < 6.0 and mkt_ratio < 1.05)
+    is_mainline = (ldr_share >= 8.0 and lim_cnt >= 3) or (ldr_share >= 10.0 and lim_cnt >= 2)
+
+    if is_fan:
+        rot_type = "electric_fan"
+        is_eff = False
+        advice = "当前日内板块无序轮动，成交量能分散，缺乏具有容量与梯队的核心主线，追高次日被套概率极高；触发【无效轮动防诱多预警】，实操策略：管住手，严禁追逐盘中脉冲。"
+        risk = "high"
+    elif is_mainline:
+        rot_type = "mainline_focused"
+        is_eff = True
+        advice = "核心主线成交额占比与梯队效应达标，资金聚焦度高，具备板块持续性，支持围绕核心主线分歧回踩低吸或打板前排先锋。"
+        risk = "low"
+    else:
+        rot_type = "transitional"
+        is_eff = True
+        advice = "轮动处于中性过渡阶段，需密切关注领涨板块次日开盘 9:25 是否具备金额比溢价与承接持续性。"
+        risk = "medium"
+
+    value = {
+        "rotation_type": rot_type,
+        "is_effective": is_eff,
+        "risk_level": risk,
+        "tactical_guidance": advice,
+        "metrics": {
+            "active_sectors_count": sec_cnt,
+            "leader_turnover_share": round(ldr_share, 2),
+            "limit_up_clusters": lim_cnt,
+            "market_amount_ratio": round(mkt_ratio, 2),
+        },
+    }
+    return result(value, "rotation-effectiveness-v1", input_snapshot_id)
+
+
+def calculate_leader_core_divergence(
+    core_trend="above_ma20",
+    core_net_flow=0.0,
+    leader_state="limit_up",
+    leader_height=3,
+    inner_up_ratio=50.0,
+    input_snapshot_id=None,
+):
+    """
+    审计板块内部‘百亿容量中军’与‘高标连板龙头’的分化与背离风险。
+    - 中军背离出货 (core_desertion): 中军跌破均线 (break_ma5 / break_ma20) 且资金流出，而龙头依旧涨停硬顶 -> 警示主力造势诱多出货；
+    - 龙头溃退反弹 (leader_collapse): 龙头已跌停 A 杀，后排或杂毛小票冲高 -> 警示假补涨掩护出逃；
+    - 健康共振 (healthy_resonance): 中军均线上方且资金流入，龙头连板开拓高度，内部上涨占比 > 60%。
+    """
+    c_trend = str(core_trend).lower()
+    l_state = str(leader_state).lower()
+    try:
+        c_flow = float(core_net_flow) if core_net_flow is not None else 0.0
+        l_height = int(leader_height) if leader_height is not None else 1
+        up_ratio = float(inner_up_ratio) if inner_up_ratio is not None else 50.0
+    except (TypeError, ValueError):
+        return result("N/A", "leader-core-divergence-v1", input_snapshot_id, ["numeric_parameters"], "unavailable")
+
+    require_range("inner_up_ratio", up_ratio, 0, 100)
+
+    is_core_desertion = ("break" in c_trend or c_flow < -5.0) and ("limit_up" in l_state or l_height >= 3) and up_ratio < 45.0
+    is_leader_collapse = ("limit_down" in l_state or "collapsed" in l_state) and up_ratio > 30.0
+
+    if is_core_desertion:
+        div_type = "core_desertion"
+        risk_lvl = "severe_divergence"
+        advice = "百亿中军破位走弱且资金净流出，仅剩小盘龙头硬顶连板，主线已进入【假繁荣出货尾声】；严禁以‘龙头未倒’为由加仓中军或后排跟风，谨防突发天地板通杀。"
+    elif is_leader_collapse:
+        div_type = "leader_collapse"
+        risk_lvl = "high_risk"
+        advice = "第一核心龙头已出现跌停 A 杀恶性负反馈，低位个股拉板仅为掩护出货的弱抽血，持续性极差，禁止追入任何所谓补涨标的。"
+    elif ("above" in c_trend or c_flow >= 0) and ("limit_up" in l_state or l_height >= 2) and up_ratio >= 55.0:
+        div_type = "healthy_resonance"
+        risk_lvl = "healthy"
+        advice = "中军大容量与先锋龙头形成良性量价共振，板块内部涨多跌少，梯队健康，支持中线持股或分歧加仓。"
+    else:
+        div_type = "neutral_divergence"
+        risk_lvl = "normal"
+        advice = "板块内部中军与龙头表现分歧中性，需观察明日开盘中军能否重回 5 日均线。"
+
+    value = {
+        "divergence_type": div_type,
+        "risk_level": risk_lvl,
+        "tactical_advice": advice,
+        "metrics": {
+            "core_trend": c_trend,
+            "core_net_flow": c_flow,
+            "leader_state": l_state,
+            "leader_height": l_height,
+            "inner_up_ratio": round(up_ratio, 2),
+        },
+    }
+    return result(value, "leader-core-divergence-v1", input_snapshot_id)
+
+
+def resolve_rotation_timeframe(
+    catalyst_scope="macro_trend",
+    duration_days=5,
+    trend_ma20_slope="up",
+    input_snapshot_id=None,
+):
+    """
+    识别板块的实际行情生命周期级别，破除固定 5 日机械尺度的周期错配：
+    - 超短脉冲 (short_term, 1–3日)：突发短命消息，次日开盘 9:35 决断，破开盘价坚决离场；
+    - 题材波段 (swing_rotation, 5–10日)：行业政策或周期性催化，依托 5 日/10 日均线滚动操作；
+    - 季度趋势主线 (major_trend, 20–60日)：产业革命与宏观大逻辑，缩量回踩 20 日线属黄金加仓点，不以单周资金流出误判为衰竭。
+    """
+    scope = str(catalyst_scope).lower()
+    slope = str(trend_ma20_slope).lower()
+    try:
+        days = int(duration_days) if duration_days is not None else 5
+    except (TypeError, ValueError):
+        return result("N/A", "rotation-timeframe-v1", input_snapshot_id, ["numeric_parameters"], "unavailable")
+
+    if scope in ("macro_trend", "industry_revolution", "major") and (days >= 15 or slope == "up"):
+        cycle_lvl = "major_trend"
+        cycle_name = "季度趋势大主线 (20–60日)"
+        defense = "依托 10 日与 20 日均线防守，日内与周度正常分歧不轻易下车，回踩缩量企稳为加仓买点。"
+    elif scope in ("pulsed", "event_pulsed", "news_flash", "rumor") or days <= 3:
+        cycle_lvl = "short_term"
+        cycle_name = "超短脉冲题材 (1–3日)"
+        defense = "严禁恋战与格局，次日开盘 9:35 确认强弱，不及预期或破分时均线坚决离场。"
+    else:
+        cycle_lvl = "swing_rotation"
+        cycle_name = "题材轮动波段 (5–10日)"
+        defense = "依托 5 日均线防守，高位滞涨出现 SEI 衰竭时果断止盈切出。"
+
+    value = {
+        "cycle_level": cycle_lvl,
+        "cycle_name": cycle_name,
+        "duration_days": days,
+        "appropriate_defense_line": defense,
+    }
+    return result(value, "rotation-timeframe-v1", input_snapshot_id)
+
+

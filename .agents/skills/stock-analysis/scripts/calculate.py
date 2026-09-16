@@ -15,8 +15,12 @@ import tools.calculations as calculations
 
 
 EXPLICIT_OPERATIONS = {
+    "assess_catalyst_exhaustion",
+    "assess_rotation_effectiveness",
     "assess_wyckoff_applicability",
     "classify_stock_archetype",
+    "filter_intraday_impulse",
+    "resolve_rotation_timeframe",
     "resolve_stock_data_mode",
     "select_stock_model",
     "summarize_seat_evidence",

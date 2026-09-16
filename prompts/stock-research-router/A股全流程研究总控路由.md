@@ -1,6 +1,6 @@
-# A股全流程研究总控路由
+# A股全流程研究总控路由与日内状态机
 
-本 Skill 只负责判断研究阶段、复用已验证上下文并交接给专业 Skill，不自行替代专业分析，也不假设宿主一定支持程序化调用其他 Skill。
+> 负责研判研究阶段、基于日内 5 大时序节点调度专业 Skill、保证跨 Skill 交易逻辑硬闭环（板块禁忌注入个股 Hard Gate、盘前对账昨日预案），不自行替代专业分析。
 
 执行前读取并遵循 [A股研究公共契约](references/common-research-contract.md)。
 
@@ -153,55 +153,73 @@ Scored Weight = 实际参与评分的原始权重
 
 当前 Skill 根目录存在 `scripts/update_manager.py` 时，可在每次研究开始前执行 `python scripts/update_manager.py reminder --quiet`。脚本自行保证默认 24 小时内最多联网检查一次；无新版本或缓存仍有效时不输出。发现新版本时仅在报告末尾提示版本号与更新命令，不得中断研究，也不得未经用户明确确认执行 `apply --yes`。检查失败保持静默，不降低研究结论状态。
 
-## 路由边界
+---
 
-- 明确提到盘前、8:30–9:15 或 9:25 竞价：选择 `market-prediction`。
-- 明确提到今日收盘、盘后或每日复盘：选择 `daily-review`。
-- 交易日 09:30–15:00 询问盘中大盘走势或板块异动：选择 `daily-review` 的盘中快照模式；`as_of` 标注盘中时点、`status=partial`，不强制写收盘评估台账，待 15:00 后再确定性回测。
-- 明确提到近5日、周末复盘、板块轮动：选择 `sector-rotation`。
-- 周末或节假日询问“下周行情怎么看”：优先选择 `sector-rotation` 复盘近5日行业与资金轮动并输出下周观察矩阵；待周一 08:30–09:15 再由 `market-prediction` 结合最新隔夜外盘做盘前推演。
-- 明确给出股票代码、名称或要求诊断个股：选择 `stock-analysis`。
-- 只有请求横跨两个以上阶段、要求继续前序研究，或意图无法由单一专业 Skill 完成时，才使用本 Router。
+## 一、日内 5 大时序节点状态机 (Intraday State Machine Pipeline)
 
-用户明确指定的任务优先于时间规则。不要仅因当前时间位于某个窗口，就覆盖用户清晰表达的意图。
+系统以交易日时间轴为核心状态机，自动流转并驱动专业 Skill：
 
-## 编排流程
+```
+[08:30–09:15 盘前谋定态] ➡️ [09:25–09:30 竞价决断态] ➡️ [09:30–15:00 盘中盯盘态]
+        ⬇                                                        ⬇
+  market-prediction                                        daily-review(盘中)
+(持仓防守+昨日对账+剧本)                                   (10:00分水岭脉冲拦截)
+                                                                 ⬇
+[周末/跨周 轮动态]       ⬅️ [15:00–18:00 收盘复盘态] ⬅️ [14:30 尾盘博弈态]
+  sector-rotation            daily-review(收盘)
+(多周期+电风扇过滤+背离)   (二八撕裂审计+次日作战池)
+```
 
-1. 提取用户要求的研究对象、时间范围、所处阶段和最终交付。
-2. **上下文读取（Artifact 优先，Handoff 回退）**：优先执行当前 Router Skill 根目录的 `scripts/artifact_store.py latest --type <prediction|auction|close_actual|daily_score|rotation|stock_diagnostic> --within-trading-days 3`（个股诊断加 `--subject <股票代码>`）读取最新有效 Artifact；输出为 `N/A`、`(expired)` 或文件损坏，以及脚本不可执行时，回退 `scripts/handoff_store.py latest --within-trading-days 3`（个股同样加 `--subject`）；两者都不可用时检查当前会话已有摘要。路由决策必须注明本次上下文来源（artifact / handoff / 会话）与日历精度。
-3. 输出简短路由决策：目标 Skill、可继承证据、仍需补采的数据。不得把旧摘要伪装为当前事实。
-4. 若宿主支持 Skill 调度，交由目标专业 Skill 执行；不支持时，明确提示用户调用对应 Skill，不在 Router 内复制整套专业框架。
-5. 专业报告完成后，用当前目标 Skill 根目录的 `scripts/handoff_store.py write --stdin` 校验并落盘交接摘要（rotation / stock 交接会自动双写为标准 Artifact，`eval_tracker` 的 record / result / record-daily 同理）；任何写入失败必须披露，不能声称闭环完成。
-6. daily-review 或 sector-rotation 输出标的池后，提供 `诊断 <代码或名称>` 的个股穿透入口；个股诊断只继承有来源的 L1/L2，继续补采 L3–L8。
+1. **Phase 1: 08:30–09:15 盘前谋定态 ➡️ `market-prediction`**
+   - 提取持仓防守红线，对账昨日复盘预案，输出【剧本 A/B/C】三大情景作战卡与 9:25 验证门槛。
+2. **Phase 2: 09:25–09:30 竞价决断态 ➡️ `market-prediction (Fast-Path)`**
+   - 30 秒内仅输出不超过 5 行的“竞价极速红绿灯卡”，3 秒读完直接去券商下单；数据在后台静默落盘。
+3. **Phase 3: 09:30–15:00 盘中盯盘态 ➡️ `daily-review (盘中快照模式)`**
+   - 重点执行 10:00 分水岭脉冲拦截（`filter_intraday_impulse`），剔除早盘假突破诱多废票；14:30 识别尾盘抢筹/跳水。`status=partial`，不写收盘台账。
+4. **Phase 4: 15:00–18:00 收盘复盘态 ➡️ `daily-review (收盘模式)`**
+   - 审计二八极端撕裂与假阳线（`calculate_market_divergence_index`），确定性落盘收盘事实，强制产出《次日实战候选作战池》。
+5. **Phase 5: 周五收盘/周末 跨周轮动态 ➡️ `sector-rotation`**
+   - 多周期时间尺度分级（`resolve_rotation_timeframe`），启动电风扇无效轮动过滤器（`assess_rotation_effectiveness`），审计中军龙头背离（`calculate_leader_core_divergence`）。
 
-## 多阶段任务顺序
+---
 
-- 盘前到收盘：先 `market-prediction`，收盘后由 `daily-review` 读取同日预测摘要并记录实际结果。
-- 收盘到个股：先 `daily-review` 或 `sector-rotation`，再将有证据的市场与板块状态交给 `stock-analysis`。
-- 周末全流程：先 `sector-rotation` 确定中期板块状态；若用户指定标的，再执行 `stock-analysis`。
+## 二、跨 Skill 逻辑硬闭环协议 (Hard Constraint Protocol)
 
-每个阶段保持自己的适用边界：不得在盘前生成尚不存在的收盘数据，不得在收盘复盘中伪造盘前预测，也不得因交接存在而跳过数据新鲜度检查。
+1. **板块战术禁忌注入个股 Hard Gate**：
+   - 当用户从复盘或轮动报告通过 `诊断 [代码/名称]` 穿透至 `stock-analysis` 时，Router 必须将前序报告中的 `primary_sectors`、`sector_lifecycle_state` 与操作禁忌一并打包传导；
+   - `stock-analysis` 执行 `validate_stock_hard_gate` 时，若所属板块处于“退潮期”或“高潮加速期且属于后排跟风”，强制触发战术拦截（`tactical_gate_blocked: true`），严禁逆势提示买入，消除上下游逻辑撕裂。
+2. **盘前强制对账昨日预案**：
+   - `market-prediction` 启动时，必须读取昨日 `daily-review` 输出的 `next_triggers` 与自选池，在 9:25 窗口逐条对账核销，标明【达标执行 / 失效放弃 / 破位止损】，杜绝孤立推演开盲盒。
 
-## 输出格式
+---
+
+## 三、路由边界与上下文读取
+
+- 用户明确指定的任务优先于时间规则。不要仅因当前时间位于某个窗口，就覆盖用户清晰表达的意图。
+- 优先调用 `artifact_store.py latest --within-trading-days 3` 读取不可变研究 Artifact；不可用时回退 `handoff_store.py latest`；注明上下文来源与日历精度。
+- 专业报告完成后，调用 `scripts/handoff_store.py write --stdin` 校验并原子落盘交接摘要；不可用时标注 `handoff_status=emitted_only`。
+- 不得把旧摘要伪装为当前事实。
+
+---
+
+## 四、输出格式规范
 
 ```text
 首屏摘要卡：
-结论：<本次路由要做什么>
+结论：<本次路由决策与调度动作>
 逻辑状态：<已识别 / 需澄清 / 无法路由>
-当前位置：<当前研究阶段>
+当前位置：<Phase 1–5 当前时序阶段>
 置信度：<高 / 中 / 低 / 数据不足>
 数据覆盖率：<上下文覆盖率或 N/A>
 数据状态：<完整数据 / 部分数据 / 数据不足>
 最大风险：<过期、冲突或缺失上下文>
-下一步观察：<目标 Skill 的第一项验证>
+下一步观察：<目标 Skill 的第一项验证门槛>
 
-路由决策：<目标 Skill 或执行顺序>
-继承上下文：<交接文件、日期、来源；没有则 N/A>
-需补数据：<列表>
+路由决策：<目标专业 Skill 或执行流水线>
+继承上下文：<交接文件、时点口径、板块生命周期状态与禁忌>
+战术门禁约束：<退潮期开仓归零 / 加速期禁追杂毛 / 正常放行>
 执行状态：<已交由宿主调度 / 请用户调用对应 Skill / 已完成>
 下一入口：<可选的后续 Skill 或“诊断 代码”>
 ```
 
-Router 的 `next_actions` 使用 `view_evidence`、`retry_data` 或跳转目标 Skill；不得输出专业评分或买卖结论。
-
-Router 不输出市场评分、涨跌概率、威科夫阶段或买卖建议；这些内容只能由相应专业 Skill 基于完整证据生成。
+Router 的 `next_actions` 使用 `view_evidence`、`retry_data` 或跳转目标 Skill；不得在 Router 中伪造专业分析或买卖点。

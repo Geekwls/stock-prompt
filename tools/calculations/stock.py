@@ -308,8 +308,11 @@ def calculate_chip_structure(
 
 def validate_stock_hard_gate(bar_count=None, adjusted=None, benchmark_complete=None, industry_complete=None,
                              input_snapshot_id=None, is_st=None, days_listed=None,
-                             kline_count=None, is_suspended=None):
-    """兼容旧调用：仅 full_mode 返回 True；新流程应直接调用 resolve_stock_data_mode。"""
+                             kline_count=None, is_suspended=None,
+                             sector_lifecycle_state=None, stock_role="follower"):
+    """兼容旧调用：仅 full_mode 返回 True；新流程应直接调用 resolve_stock_data_mode。
+    同时支持战术硬拦截：当所属板块处于退潮期，或加速高潮期且属于后排跟风时触发战术拦截。
+    """
     shortcut_mode = any(value is not None for value in (is_st, days_listed, kline_count, is_suspended))
     if bar_count is None:
         bar_count = kline_count
@@ -322,9 +325,25 @@ def validate_stock_hard_gate(bar_count=None, adjusted=None, benchmark_complete=N
     missing = list(mode.get("missing", []))
     if shortcut_mode and is_st is not False:
         missing.append("not_st")
-    passed = mode["value"]["mode"] == "full" and not missing
+
+    sec_state = str(sector_lifecycle_state or "").lower()
+    role = str(stock_role or "follower").lower()
+    tactical_blocked = False
+    tactical_warning = None
+
+    if sec_state in ("退潮期", "retreat", "state_4", "ice_point"):
+        tactical_blocked = True
+        tactical_warning = "所属板块处于退潮衰竭期，全天开仓归零，严禁逆势买入开新仓"
+        missing.append("sector_not_in_retreat")
+    elif sec_state in ("加速期", "acceleration") and role in ("follower", "跟风", "后排", "杂毛"):
+        tactical_blocked = True
+        tactical_warning = "所属板块处于高潮加速期，严禁追高开仓后排跟风杂毛，谨防次日核按钮接盘"
+        missing.append("not_acceleration_follower")
+
+    passed = mode["value"]["mode"] == "full" and not missing and not tactical_blocked
     return result(passed, "stock-hard-gate-v2", input_snapshot_id, missing,
-                  "complete" if passed else "failed", data_mode=mode["value"]["mode"])
+                  "complete" if passed else "failed", data_mode=mode["value"]["mode"],
+                  tactical_gate_blocked=tactical_blocked, tactical_warning=tactical_warning)
 
 
 def _window_return(series, window):

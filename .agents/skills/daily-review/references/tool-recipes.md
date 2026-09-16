@@ -5,17 +5,17 @@
 ### 盘中快照（交易日 09:30–15:00）
 
 - 分别调用 `get_index_kline`、`get_market_breadth`、`get_market_sentiment`、`get_sector_fund_flow`，必要时用 `get_stock_quote` 核验异动标的。
-- 所有结论以当前 `as_of` 为截止点，`status=partial`；不生成全天 Z_ATR、收盘主线阶段或次日矩阵，不写 `result` / `record-daily` 台账。
+- 所有结论以当前 `as_of` 为截止点，`status=partial`；调用 `filter_intraday_impulse` 识别 10:00 分水岭真伪脉冲；不写 `result` / `record-daily` 收盘台账。
 
 ### 收盘事实（15:00 后）
 
 1. **优先调用 MCP `get_close_review_context`**：
    - 入参：`{"date_str": "YYYYMMDD", "top_sectors_count": 5}`
    - 返回标准结构：`indices`（收盘与涨跌幅）、`sentiment`（两市量能与真实炸板率）、`breadth`（精确红盘率分布）、`top_fund_flow_sectors`（主力资金排行榜）与 `mainline_limit_quality`（领涨主线封板质量）；
-   - 自动包含冲突审计（如指数涨但红盘率偏低的二八分化预警）。
+   - 调用 `calculate_market_divergence_index` 审计二八极端撕裂与假阳线诱多。
 2. **多日资金延续性核验**：
-   - 调用 MCP `get_sector_fund_flow(count=10, days=2)` 获取主线板块 T-1 与 T 日主力资金连续性；
-   - 调用 MCP `get_sector_limit_quality(sector, date_str)` 获取主线封板质量与前缀安全归因。
+   - 调用 MCP `get_sector_fund_flow(count=10, days=2)` 获取主线板块主力资金连续性；
+   - 输出结构化《次日实战候选作战池》。
 
 ---
 
@@ -23,10 +23,12 @@
 
 | 计算目标 | 命令行调用入口 | 核心输入参数 |
 |---|---|---|
+| **二八撕裂与假阳线审计** | `python scripts/calculate.py calculate_market_divergence_index --json '{"index_pct": 0.45, "breadth_ratio": 24.5, "median_pct": -1.8, "is_fake_positive": true}'` | `index_pct`, `breadth_ratio`, `median_pct`, `is_fake_positive`；输出极化指数与情绪扣减/封顶判定 |
+| **盘中分时脉冲真伪拦截** | `python scripts/calculate.py filter_intraday_impulse --json '{"current_time": "09:50", "sector_gain": 3.1, "is_above_vwap": false, "pullback_broken": true}'` | `current_time`, `sector_gain`, `is_above_vwap`, `pullback_broken`；10:00 分水岭拦截诱多陷阱 |
 | **情绪五项加权分** | `python scripts/calculate.py calculate_market_sentiment_score --json '{"amount_score": 75, "breadth_score": 60, "limit_score": 70, "blown_score": 65, "ladder_score": 60, "volume_dev": -5, "up_ratio": 58, "coverage": 100}'` | 5项维度分 (0-100)、`volume_dev`、`up_ratio`、`coverage`；缩量且红盘占优时自动封顶 60 |
 | **连板梯队健康度** | `python scripts/calculate.py calculate_ladder_health --json '{"ladder_distribution": {"7": 1, "6": 0, "5": 0, "4": 0, "3": 0, "2": 2, "1": 15}}'` | `ladder_distribution` 字典；最高板 $\ge 4$ 且断层 $\ge 2$ 触发孤桩龙头预警 |
 | **存量吸血极化度** | `python scripts/calculate.py calculate_sector_cannibalization --json '{"leader_sector_turnover_share": 12.5, "market_amount_ratio": 0.95, "outflow_sectors_loss_rate": 2.1}'` | 领涨占比、两市成交额比、流出板块跌幅；输出 siphon_index 与受损板块 |
-| **资金延续评分** | `python scripts/calculate.py calculate_capital_continuity --json '{"amount_ratio": 0.85, "break_rate": 0.0909, "trigger_count": 5}'` | `amount_ratio` (0-1), `break_rate` (支持 0.0909、'9.09%' 或 9.09 百分数自适应，严禁裸数值 1), `trigger_count` (<3 缺失归一化) |
+| **资金延续评分** | `python scripts/calculate.py calculate_capital_continuity --json '{"amount_ratio": 0.85, "break_rate": 0.0909, "trigger_count": 5}'` | `amount_ratio`, `break_rate`, `trigger_count` |
 | **实际 Z_ATR 状态** | `python scripts/calculate.py calculate_atr_state --json '{"close": 3940, "previous_close": 3932, "atr14": 35}'` | `close`, `previous_close`, `atr14` |
 | **多分类 Brier 误差** | `python scripts/calculate.py calculate_multiclass_brier --json '{"probabilities": {"up": 0.36, "side": 0.48, "down": 0.16}, "actual_state": "side"}'` | `probabilities`, `actual_state` |
 
@@ -36,11 +38,8 @@
 
 ```bash
 # 15:00 收盘后：记录收盘结果（自动双写 close_actual Artifact）
-python scripts/stock_prompt.py eval result --date YYYY-MM-DD --z-atr 0.22 \
-    --top-sectors 农业种植,半导体,城市更新 --close 3940.55 --high 3955.0 --low 3930.0 --top1-sector-change 3.8
+python scripts/stock_prompt.py eval result --date YYYY-MM-DD --z-atr 0.22     --top-sectors 农业种植,半导体,城市更新 --close 3940.55 --high 3955.0 --low 3930.0 --top1-sector-change 3.8
 
 # 记录每日情绪与主线状态转移（自动双写 daily_score Artifact）
-python scripts/stock_prompt.py eval record-daily --date YYYY-MM-DD \
-    --sentiment-total 68 --capital-continuity 75 --opportunity 54 \
-    --mainline-sector 农业种植 --mainline-state 强化
+python scripts/stock_prompt.py eval record-daily --date YYYY-MM-DD     --sentiment-total 68 --capital-continuity 75 --opportunity 54     --mainline-sector 农业种植 --mainline-state 强化
 ```

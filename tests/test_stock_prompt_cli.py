@@ -47,6 +47,35 @@ class StockPromptCLITest(unittest.TestCase):
         self.assertEqual(completed.returncode, 0)
         self.assertIn("stock-prompt", completed.stdout)
 
+    def test_registered_in_registry_and_bundled_in_all_skills(self):
+        registry_path = MODULE.parents[1] / "registry.json"
+        registry = json.loads(registry_path.read_text(encoding="utf-8"))
+        self.assertIn("stock_prompt.py", registry["script_sources"])
+        self.assertEqual(registry["script_sources"]["stock_prompt.py"], "scripts/stock_prompt.py")
+        for skill in registry["skills"]:
+            self.assertIn(
+                "stock_prompt.py",
+                skill["bundled_scripts"],
+                f"stock_prompt.py missing from bundled_scripts in skill {skill['id']}",
+            )
+
+    def test_version_lookup_from_nested_parents(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            nested = root / ".agents" / "skills" / "daily-review" / "scripts"
+            nested.mkdir(parents=True)
+            (root / "registry.json").write_text(
+                json.dumps({"project": {"version": "9.9.9"}}), encoding="utf-8"
+            )
+            # Temporarily point CLI.SCRIPTS_DIR to nested
+            orig_dir = CLI.SCRIPTS_DIR
+            try:
+                CLI.SCRIPTS_DIR = nested
+                version = CLI.read_project_version()
+                self.assertEqual(version, "9.9.9")
+            finally:
+                CLI.SCRIPTS_DIR = orig_dir
+
 
 class HandoffCleanBackupRetentionTest(unittest.TestCase):
     def test_clean_prunes_old_backups_but_keeps_recent(self):

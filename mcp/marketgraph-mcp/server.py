@@ -732,10 +732,10 @@ def fetch_market_sentiment(date_str: Optional[str] = None) -> Dict[str, Any]:
                     p = line.split("~")
                     sh_change_raw = p[5].strip('\\"')
                     sh_change = f"{float(sh_change_raw):+.2f}%"
-                    sh_amount = float(p[9].strip('\\\"')) / 10000.0  # 亿元
+                    sh_amount = float(p[7].strip('\\\"')) / 10000.0  # 成交额(万元) -> 亿元
                 elif "s_sz399001" in line:
                     p = line.split("~")
-                    sz_amount = float(p[9].strip('\\\"')) / 10000.0  # 亿元
+                    sz_amount = float(p[7].strip('\\\"')) / 10000.0  # 成交额(万元) -> 亿元
         except Exception as exc:
             unavailable_sources.append(f"指数成交额: {type(exc).__name__}")
     else:

@@ -200,7 +200,7 @@ class MarketGraphMCPServerTest(unittest.TestCase):
     def test_fetch_market_sentiment_parsing(self, mock_get):
         def fake_get(url, timeout=4, encoding="utf-8"):
             if "qt.gtimg.cn" in url:
-                return 'v_s_sh000001="1~上证指数~000001~3850.20~+12.30~+0.32~120000~45000000~0~45000000";v_s_sz399001="1~深证成指~399001~11500.50~+25.10~+0.22~150000~55000000~0~55000000";'
+                return 'v_s_sh000001="1~上证指数~000001~3850.20~+12.30~+0.32~120000~45000000~0~650000.00";v_s_sz399001="1~深证成指~399001~11500.50~+25.10~+0.22~150000~55000000~0~520000.00";'
             if "getTopicZTPool" in url:
                 return json.dumps({"data": {"pool": [{"c": "000001", "lbc": 3}, {"c": "000002", "lbc": 1}]}})
             if "getTopicZBPool" in url:
@@ -212,6 +212,7 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         mock_get.side_effect = fake_get
         res = SERVER.fetch_market_sentiment()  # 当日路径走实时指数快照
         self.assertEqual(res.get("data_status"), "ok", res)
+        self.assertEqual(res["total_turnover_billion"], 10000.0)
         self.assertEqual(res["zt_count"], 2)
         self.assertEqual(res["zb_count"], 1)
         self.assertEqual(res["exact_break_rate"], "33.33%")

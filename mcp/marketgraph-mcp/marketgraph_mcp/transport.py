@@ -17,6 +17,7 @@ ALLOWED_HTTP_HOSTS = {
     "push2ex.eastmoney.com", "push2.eastmoney.com", "push2his.eastmoney.com",
     "datacenter-web.eastmoney.com", "searchapi.eastmoney.com",
     "money.finance.sina.com.cn",
+    "data.10jqka.com.cn", "d.10jqka.com.cn",
 }
 _HOST_LAST_REQUEST: Dict[str, float] = {}
 _HOST_FAILURE_STATE: Dict[str, Dict[str, Any]] = {}

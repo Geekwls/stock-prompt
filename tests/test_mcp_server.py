@@ -933,6 +933,52 @@ class MarketGraphMCPServerTest(unittest.TestCase):
             self.assertTrue(quote["is_capacity_core"])
             self.assertEqual(quote["core_role_tag"], "容量中军")
 
+    def test_ths_sector_kline_fallback(self):
+        """测试东财K线不可用时自动无缝降级同花顺原生日K网关"""
+        with patch.object(SERVER, "http_get") as mock_get:
+            def fake_get(url, **kwargs):
+                if "push2his" in url:
+                    raise ConnectionResetError("EastMoney closed")
+                if "10jqka" in url and "bk_881121" in url:
+                    mock_data = 'quotebridge_v6_line_bk_881121_01_last({"num":3,"name":"半导体","data":"20260915,100,105,95,102,1000,5000000000;20260916,102,108,100,107,1200,6000000000"})'
+                    return mock_data
+                raise AssertionError(f"unexpected url: {url}")
+            mock_get.side_effect = fake_get
+            SERVER.CACHE_STORE.clear()
+            res = SERVER.fetch_sector_kline("半导体", count=20)
+            self.assertEqual(res["source"], "P3_THS_Sector_Kline")
+            self.assertEqual(res["sector_name"], "半导体")
+            self.assertEqual(res["latest_close"], 107.0)
+            self.assertEqual(res["latest_amount_billion"], 60.0)
+            self.assertEqual(res["prev_amount_billion"], 50.0)
+            self.assertEqual(res["amount_ratio_1d"], 1.2)
+
+    def test_ths_sector_fund_flow_fallback(self):
+        """测试东财资金流不可用时自动无缝降级同花顺全行业资金流网关"""
+        with patch.object(SERVER, "http_get") as mock_get:
+            def fake_get(url, **kwargs):
+                if "push2.eastmoney.com" in url:
+                    raise TimeoutError("EastMoney timeout")
+                if "10jqka" in url:
+                    mock_html = """
+                    <table>
+                    <tr><th>序号</th><th>行业</th><th>指数</th><th>涨跌幅</th><th>流入</th><th>流出</th><th>净额</th><th>公司家数</th><th>领涨股</th><th>涨跌幅</th></tr>
+                    <tr><td>1</td><td><a href="http://q.10jqka.com.cn/thshy/detail/code/881121/">半导体</a></td><td>16000</td><td>+3.5%</td><td>100.0</td><td>80.0</td><td>20.0</td><td>150</td><td><a href="http://stockpage.10jqka.com.cn/688981/">中芯国际</a></td><td>+5.0%</td><td>50.0</td></tr>
+                    <tr><td>2</td><td><a href="http://q.10jqka.com.cn/thshy/detail/code/881155/">银行</a></td><td>4000</td><td>-0.5%</td><td>40.0</td><td>55.0</td><td>-15.0</td><td>42</td><td><a href="http://stockpage.10jqka.com.cn/601398/">工商银行</a></td><td>+0.2%</td><td>5.5</td></tr>
+                    </table>
+                    """
+                    return mock_html
+                raise AssertionError(f"unexpected url: {url}")
+            mock_get.side_effect = fake_get
+            SERVER.CACHE_STORE.clear()
+            res = SERVER.fetch_sector_fund_flow(count=2)
+            self.assertEqual(res["source"], "P3_THS_Sector_Fund_Flow")
+            self.assertEqual(len(res["top_inflow_sectors"]), 2)
+            top1 = res["top_inflow_sectors"][0]
+            self.assertEqual(top1["name"], "半导体")
+            self.assertEqual(top1["net_inflow_billion"], "+20.00 亿")
+            self.assertIn("中芯国际", top1["leading_stock"])
+
 
 if __name__ == "__main__":
     unittest.main()

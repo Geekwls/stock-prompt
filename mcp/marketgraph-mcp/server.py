@@ -13,6 +13,7 @@ import sys
 import json
 import time
 import math
+import re
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -1297,6 +1298,79 @@ STATIC_SECTOR_BASKETS = {
     "BK0477": ["002230", "300308", "600845"],  # 计算机设备 / 算力
 }
 
+# 同花顺 6 位行业板块代码字典 (881xxx)
+THS_SECTOR_MAP = {
+    "半导体": "881121", "BK1036": "881121",
+    "通信设备": "881129", "BK0448": "881129",
+    "消费电子": "881124", "BK0459": "881124", "电子元件": "881124", "PCB": "881124",
+    "计算机设备": "881115", "BK0450": "881115", "算力": "881115",
+    "光学光电子": "881122", "BK0479": "881122",
+    "证券": "881157", "BK0473": "881157", "券商": "881157",
+    "银行": "881155", "BK0475": "881155",
+    "保险": "881156", "BK0474": "881156",
+    "多元金融": "881158", "BK0476": "881158",
+    "汽车整车": "881125", "BK0480": "881125",
+    "汽车零部件": "881126", "BK0481": "881126",
+    "电池": "881146", "BK1033": "881146",
+    "光伏设备": "881145", "BK1031": "881145",
+    "风电设备": "881280", "BK1032": "881280",
+    "白酒": "881133", "BK0428": "881133", "饮料制造": "881133", "食品饮料": "881133",
+    "食品加工制造": "881134",
+    "化学制药": "881140", "BK0465": "881140", "医药": "881140",
+    "中药": "881141", "BK0464": "881141",
+    "生物制品": "881142",
+    "医疗器械": "881144",
+    "医疗服务": "881175",
+    "医药商业": "881143",
+    "游戏": "881275", "BK0478": "881275",
+    "文化传媒": "881164", "BK0494": "881164", "传媒": "881164",
+    "影视院线": "881274",
+    "房地产": "881153", "BK0488": "881153", "房地产开发": "881153",
+    "建筑装饰": "881116", "BK0487": "881116",
+    "建筑材料": "881115",
+    "通用设备": "881117", "BK0437": "881117", "机器人": "881117",
+    "专用设备": "881118", "BK0440": "881118",
+    "自动化设备": "881171",
+    "煤炭": "881105", "BK0425": "881105", "煤炭开采加工": "881105",
+    "港口航运": "881148", "BK0737": "881148", "航运港口": "881148",
+    "公路铁路运输": "881149",
+    "电力": "881165", "BK0427": "881165",
+    "环保设备": "881284", "BK0741": "881284", "环保": "881284",
+    "基础化工": "881109", "BK0498": "881109", "化学制品": "881109",
+    "钢铁": "881185", "BK0433": "881185",
+    "有色金属": "881187", "BK0436": "881187", "工业金属": "881187",
+    "贵金属": "881186", "BK0486": "881186", "黄金": "881186",
+    "旅游及酒店": "881160", "BK0495": "881160",
+    "互联网电商": "881177", "BK0477": "881177",
+    "教育": "881178",
+    "农产品加工": "881103", "BK1054": "881103",
+    "养殖业": "881102", "BK0424": "881102",
+    "种植业与林业": "881101",
+    "家居用品": "881139",
+    "服装家纺": "881136",
+    "造纸": "881137",
+    "小家电": "881173",
+    "白色家电": "881131",
+    "零售": "881158", "BK0422": "881158",
+}
+
+
+def resolve_ths_sector_code(sector: str, sector_code: Optional[str] = None) -> Optional[str]:
+    """解析为同花顺 6 位行业代码 (881xxx)"""
+    if sector_code and sector_code in THS_SECTOR_MAP:
+        return THS_SECTOR_MAP[sector_code]
+    clean = sector.strip()
+    if clean in THS_SECTOR_MAP:
+        return THS_SECTOR_MAP[clean]
+    stripped = clean.rstrip("行业").rstrip("板块")
+    if stripped in THS_SECTOR_MAP:
+        return THS_SECTOR_MAP[stripped]
+    for k, v in THS_SECTOR_MAP.items():
+        if k in clean or clean in k:
+            return v
+    return None
+
+
 
 
 def resolve_sector_code(keyword: str) -> Optional[str]:
@@ -1445,9 +1519,77 @@ def fetch_sector_kline(sector: str, count: int = 130) -> Dict[str, Any]:
             set_cached(cache_key, res, ttl=ttl_for_history(rows[-1]["date"]))
             return res
     except Exception:
-        pass  # 主源不可用, 自动走 fflow 兜底
+        pass  # 主源不可用, 优先走同花顺原生日K, 次选 fflow 兜底
 
-    # 兜底: fflow daykline (收盘序列 + 主力净额, 无盘中高低价与成交额)
+    # 备源 1: 同花顺板块原生日K网关 (完整 OHLCV + 真实成交额)
+    ths_code = resolve_ths_sector_code(sector, sector_code)
+    if ths_code:
+        try:
+            ths_url = f"https://d.10jqka.com.cn/v6/line/bk_{ths_code}/01/last.js"
+            raw_ths = http_get(ths_url, timeout=4, encoding="gbk")
+            if "(" in raw_ths and ")" in raw_ths:
+                data_str = raw_ths[raw_ths.index("(") + 1 : raw_ths.rindex(")")]
+                obj = json.loads(data_str)
+                parts = [b for b in obj.get("data", "").split(";") if b]
+                rows = []
+                for p in parts[-count:]:
+                    fields = p.split(",")
+                    if len(fields) >= 7:
+                        d = fields[0]
+                        fmt_date = f"{d[:4]}-{d[4:6]}-{d[6:8]}" if len(d) == 8 else d
+                        rows.append({
+                            "date": fmt_date,
+                            "open": safe_float(fields[1], 0.0),
+                            "high": safe_float(fields[2], 0.0),
+                            "low": safe_float(fields[3], 0.0),
+                            "close": safe_float(fields[4], 0.0),
+                            "amount_billion": round(safe_float(fields[6], 0.0) / 100000000.0, 2),
+                        })
+                closes = [r["close"] for r in rows]
+                n = len(closes)
+                if n >= 2 and closes[-1] > 0:
+                    amounts = [r["amount_billion"] for r in rows]
+                    prev_amount = amounts[-2] if n >= 2 else None
+                    res = {
+                        "source": "P3_THS_Sector_Kline",
+                        "data_status": "ok",
+                        "ohlc_source": True,
+                        "sector_code": sector_code,
+                        "ths_code": f"bk_{ths_code}",
+                        "sector_name": obj.get("name") or sector,
+                        "valid_bars": n,
+                        "latest_date": rows[-1]["date"],
+                        "latest_close": closes[-1],
+                        "latest_open": rows[-1]["open"],
+                        "latest_high": rows[-1]["high"],
+                        "latest_low": rows[-1]["low"],
+                        "latest_change_pct": _sector_return(closes, 1),
+                        "ma5": _sector_ma(closes, 5),
+                        "ma10": _sector_ma(closes, 10),
+                        "ma20": _sector_ma(closes, 20),
+                        "ma60": _sector_ma(closes, 60),
+                        "recent_5d_return": _sector_return(closes, 5),
+                        "recent_20d_return": _sector_return(closes, 20),
+                        "recent_60d_return": _sector_return(closes, 60),
+                        "high_20d": max(r["high"] for r in rows[-min(20, n):]),
+                        "low_20d": min(r["low"] for r in rows[-min(20, n):]),
+                        "high_60d": max(r["high"] for r in rows[-min(60, n):]),
+                        "low_60d": min(r["low"] for r in rows[-min(60, n):]),
+                        "latest_amount_billion": amounts[-1],
+                        "prev_amount_billion": prev_amount,
+                        "amount_ratio_1d": round(amounts[-1] / prev_amount, 2) if prev_amount and prev_amount > 0 else None,
+                        "avg_amount_5d_billion": round(sum(amounts[-min(5, n):]) / min(5, n), 2),
+                        "note": "东财标准K线不可用，已自动切换同花顺行业原生日K网关(完整OHLCV+真实成交额口径)；amount_ratio_1d 即板块资金延续评分成交连续度 V 项的直接输入",
+                    }
+                    if n < count:
+                        res["data_status"] = "partial"
+                        res["note"] += f"；实际仅取得 {n} 根 (不足请求的 {count} 根)"
+                    set_cached(cache_key, res, ttl=ttl_for_history(rows[-1]["date"]))
+                    return res
+        except Exception:
+            pass
+
+    # 备源 2: fflow daykline (收盘序列 + 主力净额, 无盘中高低价与成交额)
     url = (
         "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get"
         f"?lmt={count}&klt=101&secid=90.{sector_code}&secid2=90.{sector_code}"
@@ -1785,7 +1927,107 @@ def fetch_sector_fund_flow(count: int = 20, days: int = 1) -> Dict[str, Any]:
         set_cached(cache_key, res)
         return res
     except Exception as e:
-        # 降级备源: 新浪全行业 49 大板块实时网关 (总成交额与涨跌排行口径)
+        # 降级备源 1: 同花顺全行业资金流网关 (含50大行业真实主力净流入额、流入流出、领涨股)
+        try:
+            ths_url = "https://data.10jqka.com.cn/funds/hyzjl/"
+            ths_raw = http_get(ths_url, timeout=5, encoding="gbk")
+            rows = re.findall(r'<tr[^>]*>(.*?)</tr>', ths_raw, re.DOTALL)
+            sectors = []
+            for r in rows[1:]:
+                cols = [re.sub(r'<[^>]+>', '', c).strip() for c in re.findall(r'<td[^>]*>(.*?)</td>', r, re.DOTALL)]
+                if len(cols) >= 10:
+                    code_match = re.search(r'/detail/code/(\d+)/', r)
+                    ths_code = code_match.group(1) if code_match else ''
+                    stock_match = re.search(r'stockpage\.10jqka\.com\.cn/(\d+)/', r)
+                    stock_code = stock_match.group(1) if stock_match else ''
+                    s_name = cols[1]
+                    s_code = resolve_sector_code(s_name) or (f"THS_{ths_code}" if ths_code else "N/A")
+                    chg_val = safe_float(cols[3].rstrip("%"), 0.0)
+                    net_inflow_b = safe_float(cols[6], 0.0)
+                    inflow_b = safe_float(cols[4], 0.0)
+                    outflow_b = safe_float(cols[5], 0.0)
+                    turnover_b = round(inflow_b + outflow_b, 2)
+                    sectors.append({
+                        "code": s_code,
+                        "ths_code": ths_code,
+                        "name": s_name,
+                        "change_pct": f"{chg_val:+.2f}%",
+                        "change_val": chg_val,
+                        "turnover_billion": turnover_b,
+                        "net_inflow_billion": net_inflow_b,
+                        "top_stock_name": cols[8],
+                        "top_stock_code": stock_code,
+                        "top_stock_pct": cols[9],
+                    })
+            if sectors:
+                sorted_by_inflow = sorted(sectors, key=lambda x: x["net_inflow_billion"], reverse=True)
+                top_inflows = sorted_by_inflow[:count]
+                top_outflows = sorted_by_inflow[-count:][::-1]
+
+                sorted_by_gain = sorted(sectors, key=lambda x: x["change_val"], reverse=True)
+                top_gainers = sorted_by_gain[:count]
+                top_losers = sorted_by_gain[-count:][::-1]
+
+                fallback_res = {
+                    "source": "P3_THS_Sector_Fund_Flow",
+                    "data_status": "ok",
+                    "note": f"东财主力净流入不可用({type(e).__name__})，已无缝切换同花顺行业资金流网关(主力净流入、流入流出、涨跌排行与领涨股口径)",
+                    "total_sectors_tracked": len(sectors),
+                    "top_inflow_sectors": [
+                        {
+                            "rank": i + 1,
+                            "name": s["name"],
+                            "code": s["code"],
+                            "change_pct": s["change_pct"],
+                            "turnover_billion": f"{s['turnover_billion']:.2f} 亿",
+                            "net_inflow_billion": f"{s['net_inflow_billion']:+.2f} 亿",
+                            "leading_stock": f"{s['top_stock_name']}({s['top_stock_code']})" if s['top_stock_code'] else s['top_stock_name'],
+                        }
+                        for i, s in enumerate(top_inflows)
+                    ],
+                    "top_outflow_sectors": [
+                        {
+                            "rank": i + 1,
+                            "name": s["name"],
+                            "code": s["code"],
+                            "change_pct": s["change_pct"],
+                            "turnover_billion": f"{s['turnover_billion']:.2f} 亿",
+                            "net_outflow_billion": f"{s['net_inflow_billion']:+.2f} 亿",
+                            "leading_stock": f"{s['top_stock_name']}({s['top_stock_code']})" if s['top_stock_code'] else s['top_stock_name'],
+                        }
+                        for i, s in enumerate(top_outflows)
+                    ],
+                    "top_gainer_sectors": [
+                        {
+                            "rank": i + 1,
+                            "name": s["name"],
+                            "code": s["code"],
+                            "change_pct": s["change_pct"],
+                            "turnover_billion": f"{s['turnover_billion']:.2f} 亿",
+                            "net_inflow": f"{s['net_inflow_billion']:+.2f} 亿",
+                            "leader": f"{s['top_stock_name']}({s['top_stock_code']})" if s['top_stock_code'] else s['top_stock_name'],
+                        }
+                        for i, s in enumerate(top_gainers)
+                    ],
+                    "top_loser_sectors": [
+                        {
+                            "rank": i + 1,
+                            "name": s["name"],
+                            "code": s["code"],
+                            "change_pct": s["change_pct"],
+                            "turnover_billion": f"{s['turnover_billion']:.2f} 亿",
+                            "net_inflow": f"{s['net_inflow_billion']:+.2f} 亿",
+                        }
+                        for i, s in enumerate(top_losers)
+                    ],
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                }
+                set_cached(cache_key, fallback_res)
+                return fallback_res
+        except Exception:
+            pass
+
+        # 降级备源 2: 新浪全行业 49 大板块实时网关 (总成交额与涨跌排行口径)
         try:
             sina_url = "https://money.finance.sina.com.cn/q/view/newSinaHy.php"
             sina_raw = http_get(sina_url, timeout=5, encoding="gbk")

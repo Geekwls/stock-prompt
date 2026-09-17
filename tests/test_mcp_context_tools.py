@@ -103,12 +103,14 @@ class MCPContextToolsTest(unittest.TestCase):
         }
         mock_ladder = {"source": "P3_Eastmoney_Limit_Up_Ladder", "data_status": "ok"}
         mock_quality = {"source": "P3_Eastmoney_Sector_Limit_Quality", "data_status": "ok", "seal_quality_score": 78.0}
+        mock_lhb = {"source": "P3_Eastmoney_Longhubang", "data_status": "ok"}
 
         with patch.object(SERVER, "fetch_index_kline", return_value=mock_idx), \
              patch.object(SERVER, "fetch_market_sentiment", return_value=mock_sent), \
              patch.object(SERVER, "fetch_market_breadth", return_value=mock_breadth), \
              patch.object(SERVER, "fetch_sector_fund_flow", return_value=mock_fund), \
              patch.object(SERVER, "fetch_limit_up_ladder", return_value=mock_ladder), \
+             patch.object(SERVER, "fetch_longhubang_detail", return_value=mock_lhb), \
              patch.object(SERVER, "fetch_sector_limit_quality", return_value=mock_quality):
 
             res = SERVER.fetch_close_review_context(top_sectors_count=3)

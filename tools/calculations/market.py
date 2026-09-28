@@ -582,3 +582,134 @@ def reconcile_watchlist_triggers(triggers, observations, input_snapshot_id=None)
     counts = {status: sum(row["status"] == status for row in rows) for status in ("confirmed", "abandoned", "stop_loss", "unverifiable")}
     return result({"items": rows, "counts": counts, "decision": "actionable" if rows and counts["unverifiable"] == 0 else "conditional"},
                   "watchlist-reconcile-v1", input_snapshot_id, [] if rows else ["non_empty_triggers"], "complete" if rows else "unavailable")
+
+
+def calculate_tactical_position_budget(
+    sentiment_total=50.0,
+    market_regime="S2",
+    divergence_level="neutral",
+    extreme_loss_ratio=0.0,
+    input_snapshot_id=None,
+):
+    """
+    计算次日实战推荐总仓位上限与单票风险配额。
+    - sentiment_total: 0-100 全市场情绪得分
+    - market_regime: S0-S6 市场环境
+    - divergence_level: healthy / neutral / severe_divergence / fake_positive_trap
+    - extreme_loss_ratio: 日内恶性亏钱个股占比(%)
+    """
+    try:
+        sent = float(sentiment_total) if sentiment_total is not None else 50.0
+        ext_loss = float(extreme_loss_ratio) if extreme_loss_ratio is not None else 0.0
+    except (TypeError, ValueError):
+        return result("N/A", "tactical-position-budget-v1", input_snapshot_id, ["numeric_parameters"], "unavailable")
+
+    regime = str(market_regime).upper()
+    regime_base_map = {
+        "S0": 10.0,   # 恐慌急跌底：空仓或轻仓左侧首仓试错
+        "S1": 30.0,   # 止跌修复期：轻仓试错先锋龙头
+        "S2": 40.0,   # 存量震荡轮动：控制半仓以下，低吸为主
+        "S3": 65.0,   # 放量突破期：顺势加仓主升
+        "S4": 80.0,   # 趋势主升加速：重仓锁仓核心中军
+        "S5": 25.0,   # 高位滞涨出货：果断减仓防守
+        "S6": 0.0,    # 无序单边阴跌退潮：绝对空仓
+    }
+    base_cap = regime_base_map.get(regime, 30.0)
+
+    # 情绪分微调
+    if sent < 45.0:
+        base_cap -= 10.0
+    elif sent > 75.0 and regime in ("S3", "S4"):
+        base_cap += 10.0
+
+    # 二八极端割裂与假阳线诱多封顶
+    div_level = str(divergence_level).lower()
+    if div_level in ("severe_divergence", "extreme_polarization", "fake_positive_trap"):
+        base_cap = min(base_cap, 30.0)
+
+    # 极端亏钱效应扣减
+    if ext_loss >= 15.0:
+        base_cap = min(base_cap, 20.0)
+    elif ext_loss >= 25.0:
+        base_cap = 0.0
+
+    max_position_cap = max(0.0, min(80.0, base_cap))
+    single_leader_cap = min(15.0, round(max_position_cap * 0.4, 1)) if max_position_cap > 0 else 0.0
+    single_core_cap = min(25.0, round(max_position_cap * 0.6, 1)) if max_position_cap > 0 else 0.0
+    cash_buffer_min = round(100.0 - max_position_cap, 1)
+
+    guidance = (
+        "绝对防守空仓" if max_position_cap == 0.0
+        else "轻仓防守试错" if max_position_cap <= 30.0
+        else "常态稳健博弈" if max_position_cap <= 50.0
+        else "积极进取主升"
+    )
+
+    value = {
+        "max_position_cap": round(max_position_cap, 1),
+        "single_leader_cap": single_leader_cap,
+        "single_core_cap": single_core_cap,
+        "cash_buffer_min": cash_buffer_min,
+        "tactical_guidance": guidance,
+        "regime_base": regime_base_map.get(regime, 30.0),
+        "divergence_capped": div_level in ("severe_divergence", "extreme_polarization", "fake_positive_trap"),
+    }
+    return result(value, "tactical-position-budget-v1", input_snapshot_id)
+
+
+def calculate_extreme_loss_effect(
+    limit_down_count=0,
+    limit_down_sealed_amount_yi=0.0,
+    nuclear_count=0,
+    big_face_count=0,
+    nuclear_sealed_max_yi=0.0,
+    input_snapshot_id=None,
+):
+    """
+    量化全市场极端亏钱效应、大面率与短线流动性冻结风险。
+    - limit_down_count: 跌停家数
+    - limit_down_sealed_amount_yi: 跌停封单总金额(亿元)
+    - nuclear_count: 一字跌停(核按钮)家数
+    - big_face_count: 日内冲高回落大面个股数量(日内最高>=5%且收盘<=-3%)
+    - nuclear_sealed_max_yi: 单只标的最大一字封单金额(亿元)
+    """
+    try:
+        ld_cnt = int(limit_down_count) if limit_down_count is not None else 0
+        ld_sealed = float(limit_down_sealed_amount_yi) if limit_down_sealed_amount_yi is not None else 0.0
+        nuc_cnt = int(nuclear_count) if nuclear_count is not None else 0
+        face_cnt = int(big_face_count) if big_face_count is not None else 0
+        nuc_max = float(nuclear_sealed_max_yi) if nuclear_sealed_max_yi is not None else 0.0
+    except (TypeError, ValueError):
+        return result("N/A", "extreme-loss-effect-v1", input_snapshot_id, ["numeric_parameters"], "unavailable")
+
+    is_liquidity_frozen = (ld_sealed >= 30.0) or (nuc_cnt >= 3) or (nuc_max >= 8.0)
+    is_severe_loss = (face_cnt >= 15) or (ld_cnt >= 20) or is_liquidity_frozen
+
+    if is_severe_loss:
+        loss_level = "severe"
+        short_term_veto = True
+        prompt = "【高危预警：流动性踩踏】跌停巨额封死或大面个股集中爆发，高位获利盘不计成本出逃，触发短线接力一票否决，坚决严禁追涨任何连板个股！"
+    elif face_cnt >= 8 or ld_cnt >= 10 or ld_sealed >= 15.0 or nuc_cnt >= 1:
+        loss_level = "medium"
+        short_term_veto = False
+        prompt = "【警惕分歧】局部亏钱效应显现，炸板大面增加，前排去弱留强，后排杂毛严禁盲目接力。"
+    else:
+        loss_level = "low"
+        short_term_veto = False
+        prompt = "极端亏钱效应处于安全区间，未触发流动性踩踏。"
+
+    value = {
+        "loss_effect_level": loss_level,
+        "short_term_veto": short_term_veto,
+        "is_liquidity_frozen": is_liquidity_frozen,
+        "metrics": {
+            "limit_down_count": ld_cnt,
+            "limit_down_sealed_amount_yi": round(ld_sealed, 2),
+            "nuclear_count": nuc_cnt,
+            "big_face_count": face_cnt,
+            "nuclear_sealed_max_yi": round(nuc_max, 2),
+        },
+        "risk_prompt": prompt,
+    }
+    return result(value, "extreme-loss-effect-v1", input_snapshot_id)
+

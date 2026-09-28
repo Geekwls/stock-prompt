@@ -25,6 +25,8 @@
 | 计算目标 | 命令行调用入口 | 核心输入参数 |
 |---|---|---|
 | **二八撕裂与假阳线审计** | `python scripts/calculate.py calculate_market_divergence_index --json '{"index_pct": 0.45, "breadth_ratio": 24.5, "median_pct": -1.8, "is_fake_positive": true}'` | `index_pct`, `breadth_ratio`, `median_pct`, `is_fake_positive`；输出极化指数与情绪扣减/封顶判定 |
+| **极端大面与流动性踩踏** | `python scripts/calculate.py calculate_extreme_loss_effect --json '{"limit_down_count": 18, "limit_down_sealed_amount_yi": 35.0, "nuclear_count": 3, "big_face_count": 16}'` | 跌停封单与大面数；触发 short_term_veto 时严禁追涨任何连板 |
+| **次日全局仓位预算** | `python scripts/calculate.py calculate_tactical_position_budget --json '{"sentiment_total": 52.0, "market_regime": "S2", "divergence_level": "severe_divergence"}'` | 情绪分、Regime、二八割裂度；输出次日建议最大总仓位上限与单票配额 |
 | **盘中分时脉冲真伪拦截** | `python scripts/calculate.py filter_intraday_impulse --json '{"current_time": "09:50", "sector_gain": 3.1, "is_above_vwap": false, "pullback_broken": true}'` | `current_time`, `sector_gain`, `is_above_vwap`, `pullback_broken`；10:00 分水岭拦截诱多陷阱 |
 | **情绪五项加权分** | `python scripts/calculate.py calculate_market_sentiment_score --json '{"amount_score": 75, "breadth_score": 60, "limit_score": 70, "blown_score": 65, "ladder_score": 60, "volume_dev": -5, "up_ratio": 58, "coverage": 100}'` | 5项维度分 (0-100)、`volume_dev`、`up_ratio`、`coverage`；缩量且红盘占优时自动封顶 60 |
 | **连板梯队健康度** | `python scripts/calculate.py calculate_ladder_health --json '{"ladder_distribution": {"7": 1, "6": 0, "5": 0, "4": 0, "3": 0, "2": 2, "1": 15}}'` | `ladder_distribution` 字典；最高板 $\ge 4$ 且断层 $\ge 2$ 触发孤桩龙头预警 |

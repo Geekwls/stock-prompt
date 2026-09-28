@@ -1,5 +1,29 @@
 # CHANGELOG (更新日志)
 
+## [v8.1.0] - 2026-09-28
+
+### 🛡️ 实战策略深水区风控重构 (Tactical Risk & Capital Allocation Engine)
+- **次日实战作战池动态全局仓位总控 (`calculate_tactical_position_budget`)**：
+  - 将全市场情绪分、Market Regime、二八割裂度与大面率直接映射为次日全局最大仓位上限（Global Position Cap）与单票风控配额；
+  - 《次日实战候选作战池》上方强制显示次日仓位预算卡与现金安全垫底线，彻底杜绝在弱市震荡中重仓追高的爆仓风险。
+- **极端大面与流动性踩踏防爆雷体系 (`calculate_extreme_loss_effect`)**：
+  - 统计跌停封单总金额（流动性黑洞）与日内大面率（日内振幅超 8% 且收大阴线个股数）；
+  - 触发 `short_term_veto: true` 时，短线接力一票否决，坚决严禁追涨任何连板个股。
+- **板块成交容量门槛审计 (`validate_sector_capacity`)**：
+  - 设定板块成交额占全市场总成交额 $\ge 4.0\%$ 或 $\ge 350$ 亿的超级主线门槛；
+  - 占全市场 $< 1.5\%$ 或 $< 100$ 亿的小众微型题材一律剥夺主线中军评级，明确标注为小资金游击战，大资金严禁建仓。
+- **资金跷跷板对立外溢矩阵 (`map_capital_seesaw_matrix`)**：
+  - 内置 A 股经典存量博弈资金跷跷板模型（科技 vs 防御红利、资源 vs 新能源、超短 vs 大盘中字头蓝筹）；
+  - 主线分歧退潮时自动推演资金最可能外溢对流的对冲避险承接池。
+- **个股阶梯动态移动止盈保护 (`calculate_dynamic_trailing_stop`)**：
+  - 浮盈 $\ge 8\%$ 强制上移至保本线（成本 $+0.5\%$），确立“利润绝不可转为亏损”的第一铁律；
+  - 浮盈 $\ge 20\%$ 锚定 10 日均线或高点回撤 $10\%$ 锁定大趋势胜果。
+- **战术硬门禁拦截逆势加仓摊平 (`validate_stock_hard_gate`)**：
+  - 当标的处于空头破位下行且当前持仓为浮亏时，强制触发战术硬拦截，一票否决逆势补仓摊平成本。
+- **确定性计算与自动化测试**：
+  - 新增 `calculate_tactical_position_budget`、`calculate_extreme_loss_effect`、`validate_sector_capacity`、`map_capital_seesaw_matrix`、`calculate_dynamic_trailing_stop` 5 大纯计算函数；
+  - 新增 `tests/test_tactical_position_and_risk.py` 测试套件，全量 247 项单元测试全部绿灯通过。
+
 ## [v8.0.0] - 2026-09-16
 
 ### 🏆 全链路实战作战与日内状态机闭环系统 (Milestone Release)

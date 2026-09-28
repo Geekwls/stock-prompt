@@ -309,9 +309,12 @@ def calculate_chip_structure(
 def validate_stock_hard_gate(bar_count=None, adjusted=None, benchmark_complete=None, industry_complete=None,
                              input_snapshot_id=None, is_st=None, days_listed=None,
                              kline_count=None, is_suspended=None,
-                             sector_lifecycle_state=None, stock_role="follower"):
+                             sector_lifecycle_state=None, stock_role="follower",
+                             position_state=None, trend_state=None):
     """兼容旧调用：仅 full_mode 返回 True；新流程应直接调用 resolve_stock_data_mode。
-    同时支持战术硬拦截：当所属板块处于退潮期，或加速高潮期且属于后排跟风时触发战术拦截。
+    同时支持战术硬拦截：
+    1. 当所属板块处于退潮期，或加速高潮期且属于后排跟风时触发战术拦截；
+    2. 当标的处于空头破位下行且持仓处于浮亏时，强制触发禁止逆势加仓摊平硬拦截。
     """
     shortcut_mode = any(value is not None for value in (is_st, days_listed, kline_count, is_suspended))
     if bar_count is None:
@@ -328,6 +331,8 @@ def validate_stock_hard_gate(bar_count=None, adjusted=None, benchmark_complete=N
 
     sec_state = str(sector_lifecycle_state or "").lower()
     role = str(stock_role or "follower").lower()
+    pos_state = str(position_state or "").lower()
+    tr_state = str(trend_state or "").lower()
     tactical_blocked = False
     tactical_warning = None
 
@@ -339,12 +344,17 @@ def validate_stock_hard_gate(bar_count=None, adjusted=None, benchmark_complete=N
         tactical_blocked = True
         tactical_warning = "所属板块处于高潮加速期，严禁追高开仓后排跟风杂毛，谨防次日核按钮接盘"
         missing.append("not_acceleration_follower")
+    elif pos_state in ("holding_loss", "浮亏") and tr_state in ("break_ma20", "markdown", "downtrend", "phase_c", "phase_d", "phase_e", "破位"):
+        tactical_blocked = True
+        tactical_warning = "【铁律拦截：禁止逆势加仓摊平】该标的已处于破位下降趋势且当前持仓发生亏损，严禁任何逆势加仓摊平动作！逆势补仓是爆仓之源，严格执行反弹减仓或止损离场！"
+        missing.append("not_averaging_down_in_downtrend")
 
     passed = mode["value"]["mode"] == "full" and not missing and not tactical_blocked
     entry_allowed = bool(passed and not tactical_blocked)
     blocked_reason = (
         "sector_retreat" if sec_state in ("退潮期", "retreat", "state_4", "ice_point") else
-        "acceleration_follower" if tactical_blocked else None
+        "acceleration_follower" if (sec_state in ("加速期", "acceleration") and role in ("follower", "跟风", "后排", "杂毛")) else
+        "averaging_down_in_downtrend" if tactical_blocked else None
     )
     return result(passed, "stock-hard-gate-v2", input_snapshot_id, missing,
                   "complete" if passed else "failed", data_mode=mode["value"]["mode"],
@@ -472,3 +482,61 @@ def calculate_risk_reward(entry=None, stop=None, targets=None, friction=0.0, inp
     if reward <= 0:
         return result("N/A", "risk-reward-v1", input_snapshot_id, ["positive_net_reward"], "unavailable")
     return result(round(reward / risk, 6), "risk-reward-v1", input_snapshot_id, entry=entry, stop=stop, conservative_target=conservative, risk=round(risk, 6), reward=round(reward, 6))
+
+
+def calculate_dynamic_trailing_stop(
+    entry_price=0.0,
+    current_price=0.0,
+    highest_price=0.0,
+    ma5=None,
+    ma10=None,
+    input_snapshot_id=None,
+):
+    """
+    阶梯式动态移动止盈保护线计算。
+    - entry_price: 买入建仓成本价
+    - current_price: 当前现价
+    - highest_price: 建仓以来的最高价
+    - ma5 / ma10: 5日与10日均线
+    """
+    try:
+        entry = float(entry_price) if entry_price is not None else 0.0
+        curr = float(current_price) if current_price is not None else 0.0
+        high = max(float(highest_price) if highest_price is not None else 0.0, curr)
+    except (TypeError, ValueError):
+        return result("N/A", "dynamic-trailing-stop-v1", input_snapshot_id, ["numeric_prices"], "unavailable")
+
+    if entry <= 0:
+        return result("N/A", "dynamic-trailing-stop-v1", input_snapshot_id, ["entry_price>0"], "unavailable")
+
+    m5 = float(ma5) if ma5 is not None else 0.0
+    m10 = float(ma10) if ma10 is not None else 0.0
+    max_gain_pct = ((high - entry) / entry) * 100.0
+    curr_gain_pct = ((curr - entry) / entry) * 100.0
+
+    if max_gain_pct >= 20.0:
+        fallback_stop = high * 0.90
+        trailing_stop = max(fallback_stop, m10 if m10 > 0 else fallback_stop)
+        stage = "profit_lock_major"
+        advice = "浮盈超过 20%，启动大趋势锁利！跌破移动止盈线必须无条件分批或全额落袋，绝不允许大幅利润回撤！"
+    elif max_gain_pct >= 8.0:
+        breakeven_stop = entry * 1.005
+        trailing_stop = max(breakeven_stop, m5 if m5 > 0 else breakeven_stop)
+        stage = "breakeven_protection"
+        advice = "浮盈已达 8%，执行第一铁律：利润绝不可转为亏损！防守底线强制上移至成本保本线上方。"
+    else:
+        trailing_stop = entry * 0.95
+        stage = "initial_risk"
+        advice = "浮盈未达移动止盈阶梯门槛，按初始防守位执行风险控制。"
+
+    value = {
+        "trailing_stop_price": round(trailing_stop, 3),
+        "stage": stage,
+        "max_gain_pct": round(max_gain_pct, 2),
+        "current_gain_pct": round(curr_gain_pct, 2),
+        "entry_price": round(entry, 3),
+        "highest_price": round(high, 3),
+        "action_advice": advice,
+    }
+    return result(value, "dynamic-trailing-stop-v1", input_snapshot_id)
+

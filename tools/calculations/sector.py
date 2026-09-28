@@ -490,3 +490,140 @@ def resolve_rotation_timeframe(
     return result(value, "rotation-timeframe-v1", input_snapshot_id)
 
 
+def validate_sector_capacity(
+    sector_amount_yi=0.0,
+    market_total_amount_yi=10000.0,
+    input_snapshot_id=None,
+):
+    """
+    判定板块资金容量，杜绝小微题材伪装主线。
+    - sector_amount_yi: 板块日成交额(亿元)
+    - market_total_amount_yi: 两市总成交额(亿元)
+    """
+    try:
+        sec_amt = float(sector_amount_yi) if sector_amount_yi is not None else 0.0
+        mkt_amt = float(market_total_amount_yi) if market_total_amount_yi is not None else 10000.0
+    except (TypeError, ValueError):
+        return result("N/A", "sector-capacity-v1", input_snapshot_id, ["numeric_parameters"], "unavailable")
+
+    mkt_amt = max(mkt_amt, 1.0)
+    amount_share = (sec_amt / mkt_amt) * 100.0
+
+    if amount_share >= 4.0 or sec_amt >= 350.0:
+        capacity_type = "mega_mainline"
+        tradable_scale = "超级大容量主线，支持百亿中军趋势重仓配置与机构大资金进出"
+        is_mainline = True
+    elif amount_share >= 2.0 or sec_amt >= 180.0:
+        capacity_type = "standard_mainline"
+        tradable_scale = "标准主力题材，支持龙头接力与容量中军波段配置"
+        is_mainline = True
+    else:
+        capacity_type = "micro_niche"
+        tradable_scale = "小微游击题材，日成交额严重不足，无法容纳中大资金，仅适宜轻仓快进快出，严禁配置中军趋势仓位"
+        is_mainline = False
+
+    value = {
+        "capacity_type": capacity_type,
+        "amount_share_pct": round(amount_share, 2),
+        "sector_amount_yi": round(sec_amt, 2),
+        "market_total_amount_yi": round(mkt_amt, 2),
+        "tradable_scale": tradable_scale,
+        "is_mainline_eligible": is_mainline,
+    }
+    return result(value, "sector-capacity-v1", input_snapshot_id)
+
+
+def map_capital_seesaw_matrix(
+    current_mainline="",
+    current_lifecycle="divergence",
+    input_snapshot_id=None,
+):
+    """
+    A 股存量博弈资金跷跷板（Seesaw Effect）对立外溢矩阵。
+    当主线分歧退潮时，推演最可能的对立防御或补涨承接板块。
+    """
+    mainline_str = str(current_mainline).lower()
+    lifecycle = str(current_lifecycle).lower()
+
+    # 经典资金跷跷板对立映射
+    seesaw_rules = [
+        # 科技成长 vs 避险防御红利
+        (
+            ("科技", "ai", "算力", "半导体", "通信", "cpo", "芯片", "软件"),
+            {
+                "counterpart_name": "红利防御与高股息 (银行/煤炭/公用事业/石油)",
+                "logic": "成长科技高位分歧杀跌，避险资金往往涌入低估值高股息与大金融板块抱团防守避风。",
+                "alternative": "超跌新能源或医药低位超跌反弹",
+            },
+        ),
+        # 顺周期资源 vs 新能源成长
+        (
+            ("资源", "有色", "黄金", "铜", "化工", "钢铁", "煤炭", "稀土"),
+            {
+                "counterpart_name": "新能源与高端制造 (光伏/储能/锂电/风电/电池)",
+                "logic": "大宗商品与周期资源分歧休整时，往往激发中游制造与新能源赛道成长股的估值修复。",
+                "alternative": "科技算力或大金融护盘",
+            },
+        ),
+        # 新能源 vs 顺周期/科技
+        (
+            ("光伏", "锂电", "电池", "储能", "新能源"),
+            {
+                "counterpart_name": "顺周期资源或科技成长 (AI/半导体)",
+                "logic": "赛道成长内部资金轮动，易在新能源与硬科技/周期资源间形成跷跷板效应。",
+                "alternative": "大消费或大金融防守",
+            },
+        ),
+        # 微盘妖股题材 vs 核心资产中字头权重
+        (
+            ("微盘", "超短", "重组", "壳资源", "低价", "妖股"),
+            {
+                "counterpart_name": "中字头与沪深300大盘蓝筹 (核心资产/央国企/白酒)",
+                "logic": "超短高标退潮天地板多发时，监管与机构资金主导拉升大盘权重中字头稳定指数，风格发生剧烈大小盘高低切换。",
+                "alternative": "红利防御避险",
+            },
+        ),
+        # 大金融 (证券/保险) 强行拉升
+        (
+            ("证券", "券商", "保险", "大金融"),
+            {
+                "counterpart_name": "题材失血预警 (全市场中小创题材易遭遇抽血分歧)",
+                "logic": "证券大阳线拉升常伴随巨大吸血效应，中小创题材往往逆势回落，须防冲高回落踩踏。",
+                "alternative": "次日题材回血修复",
+            },
+        ),
+    ]
+
+    matched_pair = None
+    for keywords, config in seesaw_rules:
+        if any(k in mainline_str for k in keywords):
+            matched_pair = config
+            break
+
+    if not matched_pair:
+        matched_pair = {
+            "counterpart_name": "红利高股息防御或大盘中字头蓝筹",
+            "logic": "当前主线出现分歧，资金外溢通常流向低估值防御属性板块或全市场低位滞涨板块。",
+            "alternative": "次日全市场无序电风扇轮动",
+        }
+
+    is_active_outflow = lifecycle in ("divergence", "exhausted", "retreat", "declining", "fade")
+    tactical_instruction = (
+        f"主线正处【{lifecycle}】阶段，资金外溢效应强烈，次日重点盯防向【{matched_pair['counterpart_name']}】的对流承接，切忌死守退潮高位股！"
+        if is_active_outflow
+        else f"主线当前处健康主升阶段，资金虹吸聚集，对立板块暂时承压，保持聚焦核心主线龙头。"
+    )
+
+    value = {
+        "current_mainline": str(current_mainline),
+        "lifecycle_state": lifecycle,
+        "is_active_outflow": is_active_outflow,
+        "seesaw_counterpart": matched_pair["counterpart_name"],
+        "rotation_logic": matched_pair["logic"],
+        "secondary_target": matched_pair["alternative"],
+        "tactical_instruction": tactical_instruction,
+    }
+    return result(value, "capital-seesaw-matrix-v1", input_snapshot_id)
+
+
+

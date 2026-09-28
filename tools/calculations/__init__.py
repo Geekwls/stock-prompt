@@ -6,12 +6,14 @@ from .market import (
     calculate_auction_traffic_light,
     calculate_bayesian_posterior,
     calculate_catalyst_exhaustion,
+    calculate_extreme_loss_effect,
     calculate_market_divergence_index,
     calculate_market_regime,
     calculate_market_sentiment_score,
     calculate_opportunity_score,
     calculate_price_range,
     calculate_sentiment_opportunity_score,
+    calculate_tactical_position_budget,
     filter_intraday_impulse,
     reconcile_watchlist_triggers,
 )
@@ -34,11 +36,14 @@ from .sector import (
     calculate_sector_cannibalization,
     calculate_sector_exhaustion,
     calculate_sector_ranking,
+    map_capital_seesaw_matrix,
     resolve_rotation_timeframe,
+    validate_sector_capacity,
 )
 from .stock import (
     assess_wyckoff_applicability,
     calculate_chip_structure,
+    calculate_dynamic_trailing_stop,
     calculate_price_position,
     calculate_relative_strength,
     calculate_risk_reward,
@@ -50,3 +55,4 @@ from .stock import (
     validate_position_context,
     validate_stock_hard_gate,
 )
+

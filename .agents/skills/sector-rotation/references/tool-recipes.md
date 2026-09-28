@@ -24,6 +24,8 @@
 
 | 计算目标 | 命令行调用入口 | 核心输入参数 |
 |---|---|---|
+| **板块成交容量门槛审计** | `python scripts/calculate.py validate_sector_capacity --json '{"sector_amount_yi": 45.0, "market_total_amount_yi": 12000.0}'` | `sector_amount_yi`, `market_total_amount_yi`；判定超级主线/标准主力/微型游击题材 |
+| **资金跷跷板对冲矩阵** | `python scripts/calculate.py map_capital_seesaw_matrix --json '{"current_mainline": "AI算力与芯片", "current_lifecycle": "retreat"}'` | `current_mainline`, `current_lifecycle`；推演分歧退潮时的外溢承接对立板块 |
 | **电风扇无效轮动过滤器** | `python scripts/calculate.py assess_rotation_effectiveness --json '{"active_sectors_count": 5, "leader_turnover_share": 4.5, "limit_up_clusters": 1, "market_amount_ratio": 0.95}'` | `active_sectors_count`, `leader_turnover_share`, `limit_up_clusters`, `market_amount_ratio` |
 | **中军与龙头背离审计** | `python scripts/calculate.py calculate_leader_core_divergence --json '{"core_trend": "break_ma20", "core_net_flow": -15.0, "leader_state": "limit_up", "leader_height": 4, "inner_up_ratio": 30.0}'` | `core_trend`, `core_net_flow`, `leader_state`, `leader_height`, `inner_up_ratio` |
 | **多周期时间尺度识别** | `python scripts/calculate.py resolve_rotation_timeframe --json '{"catalyst_scope": "macro_trend", "duration_days": 25, "trend_ma20_slope": "up"}'` | `catalyst_scope`, `duration_days`, `trend_ma20_slope` |

@@ -20,12 +20,14 @@ EXPLICIT_OPERATIONS = {
     "assess_wyckoff_applicability",
     "classify_stock_archetype",
     "filter_intraday_impulse",
+    "map_capital_seesaw_matrix",
     "reconcile_watchlist_triggers",
     "resolve_rotation_timeframe",
     "resolve_stock_data_mode",
     "select_stock_model",
     "summarize_seat_evidence",
     "validate_position_context",
+    "validate_sector_capacity",
     "validate_stock_hard_gate",
 }
 OPERATIONS = {

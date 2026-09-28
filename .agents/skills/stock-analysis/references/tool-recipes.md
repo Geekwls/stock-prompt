@@ -37,8 +37,8 @@
 | **筹码结构** | `python scripts/calculate.py calculate_chip_structure --json '{"profit_ratio": 72.5, "data_source": "可追溯数据源", "as_of": "2026-09-16"}'` | 指标、数据源、时点与口径 |
 | **双基准相对强度 (RS)** | `python scripts/calculate.py calculate_relative_strength --json '{"stock_pct_5d": 8.5, "sector_pct_5d": 2.1, "index_pct_5d": -0.8, "stock_pct_20d": 18.2, "sector_pct_20d": 6.0, "index_pct_20d": 1.2}'` | 个股、行业、指数的 5日与20日涨跌幅 |
 | **价格均线乖离与位置** | `python scripts/calculate.py calculate_price_position --json '{"price": 15.2, "ma20": 14.1, "ma50": 13.0, "atr14": 0.65, "structure_level": 14.3}'` | `price`, `ma20`, `ma50`, `atr14`, `structure_level` |
-| **盈亏比与空间测算** | `python scripts/calculate.py calculate_risk_reward --json '{"entry": 15.2, "stop": 14.3, "targets": [17.0]}'` | `entry`, `stop`, `targets` |
-| **旧硬门槛兼容入口** | `python scripts/calculate.py validate_stock_hard_gate --json '{"bar_count": 250, "adjusted": true, "benchmark_complete": true, "industry_complete": true}'` | 仅用于兼容；新流程使用 `resolve_stock_data_mode` |
+| **阶梯动态移动止盈** | `python scripts/calculate.py calculate_dynamic_trailing_stop --json '{"entry_price": 20.0, "current_price": 24.5, "highest_price": 25.0, "ma5": 24.0, "ma10": 22.8}'` | 建仓成本、现价、高点与均线；输出保本止损与利润锁定移动价位 |
+| **战术硬门禁与补仓拦截** | `python scripts/calculate.py validate_stock_hard_gate --json '{"kline_count": 150, "adjusted": true, "benchmark_complete": true, "industry_complete": true, "position_state": "holding_loss", "trend_state": "break_ma20"}'` | 破位且浮亏时触发禁止加仓摊平拦截；退潮期或加速后排时触发开仓拦截 |
 
 ---
 

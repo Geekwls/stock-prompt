@@ -936,13 +936,19 @@ def em_kline_get(path: str, timeout: int = 5) -> str:
     raise last_exc
 
 
+EM_CLIST_NEGATIVE_TTL_SECONDS = 60
+
+
 def fetch_industry_board_rows(fields: str, fid: str = "f3", max_pages: int = 8) -> List[Dict[str, Any]]:
     """
     东财行业板块全量行 (m:90+t:2), 跨分页聚合并按 f12 去重.
     clist 单页上限实测 100 行且东财行业板块 total 已达 ~496, 不翻页则成员表
     按当日涨跌幅截断漂移 (约 80% 板块随机缺席); 主域被限流时自动切换镜像域名.
     响应无 total 视为单页数据源 (兼容测试桩); 已知 total 但未取满视为该主机失败.
+    主机族整体失败进入 60s 负缓存: THS 兜底曾逐名重试酿成 42.9s/135 次调用的解析风暴.
     """
+    if get_cached("em_clist_failed"):
+        raise ConnectionError("东财 clist 网关近期整体失败 (60s 负缓存)")
     last_exc: Optional[Exception] = None
     for host in PUSH2_LIST_HOSTS:
         try:
@@ -971,6 +977,7 @@ def fetch_industry_board_rows(fields: str, fid: str = "f3", max_pages: int = 8) 
                 return list(unique.values())
         except Exception as exc:
             last_exc = exc
+    set_cached("em_clist_failed", True, ttl=EM_CLIST_NEGATIVE_TTL_SECONDS)
     if last_exc:
         raise last_exc
     return []
@@ -2045,7 +2052,12 @@ def fetch_sector_fund_flow(count: int = 20, days: int = 1) -> Dict[str, Any]:
                     stock_match = re.search(r'stockpage\.10jqka\.com\.cn/(\d+)/', r)
                     stock_code = stock_match.group(1) if stock_match else ''
                     s_name = cols[1]
-                    s_code = resolve_sector_code(s_name) or (f"THS_{ths_code}" if ths_code else "N/A")
+                    # 兜底循环仅查静态表, 不走在线解析: 逐名联想曾实测 42.9s/135 次调用;
+                    # 静态未命中的行业保留 THS_881xxx 原生身份 (sector_taxonomy=ths_industry 口径自洽)
+                    stripped_name = s_name.rstrip("行业").rstrip("板块")
+                    s_code = (STATIC_SECTOR_MAP.get(s_name)
+                              or STATIC_SECTOR_MAP.get(stripped_name)
+                              or (f"THS_{ths_code}" if ths_code else "N/A"))
                     chg_val = safe_float(cols[3].rstrip("%"), 0.0)
                     net_inflow_b = safe_float(cols[6], 0.0)
                     inflow_b = safe_float(cols[4], 0.0)

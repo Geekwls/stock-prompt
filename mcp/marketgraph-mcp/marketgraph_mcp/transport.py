@@ -75,7 +75,10 @@ def http_get(url: str, timeout: int = 4, encoding: str = "utf-8") -> str:
                 return content.decode(encoding)
             except UnicodeDecodeError:
                 return content.decode("gbk", errors="ignore")
-        except urllib.error.HTTPError:
+        except urllib.error.HTTPError as exc:
+            # 仅 5xx 计入熔断: 单端点 4xx (404/403 等) 不代表主机不可用, 不应殃及同主机其它工具
+            if getattr(exc, "code", 0) >= 500:
+                _breaker_record_failure(hostname)
             raise
         except Exception as exc:
             last_exc = exc

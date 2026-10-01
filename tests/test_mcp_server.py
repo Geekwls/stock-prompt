@@ -1,6 +1,8 @@
 import importlib.util
+import io
 import json
 import unittest
+import urllib.error
 import urllib.parse
 from datetime import datetime
 from pathlib import Path
@@ -889,6 +891,17 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         self.assertEqual(res["top_outflow_sectors"][0]["name"], "板块249")
         self.assertEqual(res["top_inflow_sectors"][0]["name"], "板块0")
 
+    @patch.object(SERVER, "http_get", side_effect=OSError("blocked"))
+    def test_industry_board_rows_negative_cache(self, mock_get):
+        """clist 主机族整体失败进入 60s 负缓存: 重复调用直接快速失败, 不再打满 4 台镜像"""
+        with self.assertRaises(OSError):
+            SERVER.fetch_industry_board_rows("f12,f14")
+        calls_after_first = mock_get.call_count
+        self.assertGreater(calls_after_first, 0)
+        with self.assertRaises(ConnectionError):
+            SERVER.fetch_industry_board_rows("f12,f14")
+        self.assertEqual(mock_get.call_count, calls_after_first)
+
     @patch.object(SERVER, "http_get")
     def test_sector_fund_flow_ths_fallback_marks_partial_and_taxonomy(self, mock_get):
         """东财主源不可用切同花顺兜底时: data_status=partial + sector_taxonomy=ths_industry +
@@ -921,6 +934,10 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         self.assertIn("eastmoney_main_net_flow", res["unavailable_sources"][0])
         self.assertEqual(res["top_inflow_sectors"][0]["name"], "半导体")
         self.assertIn("寒武纪", res["top_inflow_sectors"][0]["leading_stock"])
+        # 兜底循环仅静态表解析: 不触发逐名 suggest 风暴 (实测曾 42.9s/135 次调用)
+        self.assertTrue(all("searchapi" not in c[0][0] for c in mock_get.call_args_list))
+        self.assertLessEqual(mock_get.call_count, 6)
+        self.assertEqual(res["top_inflow_sectors"][0]["code"], "BK1036")
 
     @patch.object(SERVER, "http_get")
     @patch.object(SERVER, "fetch_industry_board_list")
@@ -1123,6 +1140,27 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         args, _ = self.sleep_mock.call_args
         self.assertGreaterEqual(args[0], 0.3)
         self.assertLessEqual(args[0], SERVER.HOST_MIN_INTERVAL_SECONDS + 0.01)
+
+    def test_circuit_breaker_ignores_http_4xx(self):
+        """单端点 HTTP 4xx 不计入熔断: 主机对其余工具保持可用"""
+        url = "https://push2.eastmoney.com/api/qt/clist/get?x=1"
+        err = urllib.error.HTTPError(url, 404, "Not Found", None, io.BytesIO(b""))
+        with patch("urllib.request.urlopen", side_effect=err):
+            for _ in range(SERVER.BREAKER_FAILURE_THRESHOLD + 2):
+                with self.assertRaises(urllib.error.HTTPError):
+                    SERVER.http_get(url)
+        self.assertNotIn("push2.eastmoney.com", SERVER._HOST_FAILURE_STATE)
+
+    def test_circuit_breaker_records_http_5xx(self):
+        """HTTP 5xx 视为主机故障计入熔断: 连续 3 次后快速失败"""
+        url = "https://push2.eastmoney.com/api/qt/stock/kline/get?x=1"
+        err = urllib.error.HTTPError(url, 503, "Service Unavailable", None, io.BytesIO(b""))
+        with patch("urllib.request.urlopen", side_effect=err):
+            for _ in range(SERVER.BREAKER_FAILURE_THRESHOLD):
+                with self.assertRaises(urllib.error.HTTPError):
+                    SERVER.http_get(url)
+            with self.assertRaises(ConnectionError):
+                SERVER.http_get(url)
 
     def test_circuit_breaker_opens_after_consecutive_failures(self):
         """同主机连续 3 次连接失败后熔断: 第 4 次快速抛 ConnectionError 且不再发起真实请求"""

@@ -367,6 +367,72 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         self.assertEqual(res["company_risk_level"], "待补充核验")
         self.assertTrue(res["audit_opinion_status"].startswith("N/A"))
 
+    @patch.object(SERVER, "http_get")
+    def test_fetch_company_quality_lift_null_result_degrades(self, mock_get):
+        # 东财 datacenter 对无解禁记录标的返回 {"result": null} (600519 实测)，不应抛 NoneType
+        mock_fina = {"result": {"data": [{
+            "SECURITY_NAME_ABBR": "贵州茅台", "REPORT_DATE_NAME": "2026中报",
+            "TOTALOPERATEREVE": 49000000000, "TOTALOPERATEREVETZ": 15.0,
+            "PARENTNETPROFIT": 25000000000, "PARENTNETPROFITTZ": 16.0,
+            "ROEJQ": 17.0, "XSMLL": 91.0, "ZCFZL": 20.0, "MGJYXJJE": 30.0
+        }]}}
+        mock_lift = {"success": False, "result": None, "message": "返回数据为空"}
+        mock_balance = {"result": {"data": [{"GOODWILL": 0, "TOTAL_EQUITY": 300000000000, "INVENTORY": 1000000}]}}
+
+        mock_get.side_effect = [json.dumps(mock_fina), json.dumps(mock_lift), json.dumps(mock_balance)]
+        res = SERVER.fetch_company_quality(symbol="600519")
+        self.assertNotIn("error", res)
+        self.assertEqual(res["data_status"], "partial")
+        self.assertEqual(res["restricted_shares_lifting"], [])
+        self.assertIn("无解禁记录", res["restricted_shares_lifting_note"])
+        self.assertEqual(res["balance_and_goodwill"]["goodwill_million"], "0.0 万元")
+        lift_url = mock_get.call_args_list[1][0][0]
+        self.assertIn("RPT_LIFT_STAGE", lift_url)
+        self.assertIn("sortTypes=-1", lift_url)
+
+    @patch.object(SERVER, "http_get")
+    def test_fetch_company_quality_all_segments_null_unavailable(self, mock_get):
+        empty = json.dumps({"success": False, "result": None, "message": "返回数据为空"})
+        mock_get.side_effect = [empty, empty, empty]
+        res = SERVER.fetch_company_quality(symbol="980001")
+        self.assertEqual(res["data_status"], "unavailable")
+        self.assertIn("无财务指标", res["error"])
+        self.assertEqual(res["restricted_shares_lifting"], [])
+
+    @patch.object(SERVER, "http_get")
+    def test_fetch_company_quality_segment_failure_stays_partial(self, mock_get):
+        # 单段上游异常只降级该段并写入 warnings，其余段照常解析
+        mock_fina = {"result": {"data": [{
+            "SECURITY_NAME_ABBR": "迈瑞医疗", "REPORT_DATE_NAME": "2026中报",
+            "TOTALOPERATEREVE": 20000000000, "TOTALOPERATEREVETZ": 10.0,
+            "PARENTNETPROFIT": 7000000000, "PARENTNETPROFITTZ": 20.0,
+            "ROEJQ": 8.0, "XSMLL": 60.0, "ZCFZL": 30.0, "MGJYXJJE": 2.0
+        }]}}
+        mock_balance = {"result": {"data": [{"GOODWILL": 11000000000, "TOTAL_EQUITY": 40000000000, "INVENTORY": 2000000000}]}}
+
+        mock_get.side_effect = [json.dumps(mock_fina), Exception("连接超时"), json.dumps(mock_balance)]
+        res = SERVER.fetch_company_quality(symbol="300760")
+        self.assertNotIn("error", res)
+        self.assertEqual(res["data_status"], "partial")
+        self.assertTrue(any("解禁查询失败" in w for w in res["warnings"]))
+        self.assertEqual(res["restricted_shares_lifting"], [])
+        self.assertEqual(res["financial_summary"]["revenue_billion"], "200.0 亿元")
+
+    @patch.object(SERVER, "http_get")
+    def test_fetch_company_quality_financial_missing_marks_na(self, mock_get):
+        # 财务段为空时财务指标显式 N/A，风险结论注明筛查未执行，解禁/商誉段不受影响
+        empty = json.dumps({"success": False, "result": None, "message": "返回数据为空"})
+        mock_lift = {"result": {"data": [{"FREE_DATE": "2027-06-23", "CURRENT_FREE_SHARES": 48900.0, "TOTAL_RATIO": 0.0639, "FREE_SHARES_TYPE": "首发限售"}]}}
+        mock_balance = {"result": {"data": [{"GOODWILL": 0, "TOTAL_EQUITY": 50000000000, "INVENTORY": 3000000000}]}}
+
+        mock_get.side_effect = [empty, json.dumps(mock_lift), json.dumps(mock_balance)]
+        res = SERVER.fetch_company_quality(symbol="688981")
+        self.assertNotIn("error", res)
+        self.assertEqual(res["data_status"], "partial")
+        self.assertEqual(res["financial_summary"]["revenue_billion"], "N/A")
+        self.assertIn("负债率筛查未执行", res["company_risk_assessment"])
+        self.assertEqual(res["restricted_shares_lifting"][0]["lift_date"], "2027-06-23")
+
     def test_normalize_date_str(self):
         self.assertEqual(SERVER.normalize_date_str("20260904"), "2026-09-04")
         self.assertEqual(SERVER.normalize_date_str("2026-09-04"), "2026-09-04")

@@ -2322,6 +2322,8 @@ def fetch_company_quality(symbol: str) -> Dict[str, Any]:
     """
     获取 A 股个股基本面质量、财务指标、商誉、解禁与排雷数据
     直接满足 stock-analysis L8 公司质量与事件风险评估
+    东财 datacenter 对无记录/被频控标的返回 {"success": false, "result": null}，
+    因此各段查询独立容错：单段失败或为空仅降级为 N/A 与告警，不拖垮整体排雷结果
     """
     clean_symbol = symbol.strip()
     code_only = clean_symbol.split(".")[0].replace("sh", "").replace("sz", "").replace("bj", "")
@@ -2330,72 +2332,95 @@ def fetch_company_quality(symbol: str) -> Dict[str, Any]:
     if cached:
         return cached
 
+    def dc_rows(report_name: str, page_size: int, sort_types: int, sort_columns: str) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+        url = (
+            "https://datacenter-web.eastmoney.com/api/data/v1/get?"
+            + urllib.parse.urlencode({
+                "reportName": report_name,
+                "columns": "ALL",
+                "pageNumber": 1,
+                "pageSize": page_size,
+                "sortTypes": sort_types,
+                "sortColumns": sort_columns,
+                "filter": f'(SECURITY_CODE="{code_only}")',
+                "source": "WEB",
+                "client": "WEB",
+            })
+        )
+        try:
+            body = json.loads(http_get(url, timeout=4))
+        except Exception as exc:
+            return [], f"上游请求失败: {exc}"
+        result = body.get("result")
+        if not isinstance(result, dict):
+            # result=null 是服务端对无记录标的的正常返回，不是异常
+            return [], None
+        data = result.get("data")
+        return (data if isinstance(data, list) else []), None
+
     try:
-        fina_url = (
-            "https://datacenter-web.eastmoney.com/api/data/v1/get?"
-            + urllib.parse.urlencode({
-                "reportName": "RPT_F10_FINANCE_MAINFINADATA",
-                "columns": "ALL",
-                "pageNumber": 1,
-                "pageSize": 2,
-                "sortTypes": -1,
-                "sortColumns": "REPORT_DATE",
-                "filter": f'(SECURITY_CODE="{code_only}")',
-                "source": "WEB",
-                "client": "WEB",
-            })
-        )
-        fina_rows = json.loads(http_get(fina_url, timeout=4)).get("result", {}).get("data", []) or []
-
-        lift_url = (
-            "https://datacenter-web.eastmoney.com/api/data/v1/get?"
-            + urllib.parse.urlencode({
-                "reportName": "RPT_LIFT_STAGE",
-                "columns": "ALL",
-                "pageNumber": 1,
-                "pageSize": 5,
-                "sortTypes": 1,
-                "sortColumns": "FREE_DATE",
-                "filter": f'(SECURITY_CODE="{code_only}")',
-                "source": "WEB",
-                "client": "WEB",
-            })
-        )
-        lift_rows = json.loads(http_get(lift_url, timeout=4)).get("result", {}).get("data", []) or []
-
-        balance_url = (
-            "https://datacenter-web.eastmoney.com/api/data/v1/get?"
-            + urllib.parse.urlencode({
-                "reportName": "RPT_DMSK_FN_BALANCE",
-                "columns": "ALL",
-                "pageNumber": 1,
-                "pageSize": 1,
-                "sortTypes": -1,
-                "sortColumns": "REPORT_DATE",
-                "filter": f'(SECURITY_CODE="{code_only}")',
-                "source": "WEB",
-                "client": "WEB",
-            })
-        )
-        balance_rows = json.loads(http_get(balance_url, timeout=4)).get("result", {}).get("data", []) or []
+        warnings_list: List[str] = []
+        fina_rows, fina_err = dc_rows("RPT_F10_FINANCE_MAINFINADATA", 2, -1, "REPORT_DATE")
+        if fina_err:
+            warnings_list.append(f"财务指标查询失败: {fina_err}")
+        # 解禁必须按 FREE_DATE 降序：升序会让历史解禁挤出 pageSize 窗口，漏报未来解禁
+        lift_rows, lift_err = dc_rows("RPT_LIFT_STAGE", 5, -1, "FREE_DATE")
+        if lift_err:
+            warnings_list.append(f"解禁查询失败: {lift_err}")
+        balance_rows, balance_err = dc_rows("RPT_DMSK_FN_BALANCE", 1, -1, "REPORT_DATE")
+        if balance_err:
+            warnings_list.append(f"资产负债查询失败: {balance_err}")
 
         f0 = fina_rows[0] if fina_rows else {}
         b0 = balance_rows[0] if balance_rows else {}
 
-        report_period = f0.get("REPORT_DATE_NAME", "最新报告期")
-        revenue_billion = round(safe_float(f0.get("TOTALOPERATEREVE"), 0.0) / 100000000.0, 2)
-        revenue_yoy = f"{safe_float(f0.get('TOTALOPERATEREVETZ'), 0.0):+.2f}%"
-        net_profit_million = round(safe_float(f0.get("PARENTNETPROFIT"), 0.0) / 10000.0, 2)
-        net_profit_yoy = f"{safe_float(f0.get('PARENTNETPROFITTZ'), 0.0):+.2f}%"
-        roe_weighted = f"{safe_float(f0.get('ROEJQ'), 0.0):.2f}%"
-        gross_margin = f"{safe_float(f0.get('XSMLL'), 0.0):.2f}%"
-        debt_ratio = f"{safe_float(f0.get('ZCFZL'), 0.0):.2f}%"
-        operating_cashflow_per_share = round(safe_float(f0.get("MGJYXJJE"), 0.0), 2)
+        if not f0 and not b0:
+            return {
+                "source": "P3_Eastmoney_Company_Quality_Gateway",
+                "data_status": "unavailable",
+                "symbol": symbol,
+                "error": "该标的无财务指标/资产负债/解禁记录（可能未覆盖或数据源暂不可用），无法完成公司质量排雷筛查",
+                "restricted_shares_lifting": [],
+                "warnings": warnings_list,
+            }
 
-        goodwill_yuan = safe_float(b0.get("GOODWILL"), 0.0)
-        total_equity_yuan = safe_float(b0.get("TOTAL_EQUITY"), 1.0)
-        goodwill_million = round(goodwill_yuan / 10000.0, 2)
-        goodwill_ratio = round((goodwill_yuan / total_equity_yuan) * 100.0, 2) if total_equity_yuan > 0 else 0.0
+        if f0:
+            report_period = f0.get("REPORT_DATE_NAME", "最新报告期")
+            financial_summary = {
+                "revenue_billion": f"{round(safe_float(f0.get('TOTALOPERATEREVE'), 0.0) / 100000000.0, 2)} 亿元",
+                "revenue_yoy": f"{safe_float(f0.get('TOTALOPERATEREVETZ'), 0.0):+.2f}%",
+                "net_profit_wan": f"{round(safe_float(f0.get('PARENTNETPROFIT'), 0.0) / 10000.0, 2)} 万元",
+                "net_profit_yoy": f"{safe_float(f0.get('PARENTNETPROFITTZ'), 0.0):+.2f}%",
+                "gross_margin": f"{safe_float(f0.get('XSMLL'), 0.0):.2f}%",
+                "weighted_roe": f"{safe_float(f0.get('ROEJQ'), 0.0):.2f}%",
+                "debt_to_assets_ratio": f"{safe_float(f0.get('ZCFZL'), 0.0):.2f}%",
+                "operating_cashflow_per_share": f"{round(safe_float(f0.get('MGJYXJJE'), 0.0), 2)} 元",
+            }
+        else:
+            report_period = "N/A"
+            financial_summary = {
+                key: "N/A" for key in (
+                    "revenue_billion", "revenue_yoy", "net_profit_wan", "net_profit_yoy",
+                    "gross_margin", "weighted_roe", "debt_to_assets_ratio", "operating_cashflow_per_share",
+                )
+            }
+
+        if b0:
+            goodwill_yuan = safe_float(b0.get("GOODWILL"), 0.0)
+            total_equity_yuan = safe_float(b0.get("TOTAL_EQUITY"), 1.0)
+            goodwill_ratio = round((goodwill_yuan / total_equity_yuan) * 100.0, 2) if total_equity_yuan > 0 else 0.0
+            balance_and_goodwill = {
+                "goodwill_million": f"{round(goodwill_yuan / 10000.0, 2)} 万元",
+                "goodwill_to_equity_ratio": f"{goodwill_ratio:.2f}%",
+                "inventory_million": f"{round(safe_float(b0.get('INVENTORY'), 0.0) / 10000.0, 2)} 万元",
+            }
+        else:
+            goodwill_ratio = None
+            balance_and_goodwill = {
+                "goodwill_million": "N/A",
+                "goodwill_to_equity_ratio": "N/A",
+                "inventory_million": "N/A",
+            }
 
         future_lifts = []
         now_date = datetime.now().strftime("%Y-%m-%d")
@@ -2403,27 +2428,37 @@ def fetch_company_quality(symbol: str) -> Dict[str, Any]:
             free_date_str = str(lr.get("FREE_DATE", ""))[:10]
             if free_date_str >= now_date:
                 future_lifts.append({
-                "lift_date": free_date_str,
-                "lift_shares_wan": round(safe_float(lr.get("CURRENT_FREE_SHARES"), 0.0), 2),
-                "ratio_of_total_shares": f"{(safe_float(lr.get('TOTAL_RATIO'), 0.0) * 100):.2f}%",
-                "shares_type": lr.get("FREE_SHARES_TYPE", "首发原股东/定增"),
+                    "lift_date": free_date_str,
+                    "lift_shares_wan": round(safe_float(lr.get("CURRENT_FREE_SHARES"), 0.0), 2),
+                    "ratio_of_total_shares": f"{(safe_float(lr.get('TOTAL_RATIO'), 0.0) * 100):.2f}%",
+                    "shares_type": lr.get("FREE_SHARES_TYPE", "首发原股东/定增"),
                     "is_future": True,
                 })
 
+        restricted_note = ""
+        if not lift_err and not lift_rows:
+            restricted_note = "该标的数据源无解禁记录（可能未覆盖或已全部解禁），不构成排雷异常"
+
         audit_opinion_status = "N/A（当前数据源未提供审计意见；需以年度审计报告或交易所公告核验）"
 
-        debt_val = safe_float(f0.get("ZCFZL"), 0.0)
+        debt_val = safe_float(f0.get("ZCFZL"), 0.0) if f0 else None
         risk_level = "待补充核验"
         risk_reasons = []
-        if debt_val > 70:
-            risk_level = "高"
-            risk_reasons.append(f"资产负债率偏高 ({debt_ratio})")
-        elif debt_val > 50:
-            risk_level = "中"
-            risk_reasons.append(f"资产负债率中等 ({debt_ratio})")
-        if goodwill_ratio > 30:
-            risk_level = "高"
-            risk_reasons.append(f"商誉占净资产比例过高 ({goodwill_ratio}%)")
+        if debt_val is not None:
+            if debt_val > 70:
+                risk_level = "高"
+                risk_reasons.append(f"资产负债率偏高 ({financial_summary['debt_to_assets_ratio']})")
+            elif debt_val > 50:
+                risk_level = "中"
+                risk_reasons.append(f"资产负债率中等 ({financial_summary['debt_to_assets_ratio']})")
+        else:
+            risk_reasons.append("财务指标缺失，负债率筛查未执行")
+        if goodwill_ratio is not None:
+            if goodwill_ratio > 30:
+                risk_level = "高"
+                risk_reasons.append(f"商誉占净资产比例过高 ({goodwill_ratio}%)")
+        else:
+            risk_reasons.append("资产负债数据缺失，商誉筛查未执行")
         if not risk_reasons:
             risk_reasons.append("仅完成负债率与商誉占比筛查；现金流、质押、减持、监管、诉讼及审计意见未覆盖")
 
@@ -2431,30 +2466,21 @@ def fetch_company_quality(symbol: str) -> Dict[str, Any]:
             "source": "P3_Eastmoney_Company_Quality_Gateway",
             "data_status": "partial",
             "symbol": symbol,
-            "name": f0.get("SECURITY_NAME_ABBR", symbol),
+            "name": f0.get("SECURITY_NAME_ABBR", symbol) if f0 else symbol,
             "report_period": report_period,
-            "financial_summary": {
-                "revenue_billion": f"{revenue_billion} 亿元",
-                "revenue_yoy": revenue_yoy,
-                "net_profit_wan": f"{net_profit_million} 万元",
-                "net_profit_yoy": net_profit_yoy,
-                "gross_margin": gross_margin,
-                "weighted_roe": roe_weighted,
-                "debt_to_assets_ratio": debt_ratio,
-                "operating_cashflow_per_share": f"{operating_cashflow_per_share} 元",
-            },
-            "balance_and_goodwill": {
-                "goodwill_million": f"{goodwill_million} 万元",
-                "goodwill_to_equity_ratio": f"{goodwill_ratio:.2f}%",
-                "inventory_million": f"{round(safe_float(b0.get('INVENTORY'), 0.0) / 10000.0, 2)} 万元",
-            },
+            "financial_summary": financial_summary,
+            "balance_and_goodwill": balance_and_goodwill,
             "restricted_shares_lifting": future_lifts[:3],
             "audit_opinion_status": audit_opinion_status,
             "company_risk_level": risk_level,
             "company_risk_assessment": "；".join(risk_reasons),
             "uncovered_risks": ["审计意见", "股权质押", "股东减持", "监管问询/处罚", "诉讼仲裁", "退市风险"],
         }
-        set_cached(cache_key, res, ttl=ttl_for_history(f0.get("REPORT_DATE")))
+        if restricted_note:
+            res["restricted_shares_lifting_note"] = restricted_note
+        if warnings_list:
+            res["warnings"] = warnings_list
+        set_cached(cache_key, res, ttl=ttl_for_history(f0.get("REPORT_DATE") if f0 else None))
         return res
 
     except Exception as e:

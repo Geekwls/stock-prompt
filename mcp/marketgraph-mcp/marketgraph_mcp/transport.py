@@ -15,6 +15,8 @@ MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 ALLOWED_HTTP_HOSTS = {
     "smartbox.gtimg.cn", "qt.gtimg.cn", "web.ifzq.gtimg.cn",
     "push2ex.eastmoney.com", "push2.eastmoney.com", "push2his.eastmoney.com",
+    "23.push2.eastmoney.com", "48.push2.eastmoney.com", "push2delay.eastmoney.com",
+    "23.push2his.eastmoney.com", "48.push2his.eastmoney.com",
     "datacenter-web.eastmoney.com", "searchapi.eastmoney.com",
     "money.finance.sina.com.cn",
     "data.10jqka.com.cn", "d.10jqka.com.cn",

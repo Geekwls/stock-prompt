@@ -128,7 +128,7 @@ AVAILABLE_TOOLS = [
             "properties": {
                 "sector": {
                     "type": "string",
-                    "description": "行业板块 BK 代码或中文名，例如 'BK1036', '半导体', '农产品加工'（概念板块无 hybk 归属，不支持）",
+                    "description": "东财行业板块 BK 代码或中文名，例如 '保险'、'农产品加工'、'BK1036'（半导体）。仅接受行业板块（含一二三级行业，名称可能带Ⅱ/Ⅲ后缀）；概念/题材板块无 hybk 归属，不支持。传入无法识别的板块时，错误信息会附上 available_industry_boards 全量可用清单",
                 },
                 "date_str": {
                     "type": "string",
@@ -141,7 +141,7 @@ AVAILABLE_TOOLS = [
     },
     {
         "name": "get_sector_fund_flow",
-        "description": "获取 A 股全行业板块主力资金净流入榜、流出榜、涨幅榜、跌幅榜及领涨龙头股票；days>1 时对流入/流出榜板块回补 N 日主力净流入历史与趋势定性（直供复盘与5日轮动资金迁移）",
+        "description": "获取 A 股全行业板块主力资金净流入榜、流出榜、涨幅榜、跌幅榜及领涨龙头股票；days>1 时对流入/流出榜板块回补 N 日主力净流入历史与趋势定性（直供复盘与5日轮动资金迁移）。口径声明：主源为东财行业板块（sector_taxonomy=eastmoney_industry，history/cum_net_inflow_billion/fund_flow_trend 资金延续字段仅在此口径下提供）；东财主源不可用时自动降级为同花顺行业口径（sector_taxonomy=ths_industry，板块名与统计口径为另一体系且粒度更粗，data_status=partial，无资金延续字段并置 history_unavailable=true）。做跨时点资金延续对比前必须核对两次采集的 sector_taxonomy 一致，否则结论不可复现",
         "inputSchema": {
             "type": "object",
             "properties": {

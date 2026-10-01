@@ -697,6 +697,7 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         mock_get.side_effect = fake_http_get
         res = SERVER.fetch_sector_fund_flow(count=2, days=2)
         self.assertEqual(res["data_status"], "ok", res)
+        self.assertEqual(res["sector_taxonomy"], "eastmoney_industry")
         entry = res["top_inflow_sectors"][0] if res["top_inflow_sectors"][0]["code"] == "BK1036" else res["top_inflow_sectors"][1]
         self.assertEqual(len(entry["history"]), 1)
         self.assertEqual(entry["history"][0]["main_net_inflow_billion"], -320.75)
@@ -766,6 +767,219 @@ class MarketGraphMCPServerTest(unittest.TestCase):
         self.assertEqual(res["broken_count"], 0)
         self.assertEqual(res["sector_break_rate"], "0.00%")
         self.assertEqual(res["seal_quality_q"], 100.0)
+
+    @patch.object(SERVER, "http_get")
+    def test_industry_board_list_paginates_total(self, mock_get):
+        """行业板块 total (~496) 超单页 100 上限时必须翻页聚合, 否则成员表按当日涨跌幅截断漂移"""
+        def fake_get(url, timeout=4, encoding="utf-8"):
+            self.assertIn("clist/get", url)
+            pn = int(urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["pn"][0])
+            total, start = 250, (pn - 1) * 100
+            count = min(100, total - start)
+            rows = [{"f12": f"BK{start + i + 1:04d}", "f14": f"板块{start + i + 1}"} for i in range(count)]
+            return json.dumps({"data": {"total": total, "diff": rows}})
+
+        mock_get.side_effect = fake_get
+        boards = SERVER.fetch_industry_board_list()
+        self.assertEqual(len(boards), 250)
+        requested_pns = [int(urllib.parse.parse_qs(urllib.parse.urlparse(c[0][0]).query)["pn"][0])
+                         for c in mock_get.call_args_list]
+        self.assertEqual(requested_pns, [1, 2, 3])
+
+    @patch.object(SERVER, "http_get")
+    def test_industry_board_list_single_page_without_total(self, mock_get):
+        """响应无 total 视为单页数据源, 不翻页 (兼容旧网关与测试桩)"""
+        mock_get.return_value = json.dumps({"data": {"diff": [{"f12": "BK0428", "f14": "电力"}]}})
+        boards = SERVER.fetch_industry_board_list()
+        self.assertEqual(len(boards), 1)
+        self.assertEqual(mock_get.call_count, 1)
+
+    @patch.object(SERVER, "http_get")
+    def test_industry_board_list_falls_back_to_mirror_host(self, mock_get):
+        """主域被限流/断连时自动切换镜像域名拉取同一张板块表"""
+        hosts = []
+
+        def fake_get(url, timeout=4, encoding="utf-8"):
+            host = urllib.parse.urlparse(url).hostname
+            hosts.append(host)
+            if host == "push2.eastmoney.com":
+                raise OSError("RemoteDisconnected")
+            return json.dumps({"data": {"total": 2, "diff": [
+                {"f12": "BK0475", "f14": "银行Ⅱ"}, {"f12": "BK1036", "f14": "半导体"}]}})
+
+        mock_get.side_effect = fake_get
+        boards = SERVER.fetch_industry_board_list()
+        self.assertEqual(len(boards), 2)
+        self.assertTrue(any(h and h != "push2.eastmoney.com" and h.endswith("push2.eastmoney.com") for h in hosts))
+
+    @patch.object(SERVER, "http_get")
+    def test_sector_limit_quality_accepts_semiconductor_bk1036(self, mock_get):
+        """BK1036/半导体 是行业板块 (曾被单页截断的行业板块表误拒), 成员校验必须通过"""
+        boards = [{"f12": "BK1036", "f14": "半导体"}, {"f12": "BK0475", "f14": "银行Ⅱ"}]
+        mock_get.side_effect = self._mock_sector_quality_gateways(boards, [], [])
+        res = SERVER.fetch_sector_limit_quality("半导体", "20260904")
+        self.assertNotIn("不在东财行业板块表内", res.get("error", ""))
+        self.assertIn("涨停池与炸板池均为空", res.get("error", ""))
+
+    @patch.object(SERVER, "http_get", side_effect=OSError("offline"))
+    @patch.object(SERVER, "fetch_industry_board_list")
+    def test_sector_limit_quality_rejection_lists_available_boards(self, mock_boards, mock_get):
+        """板块无效时错误里回传全量可用行业板块清单, 调用方一次改对传参"""
+        mock_boards.return_value = [
+            {"code": "BK1036", "name": "半导体"},
+            {"code": "BK0475", "name": "银行Ⅱ"},
+        ]
+        res = SERVER.fetch_sector_limit_quality("BK9999", "20260904")
+        self.assertEqual(res["data_status"], "unavailable")
+        self.assertIn("不在东财行业板块表内", res["error"])
+        self.assertEqual(res["available_industry_boards"], mock_boards.return_value)
+        self.assertIn("hybk", res["hint"])
+
+        res2 = SERVER.fetch_sector_limit_quality("某某概念板块XYZ", "20260904")
+        self.assertIn("无法解析板块", res2["error"])
+        self.assertEqual(res2["available_industry_boards"], mock_boards.return_value)
+
+    @patch.object(SERVER, "http_get", side_effect=OSError("offline"))
+    @patch.object(SERVER, "fetch_industry_board_list")
+    def test_resolve_sector_code_uses_full_board_table(self, mock_boards, mock_get):
+        """全量板块表兜底解析: 精确名 (含Ⅱ后缀) 与唯一子串模糊名均可命中"""
+        mock_boards.return_value = [
+            {"code": "BK0473", "name": "证券Ⅱ"},
+            {"code": "BK0433", "name": "农林牧渔"},
+        ]
+        self.assertEqual(SERVER.resolve_sector_code("证券Ⅱ"), "BK0473")
+        self.assertEqual(SERVER.resolve_sector_code("农林"), "BK0433")
+        self.assertIsNone(SERVER.resolve_sector_code("不存在的板块XYZ"))
+
+    def test_static_sector_map_no_cross_wiring(self):
+        """静态板块映射回归钉: 关键行业各归其位且互不共享代码 (曾出现通信设备→银行/电子元件→证券串号)"""
+        sm = SERVER.STATIC_SECTOR_MAP
+        for code in sm.values():
+            self.assertRegex(code, r"^BK\d{4}$")
+        self.assertEqual(sm["通信设备"], "BK0448")
+        self.assertEqual(sm["电子元件"], "BK0459")
+        self.assertEqual(sm["光伏设备"], "BK1031")
+        self.assertEqual(sm["电池"], "BK1033")
+        self.assertEqual(sm["汽车整车"], "BK1029")
+        self.assertEqual(sm["白酒"], "BK0896")
+        self.assertEqual(sm["钢铁"], "BK0479")
+        self.assertEqual(sm["电网设备"], "BK0457")
+        self.assertEqual(sm["煤炭"], "BK0437")
+        canonical = ["半导体", "通信设备", "电子元件", "证券", "银行", "保险",
+                     "汽车整车", "光伏设备", "电池", "白酒", "钢铁", "电网设备"]
+        codes = [sm[n] for n in canonical]
+        self.assertEqual(len(set(codes)), len(codes))
+
+    @patch.object(SERVER, "http_get")
+    def test_sector_fund_flow_covers_all_pages(self, mock_get):
+        """资金流榜必须覆盖翻页后的全量板块 (曾只取单页 100 行, 流出榜尾部被截断)"""
+        rows = [{"f12": f"BK{1000 + i}", "f14": f"板块{i}", "f3": 0.0,
+                 "f62": (500.0 - i) * 1e8, "f184": 1.0, "f204": "龙头", "f205": "600000"}
+                for i in range(250)]
+
+        def fake_get(url, timeout=4, encoding="utf-8"):
+            pn = int(urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["pn"][0])
+            start = (pn - 1) * 100
+            return json.dumps({"data": {"total": len(rows), "diff": rows[start:start + 100]}})
+
+        mock_get.side_effect = fake_get
+        res = SERVER.fetch_sector_fund_flow(count=3, days=1)
+        self.assertEqual(res.get("data_status"), "ok", res)
+        self.assertEqual(res["total_sectors_tracked"], 250)
+        self.assertEqual(res["top_outflow_sectors"][0]["name"], "板块249")
+        self.assertEqual(res["top_inflow_sectors"][0]["name"], "板块0")
+
+    @patch.object(SERVER, "http_get")
+    def test_sector_fund_flow_ths_fallback_marks_partial_and_taxonomy(self, mock_get):
+        """东财主源不可用切同花顺兜底时: data_status=partial + sector_taxonomy=ths_industry +
+        days>1 时显式 history_unavailable, 不得静默换口径伪装 ok"""
+        ths_html = (
+            "<table><tr><th>序号</th><th>行业</th></tr>"
+            "<tr><td>1</td>"
+            "<td><a href='http://data.10jqka.com.cn/funds/detail/code/881121/'>半导体</a></td>"
+            "<td>x</td><td>2.35%</td><td>120.5</td><td>80.2</td><td>40.3</td><td>200.7</td>"
+            "<td><a href='http://stockpage.10jqka.com.cn/688256/'>寒武纪</a></td><td>+10.00%</td></tr>"
+            "<tr><td>2</td>"
+            "<td><a href='http://data.10jqka.com.cn/funds/detail/code/881164/'>文化传媒</a></td>"
+            "<td>x</td><td>-1.20%</td><td>10.0</td><td>30.0</td><td>-20.0</td><td>40.0</td>"
+            "<td><a href='http://stockpage.10jqka.com.cn/300058/'>蓝色光标</a></td><td>-3.00%</td></tr>"
+            "</table>"
+        )
+
+        def fake_get(url, timeout=4, encoding="utf-8"):
+            if "hyzjl" in url:
+                return ths_html
+            raise OSError("eastmoney down")
+
+        mock_get.side_effect = fake_get
+        res = SERVER.fetch_sector_fund_flow(count=3, days=2)
+        self.assertEqual(res["source"], "P3_THS_Sector_Fund_Flow")
+        self.assertEqual(res["data_status"], "partial", res)
+        self.assertEqual(res["sector_taxonomy"], "ths_industry")
+        self.assertTrue(res["history_unavailable"])
+        self.assertEqual(res["history_days"], 2)
+        self.assertIn("eastmoney_main_net_flow", res["unavailable_sources"][0])
+        self.assertEqual(res["top_inflow_sectors"][0]["name"], "半导体")
+        self.assertIn("寒武纪", res["top_inflow_sectors"][0]["leading_stock"])
+
+    @patch.object(SERVER, "http_get")
+    @patch.object(SERVER, "fetch_industry_board_list")
+    def test_resolve_sector_code_prefers_exact_table_then_industry_suggest(self, mock_boards, mock_get):
+        """全表精确同名先于联想网关 (联想首个命中可能是概念/子行业); 联想命中时行业(MktNum=90)优先于概念"""
+        mock_boards.return_value = [{"code": "BK2001", "name": "算力服务器Ⅱ"}]
+
+        def fake_suggest(url, timeout=3, encoding="utf-8"):
+            return json.dumps({"QuotationCodeTable": {"Data": [
+                {"Code": "BK1134", "Name": "算力概念", "Classify": "BK", "MktNum": "90"}]}})
+
+        mock_get.side_effect = fake_suggest
+        self.assertEqual(SERVER.resolve_sector_code("算力服务器Ⅱ"), "BK2001")
+
+        mock_boards.side_effect = OSError("table down")
+        self.assertEqual(SERVER.resolve_sector_code("智算"), "BK1134")
+
+    @patch.object(SERVER, "http_get", side_effect=OSError("offline"))
+    @patch.object(SERVER, "fetch_industry_board_list")
+    def test_sector_kline_unresolvable_lists_candidates(self, mock_boards, mock_get):
+        """名称歧义 (子串命中多个板块) 时返回候选清单, 不静默二选一"""
+        mock_boards.return_value = [
+            {"code": "BK0457", "name": "电网设备"},
+            {"code": "BK1309", "name": "电网自动化设备"},
+        ]
+        res = SERVER.fetch_sector_kline("电网", count=20)
+        self.assertEqual(res["data_status"], "unavailable")
+        self.assertEqual(res["sector_candidates"],
+                         ["电网设备(BK0457)", "电网自动化设备(BK1309)"])
+
+    @patch.object(SERVER, "http_get", side_effect=OSError("down"))
+    def test_sector_kline_explicit_source_unavailable(self, mock_get):
+        """/全链路失败时显式标注 source_unavailable 与失败源清单, 而非返回全 None 空壳"""
+        res = SERVER.fetch_sector_kline("BK9999", count=20)
+        self.assertEqual(res["data_status"], "unavailable")
+        self.assertTrue(res["source_unavailable"])
+        self.assertTrue(any("eastmoney_standard_kline" in s for s in res["unavailable_sources"]))
+        self.assertTrue(any("eastmoney_fflow_daykline" in s for s in res["unavailable_sources"]))
+
+    @patch.object(SERVER, "http_get")
+    def test_em_index_daily_mirror_fallback(self, mock_get):
+        """push2his 主域被限流时自动切换镜像域名, 历史成交额不再单点依赖主域"""
+        klines = [
+            "2026-09-02,3920.00,3950.00,3960.00,3910.00,1,65000000000",
+            "2026-09-03,3955.00,3986.00,3990.00,3950.00,1,66000000000",
+        ]
+
+        def fake_get(url, timeout=5, encoding="utf-8"):
+            if url.startswith("https://push2his.eastmoney.com/"):
+                raise OSError("RemoteDisconnected")
+            if "secid=1.000001" in url:
+                return json.dumps({"data": {"klines": klines}})
+            raise AssertionError("unexpected url: " + url)
+
+        mock_get.side_effect = fake_get
+        bars = SERVER.fetch_em_index_daily("1.000001", 5)
+        self.assertEqual(len(bars), 2)
+        self.assertEqual(bars[-1]["date"], "2026-09-03")
+        self.assertEqual(bars[-1]["amount_yuan"], 66000000000.0)
 
     @patch.object(SERVER, "http_get")
     def test_sector_limit_quality_ambiguous_prefix_excluded(self, mock_get):

@@ -659,11 +659,11 @@ def fetch_em_index_daily(secid: str, n: int) -> List[Dict[str, Any]]:
     fields2 顺序: f51日期, f52开, f53收, f54高, f55低, f56量, f57成交额(元)
     """
     url = (
-        "https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=" + secid
+        "/api/qt/stock/kline/get?secid=" + secid
         + f"&klt=101&fqt=0&lmt={n}&end=20500101"
         + "&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61"
     )
-    raw = http_get(url, timeout=5)
+    raw = em_kline_get(url, timeout=5)
     klines = (json.loads(raw).get("data") or {}).get("klines") or []
     out = []
     for line in klines[-n:]:
@@ -911,16 +911,77 @@ def fetch_topic_pool(pool_path: str, compact_date: str, sort_field: str) -> List
     return json.loads(http_get(url, timeout=4)).get("data", {}).get("pool", []) or []
 
 
+PUSH2_LIST_HOSTS = [
+    "push2.eastmoney.com",
+    "23.push2.eastmoney.com",
+    "48.push2.eastmoney.com",
+    "push2delay.eastmoney.com",
+]
+
+EM_KLINE_HOSTS = [
+    "push2his.eastmoney.com",
+    "23.push2his.eastmoney.com",
+    "48.push2his.eastmoney.com",
+]
+
+
+def em_kline_get(path: str, timeout: int = 5) -> str:
+    """push2his 家族K线接口抓取; 主域被限流时自动切换镜像域名 (与板块表同一边缘, 同命运)"""
+    last_exc: Optional[Exception] = None
+    for host in EM_KLINE_HOSTS:
+        try:
+            return http_get(f"https://{host}{path}", timeout=timeout)
+        except Exception as exc:
+            last_exc = exc
+    raise last_exc
+
+
+def fetch_industry_board_rows(fields: str, fid: str = "f3", max_pages: int = 8) -> List[Dict[str, Any]]:
+    """
+    东财行业板块全量行 (m:90+t:2), 跨分页聚合并按 f12 去重.
+    clist 单页上限实测 100 行且东财行业板块 total 已达 ~496, 不翻页则成员表
+    按当日涨跌幅截断漂移 (约 80% 板块随机缺席); 主域被限流时自动切换镜像域名.
+    响应无 total 视为单页数据源 (兼容测试桩); 已知 total 但未取满视为该主机失败.
+    """
+    last_exc: Optional[Exception] = None
+    for host in PUSH2_LIST_HOSTS:
+        try:
+            rows: List[Dict[str, Any]] = []
+            total: Optional[int] = None
+            for pn in range(1, max_pages + 1):
+                url = (f"https://{host}/api/qt/clist/get?pn={pn}&pz=100&po=1&np=1"
+                       f"&fltt=2&invt=2&fid={fid}&fs=m:90+t:2+f:!50&fields={fields}")
+                data = json.loads(http_get(url, timeout=5)).get("data") or {}
+                if isinstance(data.get("total"), int):
+                    total = data["total"]
+                page_rows = data.get("diff") or []
+                rows.extend(page_rows)
+                if not page_rows or len(page_rows) < 100:
+                    break
+                if total is None:
+                    break
+                if len(rows) >= total:
+                    break
+            if rows and (total is None or len(rows) >= total):
+                unique: Dict[str, Dict[str, Any]] = {}
+                for r in rows:
+                    key = str(r.get("f12", ""))
+                    if key:
+                        unique.setdefault(key, r)
+                return list(unique.values())
+        except Exception as exc:
+            last_exc = exc
+    if last_exc:
+        raise last_exc
+    return []
+
+
 def fetch_industry_board_list() -> List[Dict[str, str]]:
     """东财全量行业板块表 (代码+名称, 日级缓存); 兼作 hybk 缩写前缀歧义判定基准"""
     cached = get_cached("industry_board_list")
     if cached:
         return cached
-    url = (
-        "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1"
-        "&fltt=2&invt=2&fid=f3&fs=m:90+t:2+f:!50&fields=f12,f14"
-    )
-    rows = json.loads(http_get(url, timeout=5)).get("data", {}).get("diff", []) or []
+    rows = fetch_industry_board_rows("f12,f14")
     boards = [{"code": str(r.get("f12", "")), "name": str(r.get("f14", "")).strip()}
               for r in rows if str(r.get("f12", "")).startswith("BK")]
     if not boards:
@@ -936,6 +997,18 @@ def industry_hybk_matches(hybk: str, board_name: str) -> bool:
     if not short or not full:
         return False
     return full == short or full.startswith(short)
+
+
+def _industry_board_rejection(error: str, boards: Optional[List[Dict[str, str]]]) -> Dict[str, Any]:
+    """拒绝无效板块时回传全量可用行业板块清单, 让调用方一次改对传参而非逐个试错"""
+    payload = {
+        "error": error,
+        "data_status": "unavailable",
+        "hint": "仅接受东财行业板块 (t:2, 含一/二/三级行业, 名称可能带Ⅱ/Ⅲ后缀); 概念/题材板块无 hybk 归属, 不支持",
+    }
+    if boards:
+        payload["available_industry_boards"] = boards
+    return payload
 
 
 def fetch_sector_limit_quality(sector: str, date_str: Optional[str] = None) -> Dict[str, Any]:
@@ -955,16 +1028,16 @@ def fetch_sector_limit_quality(sector: str, date_str: Optional[str] = None) -> D
     clean = sector.strip()
     upper = clean.upper().replace("90.", "")
     sector_code = upper if upper.startswith("BK") and upper[2:].isdigit() else resolve_sector_code(clean)
-    if not sector_code:
-        return {"error": f"无法解析板块: {clean}", "data_status": "unavailable"}
-
     try:
         boards = fetch_industry_board_list()
     except Exception as exc:
         return {"error": f"行业板块表不可用: {type(exc).__name__}", "data_status": "unavailable"}
+    if not sector_code:
+        return _industry_board_rejection(f"无法解析板块: {clean} (仅支持行业板块中文名或 BK 代码)", boards)
     target = next((b for b in boards if b["code"] == sector_code or b["name"] == clean), None)
     if not target:
-        return {"error": f"{sector_code} 不在东财行业板块表内 (仅支持行业板块, 概念板块无 hybk 归属)", "data_status": "unavailable"}
+        return _industry_board_rejection(
+            f"{sector_code} 不在东财行业板块表内 (仅支持行业板块, 概念板块无 hybk 归属)", boards)
     sector_code = target["code"]
 
     cache_key = f"sector_limit_quality_{sector_code}_{compact_date}"
@@ -1228,55 +1301,65 @@ def fund_flow_trend_label(hist: List[Dict[str, Any]]) -> str:
     return "净流出转净流入" if signs[-1] > 0 else "净流入转净流出"
 
 
+# 代码均经东财 suggest 网关 (MktNum=90 行业) 与 clist 全量表交叉核实 (2026-10 复核)。
+# 旧表大量串号 (如 电池→一般零售/煤炭→工程建设/通信设备→银行), 已全部修正;
+# 无法核实的别名 (消费电子/人工智能/算力/稀土 等概念词) 一律删除, 交由动态解析,
+# 解析失败时错误信息会回传 available_industry_boards 全量清单。
 STATIC_SECTOR_MAP: Dict[str, str] = {
     "半导体": "BK1036", "芯片": "BK1036", "集成电路": "BK1036",
-    "通信设备": "BK0475", "通信": "BK0475", "5G": "BK0475", "光通信": "BK0475", "CPO": "BK0475",
-    "电子元件": "BK0473", "元件": "BK0473", "PCB": "BK0473", "覆铜板": "BK0473",
-    "消费电子": "BK0474", "果链": "BK0474", "智能穿戴": "BK0474",
-    "光伏设备": "BK0480", "光伏": "BK0480", "太阳能": "BK0480",
-    "风电设备": "BK0481", "风电": "BK0481", "海上风电": "BK0481",
-    "电池": "BK0482", "锂电池": "BK0482", "固态电池": "BK0482", "储能": "BK0482",
-    "电网设备": "BK0483", "特高压": "BK0483", "智能电网": "BK0483",
-    "电力行业": "BK0484", "电力": "BK0484", "绿电": "BK0484",
-    "软件开发": "BK0476", "软件": "BK0476", "信创": "BK0476",
-    "互联网服务": "BK0477", "人工智能": "BK0477", "AI": "BK0477", "大模型": "BK0477",
-    "计算机设备": "BK0450", "算力": "BK0450", "服务器": "BK0450",
-    "游戏": "BK0478", "网络游戏": "BK0478",
-    "光学光电子": "BK0479", "显示面板": "BK0479", "LED": "BK0479",
+    "半导体设备": "BK1326",
+    "通信设备": "BK0448", "通信": "BK0448",
+    "电子元件": "BK0459", "元件": "BK0459", "PCB": "BK0459", "覆铜板": "BK0459",
+    "光学光电子": "BK1038", "显示面板": "BK1038", "LED": "BK1038",
+    "计算机设备": "BK0735",
+    "互联网服务": "BK0447",
+    "游戏": "BK1046", "网络游戏": "BK1046",
+    "信创": "BK1104",
+    "光伏设备": "BK1031", "光伏": "BK1031", "太阳能": "BK1031",
+    "风电设备": "BK1032", "风电": "BK1032", "海上风电": "BK1032",
+    "电池": "BK1033", "锂电池": "BK1033",
+    "电网设备": "BK0457", "特高压": "BK0457", "智能电网": "BK0457",
+    "电力行业": "BK0428", "电力": "BK0428",
     "证券": "BK0473", "券商": "BK0473", "证券行业": "BK0473",
     "银行": "BK0475", "银行业": "BK0475",
     "保险": "BK0474", "保险业": "BK0474",
-    "多元金融": "BK0476", "信托": "BK0476", "期货": "BK0476",
+    "多元金融": "BK0738", "信托": "BK0738", "期货": "BK0738",
+    "汽车整车": "BK1029", "整车": "BK1029",
     "汽车零部件": "BK0481", "汽配": "BK0481",
-    "汽车整车": "BK0480", "整车": "BK0480", "新能源汽车": "BK0480",
-    "通用设备": "BK0437", "机器人": "BK0437", "工业母机": "BK0437", "减速器": "BK0437",
-    "专用设备": "BK0440", "半导体设备": "BK0440",
-    "化学制药": "BK0465", "创新药": "BK0465", "医药": "BK0465",
-    "中药": "BK0464", "中药Ⅱ": "BK0464",
-    "生物制品": "BK0465", "疫苗": "BK0465",
-    "医疗器械": "BK0465", "医疗服务": "BK0465",
-    "贵金属": "BK0486", "黄金": "BK0486", "白银": "BK0486",
-    "工业金属": "BK0436", "铜": "BK0436", "铝": "BK0436", "有色金属": "BK0436",
-    "小金属": "BK0436", "稀土": "BK0436",
-    "钢铁行业": "BK0433", "钢铁": "BK0433",
-    "煤炭行业": "BK0425", "煤炭": "BK0425",
-    "石油行业": "BK0496", "采掘行业": "BK0496", "石油": "BK0496", "油气": "BK0496",
-    "白酒": "BK0428", "酿酒行业": "BK0428", "食品饮料": "BK0428",
-    "商业百货": "BK0422", "免税店": "BK0422", "零售": "BK0422",
-    "旅游酒店": "BK0495", "旅游": "BK0495", "酒店餐饮": "BK0495",
-    "文化传媒": "BK0494", "传媒": "BK0494", "影视院线": "BK0494",
+    "通用设备": "BK0545",
+    "专用设备": "BK0910",
+    "化学制药": "BK0465",
+    "创新药": "BK1106",
+    "中药": "BK1040", "中药Ⅱ": "BK1040",
+    "生物制品": "BK1044",
+    "医疗器械": "BK1041",
+    "医疗服务": "BK0727",
+    "贵金属": "BK0732", "黄金": "BK0732", "白银": "BK0732",
+    "钢铁行业": "BK0479", "钢铁": "BK0479",
+    "煤炭行业": "BK0437", "煤炭": "BK0437",
+    "石油行业": "BK0496", "石油": "BK0496",
+    "化学制品": "BK0538",
+    "白酒": "BK0896",
+    "商业百货": "BK0482",
+    "旅游酒店": "BK0485", "旅游": "BK0485", "酒店餐饮": "BK0485",
+    "文化传媒": "BK0486", "传媒": "BK0486",
     "房地产开发": "BK0488", "房地产": "BK0488", "地产": "BK0488",
-    "航天航空": "BK0468", "军工": "BK0468", "国防军工": "BK0468",
-    "军工电子": "BK0734",
-    "航运港口": "BK0737", "航运": "BK0737", "港口": "BK0737",
-    "环保行业": "BK0741", "环保": "BK0741",
-    "玻璃玻纤": "BK0503", "玻璃": "BK0503",
-    "农牧饲渔": "BK0424", "农业": "BK0424", "养殖业": "BK0424",
-    "化学制品": "BK0498", "化工": "BK0498", "电子化学品": "BK0498",
-    "建筑装饰": "BK0487", "装修装饰": "BK0487", "工程建设": "BK0470",
+    "航天航空": "BK0480",
+    "军工": "BK0490", "国防军工": "BK0490",
+    "军工电子": "BK1233",
+    "航运港口": "BK0450", "航运": "BK0450", "港口": "BK0450",
+    "环保行业": "BK0728", "环保": "BK0728",
+    "玻璃玻纤": "BK0546", "玻璃": "BK0546",
+    "农牧饲渔": "BK0433",
+    "养殖业": "BK1259",
+    "建筑装饰": "BK1209",
+    "工程建设": "BK0425",
+    "物流": "BK0422",
+    "教育": "BK0740",
 }
 
 # 核心行业权重股等权篮子映射 (当东财板块K线网关不可用时自动作为代理序列源)
+# 键位与 STATIC_SECTOR_MAP 的核实代码保持一致 (2026-10 复核)
 STATIC_SECTOR_BASKETS = {
     "BK1036": ["688981", "002371", "688256"],  # 半导体
     "BK0448": ["000063", "600941", "601728"],  # 通信设备
@@ -1284,74 +1367,74 @@ STATIC_SECTOR_BASKETS = {
     "BK1031": ["601012", "300274", "688599"],  # 光伏设备
     "BK1033": ["300750", "300014", "002812"],  # 电池
     "BK0473": ["600030", "000776", "601688"],  # 证券
-    "BK0451": ["600519", "000858", "000568"],  # 白酒 / 饮料
+    "BK0896": ["600519", "000858", "000568"],  # 白酒
     "BK0475": ["600036", "601398", "601288"],  # 银行
     "BK0474": ["601318", "601628", "601601"],  # 保险
     "BK0488": ["000002", "600048", "001979"],  # 房地产
-    "BK0480": ["002594", "601238", "600104"],  # 汽车整车
-    "BK0468": ["600760", "600893", "000768"],  # 航天航空/军工
-    "BK0498": ["600309", "002493", "600426"],  # 化学制品
-    "BK0425": ["601088", "601225", "600188"],  # 煤炭
+    "BK1029": ["002594", "601238", "600104"],  # 汽车整车
+    "BK0490": ["600760", "600893", "000768"],  # 军工
+    "BK0538": ["600309", "002493", "600426"],  # 化学制品
+    "BK0437": ["601088", "601225", "600188"],  # 煤炭
     "BK0496": ["601857", "600028", "600938"],  # 石油
-    "BK0465": ["600276", "000538", "600085"],  # 医药商业/化学制药
-    "BK0737": ["601919", "600018", "601872"],  # 航运港口
-    "BK0477": ["002230", "300308", "600845"],  # 计算机设备 / 算力
+    "BK0465": ["600276", "000538", "600085"],  # 化学制药
+    "BK0450": ["601919", "600018", "601872"],  # 航运港口
+    "BK0735": ["002230", "300308", "600845"],  # 计算机设备 / 算力
 }
 
 # 同花顺 6 位行业板块代码字典 (881xxx)
+# EM BK 键位经 2026-10 复核: 对不上东财行业板块表的串号键已剔除, 名称键保留
 THS_SECTOR_MAP = {
     "半导体": "881121", "BK1036": "881121",
     "通信设备": "881129", "BK0448": "881129",
     "消费电子": "881124", "BK0459": "881124", "电子元件": "881124", "PCB": "881124",
-    "计算机设备": "881115", "BK0450": "881115", "算力": "881115",
-    "光学光电子": "881122", "BK0479": "881122",
+    "计算机设备": "881115", "算力": "881115",
+    "光学光电子": "881122",
     "证券": "881157", "BK0473": "881157", "券商": "881157",
     "银行": "881155", "BK0475": "881155",
     "保险": "881156", "BK0474": "881156",
-    "多元金融": "881158", "BK0476": "881158",
-    "汽车整车": "881125", "BK0480": "881125",
+    "多元金融": "881158",
+    "汽车整车": "881125",
     "汽车零部件": "881126", "BK0481": "881126",
     "电池": "881146", "BK1033": "881146",
     "光伏设备": "881145", "BK1031": "881145",
     "风电设备": "881280", "BK1032": "881280",
-    "白酒": "881133", "BK0428": "881133", "饮料制造": "881133", "食品饮料": "881133",
+    "白酒": "881133", "饮料制造": "881133", "食品饮料": "881133",
     "食品加工制造": "881134",
     "化学制药": "881140", "BK0465": "881140", "医药": "881140",
-    "中药": "881141", "BK0464": "881141",
+    "中药": "881141",
     "生物制品": "881142",
     "医疗器械": "881144",
     "医疗服务": "881175",
     "医药商业": "881143",
-    "游戏": "881275", "BK0478": "881275",
-    "文化传媒": "881164", "BK0494": "881164", "传媒": "881164",
+    "游戏": "881275",
+    "文化传媒": "881164", "传媒": "881164",
     "影视院线": "881274",
     "房地产": "881153", "BK0488": "881153", "房地产开发": "881153",
-    "建筑装饰": "881116", "BK0487": "881116",
+    "建筑装饰": "881116",
     "建筑材料": "881115",
-    "通用设备": "881117", "BK0437": "881117", "机器人": "881117",
-    "专用设备": "881118", "BK0440": "881118",
+    "通用设备": "881117", "机器人": "881117",
+    "专用设备": "881118",
     "自动化设备": "881171",
-    "煤炭": "881105", "BK0425": "881105", "煤炭开采加工": "881105",
-    "港口航运": "881148", "BK0737": "881148", "航运港口": "881148",
+    "煤炭": "881105", "煤炭开采加工": "881105",
+    "港口航运": "881148", "航运港口": "881148",
     "公路铁路运输": "881149",
-    "电力": "881165", "BK0427": "881165",
-    "环保设备": "881284", "BK0741": "881284", "环保": "881284",
-    "基础化工": "881109", "BK0498": "881109", "化学制品": "881109",
-    "钢铁": "881185", "BK0433": "881185",
-    "有色金属": "881187", "BK0436": "881187", "工业金属": "881187",
-    "贵金属": "881186", "BK0486": "881186", "黄金": "881186",
-    "旅游及酒店": "881160", "BK0495": "881160",
-    "互联网电商": "881177", "BK0477": "881177",
+    "电力": "881165",
+    "环保设备": "881284", "环保": "881284",
+    "基础化工": "881109", "化学制品": "881109",
+    "钢铁": "881185",
+    "有色金属": "881187", "工业金属": "881187",
+    "贵金属": "881186", "黄金": "881186",
+    "旅游及酒店": "881160",
+    "互联网电商": "881177",
     "教育": "881178",
-    "农产品加工": "881103", "BK1054": "881103",
-    "养殖业": "881102", "BK0424": "881102",
+    "农产品加工": "881103",
+    "养殖业": "881102",
     "种植业与林业": "881101",
     "家居用品": "881139",
     "服装家纺": "881136",
     "造纸": "881137",
     "小家电": "881173",
     "白色家电": "881131",
-    "零售": "881158", "BK0422": "881158",
 }
 
 
@@ -1374,7 +1457,10 @@ def resolve_ths_sector_code(sector: str, sector_code: Optional[str] = None) -> O
 
 
 def resolve_sector_code(keyword: str) -> Optional[str]:
-    """解析板块名称或代码为东财行业板块代码 (BKxxxxxx)；支持内置静态字典、在线模糊联想与建议网关"""
+    """解析板块名称或代码为东财行业板块代码 (BKxxxxxx)；
+    优先级: 静态别名字典 → 全量板块表精确同名 → 联想网关(优先行业MktNum=90) → 全量板块表唯一子串模糊。
+    精确同名先于联想: 联想首个命中可能是概念板块或子行业, 会静默解析到字面不同的板块。
+    """
     clean = keyword.strip()
     upper = clean.upper().replace("90.", "")
     if upper.startswith("BK") and upper[2:].isdigit():
@@ -1392,36 +1478,37 @@ def resolve_sector_code(keyword: str) -> Optional[str]:
     if cached:
         return cached
 
-    # 2. 东财建议网关联想 (轻量稳定)
+    def _remember(code: str) -> str:
+        set_cached(cache_key, code, ttl=86400)
+        return code
+
+    # 2. 全量行业板块表精确同名 (日级缓存, 命中即字面一致)
+    try:
+        boards = fetch_industry_board_list()
+        exact = next((b["code"] for b in boards if b["name"] == clean), None)
+        if exact:
+            return _remember(exact)
+    except Exception:
+        boards = None
+
+    # 3. 东财建议网关联想 (轻量稳定; 行业板块 MktNum=90 优先于概念)
     try:
         suggest_url = f"https://searchapi.eastmoney.com/api/suggest/get?input={urllib.parse.quote(clean)}&type=14"
         sug_raw = http_get(suggest_url, timeout=3)
         sug_items = json.loads(sug_raw).get("QuotationCodeTable", {}).get("Data", []) or []
-        for x in sug_items:
-            if x.get("Classify") == "BK" and str(x.get("Code", "")).startswith("BK"):
-                code = str(x["Code"])
-                set_cached(cache_key, code, ttl=86400)
-                return code
+        bk_items = [x for x in sug_items
+                    if x.get("Classify") == "BK" and str(x.get("Code", "")).startswith("BK")]
+        pick = next((x for x in bk_items if x.get("MktNum") == "90"), None) or (bk_items[0] if bk_items else None)
+        if pick:
+            return _remember(str(pick["Code"]))
     except Exception:
         pass
 
-    # 3. 兜底在线 clist 全量行业板块表
-    url = (
-        "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1"
-        "&fltt=2&invt=2&fid=f3&fs=m:90+t:2+f:!50&fields=f12,f14"
-    )
-    try:
-        rows = json.loads(http_get(url, timeout=5)).get("data", {}).get("diff", []) or []
-        exact = next((str(r["f12"]) for r in rows if str(r.get("f14", "")).strip() == clean), None)
-        if exact:
-            set_cached(cache_key, exact, ttl=86400)
-            return exact
-        fuzzy = [r for r in rows if clean in str(r.get("f14", ""))]
+    # 4. 兜底全量行业板块表唯一子串模糊 (多个命中视为歧义, 返回 None 由调用方报候选)
+    if boards:
+        fuzzy = [b for b in boards if clean in b["name"]]
         if len(fuzzy) == 1:
-            set_cached(cache_key, str(fuzzy[0]["f12"]), ttl=86400)
-            return str(fuzzy[0]["f12"])
-    except Exception:
-        pass
+            return _remember(fuzzy[0]["code"])
     return None
 
 
@@ -1447,24 +1534,36 @@ def fetch_sector_kline(sector: str, count: int = 130) -> Dict[str, Any]:
         return {"error": "count 必须是 20 至 250 的整数", "data_status": "unavailable"}
     sector_code = resolve_sector_code(sector)
     if not sector_code:
-        return {
-            "error": f"无法解析板块: {sector} (可传 BK 代码如 BK1036; 板块代码可用 get_sector_fund_flow 查询)",
+        err: Dict[str, Any] = {
+            "error": f"无法解析板块: {sector} (仅支持东财行业板块中文名或 BK 代码; 板块代码可用 get_sector_fund_flow 查询)",
             "data_status": "unavailable",
         }
+        # 名称可能命中多个板块 (如"电网"同时前缀匹配 电网设备/电网自动化设备), 给出候选让调用方改对, 不静默二选一
+        try:
+            boards = fetch_industry_board_list()
+            candidates = [f"{b['name']}({b['code']})" for b in boards if sector.strip() and sector.strip() in b["name"]][:8]
+            if candidates:
+                err["sector_candidates"] = candidates
+                err["error"] += f"；相关行业板块候选: {', '.join(candidates)}"
+        except Exception:
+            pass
+        return err
 
     cache_key = f"sector_kline_{sector_code}_{count}"
     cached = get_cached(cache_key)
     if cached:
         return cached
 
+    failed_sources: List[str] = []
+
     # 主源: 东财标准K线 (完整 OHLCV + 成交额)
     try:
         kline_url = (
-            "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+            "/api/qt/stock/kline/get"
             f"?secid=90.{sector_code}&klt=101&fqt=1&lmt={count}&end=20500101"
             "&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57"
         )
-        data = (json.loads(http_get(kline_url, timeout=5)).get("data") or {})
+        data = (json.loads(em_kline_get(kline_url, timeout=5)).get("data") or {})
         klines = data.get("klines") or []
         rows = []
         for line in klines[-count:]:
@@ -1518,8 +1617,9 @@ def fetch_sector_kline(sector: str, count: int = 130) -> Dict[str, Any]:
                 res["note"] += f"；实际仅取得 {n} 根 (不足请求的 {count} 根)"
             set_cached(cache_key, res, ttl=ttl_for_history(rows[-1]["date"]))
             return res
-    except Exception:
-        pass  # 主源不可用, 优先走同花顺原生日K, 次选 fflow 兜底
+        failed_sources.append("eastmoney_standard_kline(响应无有效K线)")
+    except Exception as exc:
+        failed_sources.append(f"eastmoney_standard_kline({type(exc).__name__})")
 
     # 备源 1: 同花顺板块原生日K网关 (完整 OHLCV + 真实成交额)
     ths_code = resolve_ths_sector_code(sector, sector_code)
@@ -1579,24 +1679,25 @@ def fetch_sector_kline(sector: str, count: int = 130) -> Dict[str, Any]:
                         "prev_amount_billion": prev_amount,
                         "amount_ratio_1d": round(amounts[-1] / prev_amount, 2) if prev_amount and prev_amount > 0 else None,
                         "avg_amount_5d_billion": round(sum(amounts[-min(5, n):]) / min(5, n), 2),
-                        "note": "东财标准K线不可用，已自动切换同花顺行业原生日K网关(完整OHLCV+真实成交额口径)；amount_ratio_1d 即板块资金延续评分成交连续度 V 项的直接输入",
+                        "note": "东财标准K线不可用，已自动切换同花顺行业原生日K网关(完整OHLCV+真实成交额口径)；同花顺源日更时点可能滞后，使用前核对 latest_date；amount_ratio_1d 即板块资金延续评分成交连续度 V 项的直接输入",
                     }
                     if n < count:
                         res["data_status"] = "partial"
                         res["note"] += f"；实际仅取得 {n} 根 (不足请求的 {count} 根)"
                     set_cached(cache_key, res, ttl=ttl_for_history(rows[-1]["date"]))
                     return res
-        except Exception:
-            pass
+            failed_sources.append("ths_native_kline(响应无有效K线)")
+        except Exception as exc:
+            failed_sources.append(f"ths_native_kline({type(exc).__name__})")
 
     # 备源 2: fflow daykline (收盘序列 + 主力净额, 无盘中高低价与成交额)
     url = (
-        "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get"
+        "/api/qt/stock/fflow/daykline/get"
         f"?lmt={count}&klt=101&secid=90.{sector_code}&secid2=90.{sector_code}"
         "&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65"
     )
     try:
-        data = json.loads(http_get(url, timeout=5)).get("data") or {}
+        data = json.loads(em_kline_get(url, timeout=5)).get("data") or {}
         klines = data.get("klines") or []
         if len(klines) >= 2:
             rows = []
@@ -1642,8 +1743,9 @@ def fetch_sector_kline(sector: str, count: int = 130) -> Dict[str, Any]:
                     res["note"] += f"；实际仅取得 {n} 根 (不足请求的 {count} 根)"
                 set_cached(cache_key, res, ttl=ttl_for_history(rows[-1]["date"]))
                 return res
-    except Exception:
-        pass
+        failed_sources.append("eastmoney_fflow_daykline(响应无有效K线)")
+    except Exception as exc:
+        failed_sources.append(f"eastmoney_fflow_daykline({type(exc).__name__})")
 
     # 兜底2: 若东财板块K线与资金流日K皆不可用，但该板块在 STATIC_SECTOR_BASKETS 中，自动由 fetch_basket_index 构造等权代理日K
     try:
@@ -1684,14 +1786,20 @@ def fetch_sector_kline(sector: str, count: int = 130) -> Dict[str, Any]:
     except Exception:
         pass
 
-    return {"error": f"未获取到板块日K序列: {sector}", "data_status": "unavailable",
-            "hint": "东财板块源不可用时, 可改用 get_basket_index 传入板块主要成分股构造等权代理序列 (使用边界见公共研究契约)"}
+    return {
+        "error": f"未获取到板块日K序列: {sector}",
+        "data_status": "unavailable",
+        "source_unavailable": True,
+        "unavailable_sources": failed_sources,
+        "note": "东财板块K线网关临时不可用 (含镜像域名), 同花顺与资金流日K兜底亦未取到有效数据; 稍后重试",
+        "hint": "可改用 get_basket_index 传入板块主要成分股构造等权代理序列 (使用边界见公共研究契约)",
+    }
 
 
 def fetch_basket_index(stocks: List[str], count: int = 20) -> Dict[str, Any]:
     """
     以腾讯前复权日K构造等权篮子指数（日度再平衡口径：篮子日收益 = 成分股当日收益的等权均值）
-    用途：东财板块指数网关抖动时的代理序列（如保险 BK0735 仅 6 只成分股，等权大票覆盖度高）、
+    用途：东财板块指数网关抖动时的代理序列（如保险 BK0474、银行 BK0475 等大票行业，等权覆盖度高）、
     主线篮子相对强度对照。输出为构造序列（series_type=equal_weight_constructed），
     只能用于方向性对照，不得用于精确评分阈值——使用边界见公共研究契约
     """
@@ -1818,14 +1926,9 @@ def fetch_sector_fund_flow(count: int = 20, days: int = 1) -> Dict[str, Any]:
     if cached:
         return cached
 
-    url = (
-        "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=100&po=1&np=1"
-        "&ut=b2884a393a59ad64002292a3e90d46a5&fltt=2&invt=2&fid=f62&fs=m:90+t:2+f:!50"
-        "&fields=f12,f14,f2,f3,f62,f184,f204,f205"
-    )
     try:
-        raw = http_get(url)
-        data = json.loads(raw).get("data", {}).get("diff", [])
+        # 全量翻页聚合: 行业板块 total 已超单页 100 上限, 不翻页会截断流出榜尾部
+        data = fetch_industry_board_rows("f12,f14,f2,f3,f62,f184,f204,f205", fid="f62")
         if not data:
             return {"error": "未获取到行业资金流数据"}
 
@@ -1855,6 +1958,7 @@ def fetch_sector_fund_flow(count: int = 20, days: int = 1) -> Dict[str, Any]:
         res = {
             "source": "P3_Eastmoney_Sector_Fund_Flow",
             "data_status": "ok",
+            "sector_taxonomy": "eastmoney_industry",
             "total_sectors_tracked": len(sectors),
             "top_inflow_sectors": [
                 {
@@ -1970,8 +2074,10 @@ def fetch_sector_fund_flow(count: int = 20, days: int = 1) -> Dict[str, Any]:
 
                 fallback_res = {
                     "source": "P3_THS_Sector_Fund_Flow",
-                    "data_status": "ok",
-                    "note": f"东财主力净流入不可用({type(e).__name__})，已无缝切换同花顺行业资金流网关(主力净流入、流入流出、涨跌排行与领涨股口径)",
+                    "data_status": "partial",
+                    "sector_taxonomy": "ths_industry",
+                    "unavailable_sources": [f"eastmoney_main_net_flow({type(e).__name__})"],
+                    "note": f"东财主力净流入不可用({type(e).__name__})，已切换同花顺行业资金流网关；板块名称为同花顺行业口径(与东财行业板块不同体系, 如传媒↔文化传媒)，主力净流入为实时口径，跨时点对比前先核对 sector_taxonomy",
                     "total_sectors_tracked": len(sectors),
                     "top_inflow_sectors": [
                         {
@@ -2020,8 +2126,13 @@ def fetch_sector_fund_flow(count: int = 20, days: int = 1) -> Dict[str, Any]:
                         }
                         for i, s in enumerate(top_losers)
                     ],
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                }
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                if days > 1:
+                    # 同花顺兜底无 N 日历史回补能力, 必须显式声明而非静默省略 (曾致资金延续结论不可复现)
+                    fallback_res["history_days"] = days
+                    fallback_res["history_unavailable"] = True
+                    fallback_res["history_unavailable_reason"] = "同花顺兜底源仅提供当日主力净流入, 不支持 N 日历史回补; history/cum/trend 字段仅在东财主源 (sector_taxonomy=eastmoney_industry) 下提供"
                 set_cached(cache_key, fallback_res)
                 return fallback_res
         except Exception:
@@ -2062,7 +2173,9 @@ def fetch_sector_fund_flow(count: int = 20, days: int = 1) -> Dict[str, Any]:
                     fallback_res = {
                         "source": "P3_Sina_Industry_Fallback",
                         "data_status": "partial",
-                        "note": f"东财主力净流入上游不可用({type(e).__name__})，已无缝降级为新浪行业全景网关(全天总成交额与涨跌排行口径)",
+                        "sector_taxonomy": "sina_industry",
+                        "unavailable_sources": [f"eastmoney_main_net_flow({type(e).__name__})", "ths_industry_fund_flow"],
+                        "note": f"东财主力净流入上游不可用({type(e).__name__})，已降级为新浪行业全景网关(全天总成交额与涨跌排行口径)；跨时点对比前先核对 sector_taxonomy",
                         "total_sectors_tracked": len(sectors),
                         "top_inflow_sectors": [
                             {
@@ -2093,12 +2206,16 @@ def fetch_sector_fund_flow(count: int = 20, days: int = 1) -> Dict[str, Any]:
                                 "name": s["name"],
                                 "code": s["code"],
                                 "change_pct": s["change_pct"],
-                                "turnover_billion": f"{s['turnover_billion']:.2f} 亿",
-                            }
-                            for i, s in enumerate(top_losers)
-                        ],
+                            "turnover_billion": f"{s['turnover_billion']:.2f} 亿",
+                        }
+                        for i, s in enumerate(top_losers)
+                    ],
                         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     }
+                    if days > 1:
+                        fallback_res["history_days"] = days
+                        fallback_res["history_unavailable"] = True
+                        fallback_res["history_unavailable_reason"] = "新浪兜底源仅提供当日总成交额与涨跌排行, 无主力净流入及 N 日历史"
                     set_cached(cache_key, fallback_res)
                     return fallback_res
         except Exception:

@@ -20,11 +20,23 @@ def _digest(*parts):
 
 
 def _coverage_percent(record):
-    coverage = str(record.get("coverage", "") or "").strip()
+    raw = record.get("coverage")
+    if raw is None or raw == "" or raw == "N/A":
+        return "N/A"
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        val = float(raw)
+        if 0 <= val <= 100:
+            return f"{int(val)}%" if val == int(val) else f"{round(val, 2)}%"
+        return "N/A"
+    coverage = str(raw).strip()
     if coverage.endswith("%"):
         return coverage
-    if coverage == "N/A":
-        return "N/A"
+    try:
+        val = float(coverage)
+        if 0 <= val <= 100:
+            return f"{int(val)}%" if val == int(val) else f"{round(val, 2)}%"
+    except ValueError:
+        pass
     return "N/A"
 
 

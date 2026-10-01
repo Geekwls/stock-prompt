@@ -1,6 +1,7 @@
 import unittest
 
 from tools.calculations.market import calculate_market_sentiment_score, calculate_opportunity_score, calculate_price_range
+from tools.calculations.metrics import calculate_calibration_curve
 from tools.calculations.sector import calculate_5d_sentiment_score, calculate_capital_continuity, calculate_sector_exhaustion
 from tools.calculations.stock import calculate_price_position, calculate_relative_strength, calculate_risk_reward, validate_stock_hard_gate
 

@@ -54,10 +54,11 @@ def calculate_calibration_curve(probabilities, outcomes, bins=10, input_snapshot
     if len(probabilities) != len(outcomes) or not probabilities:
         return result("N/A", "calibration-curve-v1", input_snapshot_id, ["aligned_nonempty_samples"], "unavailable")
     buckets = [[] for _ in range(bins)]
+    scale = 100.0 if any(p > 1.0 for p in probabilities) else 1.0
     for probability, outcome in zip(probabilities, outcomes):
-        probability = probability / 100 if probability > 1 else probability
-        index = min(bins - 1, max(0, int(probability * bins)))
-        buckets[index].append((probability, 1.0 if outcome else 0.0))
+        prob = min(1.0, max(0.0, float(probability) / scale))
+        index = min(bins - 1, max(0, int(prob * bins)))
+        buckets[index].append((prob, 1.0 if outcome else 0.0))
     curve = []
     for index, bucket in enumerate(buckets):
         if bucket:

@@ -52,10 +52,15 @@ def permission_status(path, expected):
 def mcp_registered():
     home = Path.home()
     candidates = (
+        home / ".gemini" / "config" / "mcp_config.json",
         home / ".gemini" / "antigravity" / "mcp_config.json",
+        home / ".gemini" / "antigravity-cli" / "mcp_config.json",
         home / ".gemini" / "mcp_config.json",
         home / ".cursor" / "mcp.json",
+        home / ".vscode" / "mcp.json",
         home / ".workbuddy-ai" / "mcp.json",
+        home / ".claude" / "claude_desktop_config.json",
+        home / ".config" / "antigravity" / "mcp_config.json",
         Path(os.environ.get("CODEX_HOME", home / ".codex")) / "config.toml",
     )
     for path in candidates:

@@ -158,6 +158,18 @@ class ArtifactPipelineE2E(unittest.TestCase):
         self.assertIsNone(payload["opportunity_score"])
         self.assertEqual(payload["status"], "degraded")
 
+    def test_numeric_coverage_low_coverage_suppression(self):
+        """场景3c：浮点或整数覆盖率 (如 65.0) 必须被正确格式化并触发降级。"""
+        payload = adapters.mirror_prediction_record({
+            "date": "2026-09-08", "coverage": 65.0, "coverage_band": "medium",
+            "probs": {"up": 0.55, "side": 0.30, "down": 0.15},
+            "opportunity": 78, "regime": "S3", "market_phase": "preopen",
+        })
+        self.assertEqual(payload["coverage"], "65%")
+        self.assertIsNone(payload["probabilities"])
+        self.assertIsNone(payload["opportunity_score"])
+        self.assertEqual(payload["status"], "degraded")
+
     def test_artifact_failure_does_not_block_analysis(self):
         """场景4：Artifact 双写失败时台账照常写入且仅告警。"""
         with patch.object(adapters, "mirror_and_store", side_effect=RuntimeError("disk full")):

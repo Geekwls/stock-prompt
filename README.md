@@ -128,12 +128,12 @@ stock-prompt/
 | `get_market_breadth` | 全市场上涨/平盘/下跌家数与红盘率（东财快照），历史日期以打板池与指数替代并明确标注精度 | `daily-review` 市场整体赚钱效应审计 |
 | `get_market_sentiment`| 两市总成交额、涨跌停池数量、炸板池数量、全市场精确真实炸板率、最高连板高度；支持历史日期回补 | 情绪周期量能与短线极值判定 |
 | `get_limit_up_ladder` | 今日或历史指定交易日连板天梯分布、各高度板代表龙头标的与所属行业 | 市场最高连板高度与短线情绪梯队拆解 |
-| `get_sector_limit_quality` | 行业板块当日/历史触板结构：涨停+炸板清单、板块炸板率与封板质量 Q（触板<3家记 null）；hybk ≤4 字缩写前缀安全匹配，杜绝按全称匹配漏票 | `daily-review` / `market-prediction` 板块封板质量 Q 与情绪退潮判定 |
-| `get_sector_fund_flow`| 申万/概念板块主力资金净流入 Top 榜、净流出 Top 榜、涨幅榜与领涨龙头；支持 2-10 日历史流向回补 | `daily-review` / `sector-rotation` 主线资金追踪 |
-| `get_sector_kline` | 行业指数日 K 序列（MA5/10/20/60、区间涨幅、高低点、成交额与量比）；支持 BK 代码或中文板块名 | 板块中期强度、均线支撑与资金延续判定 |
+| `get_sector_limit_quality` | 行业板块当日/历史触板结构：涨停+炸板清单、板块炸板率与封板质量 Q（触板<3家记 null）；hybk ≤4 字缩写前缀安全匹配，杜绝按全称匹配漏票；`sector` 仅接受东财行业板块（名称可带Ⅱ/Ⅲ后缀），无效传参报错附全量可用板块清单 | `daily-review` / `market-prediction` 板块封板质量 Q 与情绪退潮判定 |
+| `get_sector_fund_flow`| 东财行业板块主力资金净流入 Top 榜、净流出 Top 榜、涨幅榜与领涨龙头；支持 2-10 日历史流向回补；响应携带 `sector_taxonomy` 口径标签，兜底源自动降为 partial 并显式 `history_unavailable` | `daily-review` / `sector-rotation` 主线资金追踪 |
+| `get_sector_kline` | 行业指数日 K 序列（MA5/10/20/60、区间涨幅、高低点、成交额与量比）；支持 BK 代码或中文板块名，歧义名返回候选清单，全链路失败显式 `source_unavailable` 台账 | 板块中期强度、均线支撑与资金延续判定 |
 | `get_basket_index` | 以腾讯前复权日 K 构造**等权篮子代理指数**（日度再平衡口径），披露成分覆盖度与失败清单 | 行业指数接口抖动时的合规代理序列对冲 |
 | `get_longhubang_detail`| 全市场日度龙虎榜总览或个股前 5 大买卖席位穿透（自动识别机构专用、外资北向与游资营业部） | 资金合力属性、机构净买入与游资溢价研判 |
-| `get_company_quality` | 核心财务指标（营收/净利同比、ROE、毛利率、负债率）、商誉占比、未来限售解禁日筛查 | `stock-analysis` L8 公司基本面排雷与解禁雷达 |
+| `get_company_quality` | 核心财务指标（营收/净利同比、ROE、毛利率、负债率）、商誉占比、未来限售解禁日筛查；财务/解禁/资产负债三段独立容错，无记录显式说明而非整体不可用 | `stock-analysis` L8 公司基本面排雷与解禁雷达 |
 
 ---
 

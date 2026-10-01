@@ -30,12 +30,12 @@ marketgraph-mcp/
   5. `get_market_breadth`: 全市场广度 N 日序列——最新交易日为精确上涨/下跌/平盘家数与红盘率（东财涨跌分布快照），历史交易日以涨停/炸板/跌停池与沪指涨跌幅替代并以 `breadth_precision` 标注精度（不估算）。
   6. `get_market_sentiment`: 两市总成交额、涨跌停池数量、炸板池数量、全市场精确真实炸板率、最高连板高度；历史 `date_str` 的指数涨跌幅由腾讯指数日K主源回补（东财日K备源），两市历史成交额由东财指数日K回补（非交易日显式 `unavailable`，不以零值伪装）；`date_str` 支持 YYYYMMDD 或 YYYY-MM-DD。
   7. `get_limit_up_ladder`: 今日或历史指定交易日连板天梯分布、各高度板代表龙头与所属行业；`date_str` 支持 YYYYMMDD 或 YYYY-MM-DD。
-  8. `get_sector_limit_quality`: 获取行业板块涨停与炸板封单质量（前缀安全归因与换手封单比）。
-  9. `get_sector_fund_flow`: 申万与概念行业板块全天主力资金净流入 Top 榜、净流出 Top 榜、涨跌幅榜与领涨龙头代码；`days=2-10` 时对流入/流出榜板块回补 N 日主力净流入历史、累计净额与趋势定性。
-  10. `get_sector_kline`: 东财行业板块指数日K序列（主源为完整 OHLCV+成交额：板块 MA5/10/20/60、5/20/60 日区间涨幅、20/60 日高低点、最新/前一日成交额与量比 `amount_ratio_1d`；主源不可用自动兜底收盘序列+主力净额口径。支持 BK 代码或中文板块名，直供个股 L4 行业基准、daily-review 资金延续 V 项与板块强度证据）；东财板块源整体不可用时返回 `hint` 引导改用 `get_basket_index`。
-  11. `get_basket_index`: 以腾讯前复权日K构造等权篮子指数（日度再平衡口径，披露成分覆盖度与失败清单）——东财板块指数不可用时的合规代理序列（如保险 BK0735 仅 6 只成分股），也可用于主线篮子相对强度对照；`series_type=equal_weight_constructed`，构造序列只能用于方向性对照（使用边界见公共研究契约）。
+  8. `get_sector_limit_quality`: 获取行业板块涨停与炸板封单质量（前缀安全归因与换手封单比）；`sector` 仅接受东财行业板块 BK 代码或中文名（名称可能带Ⅱ/Ⅲ后缀，如银行Ⅱ），传入无效板块时错误回传 `available_industry_boards` 全量可用清单。
+  9. `get_sector_fund_flow`: 申万与概念行业板块全天主力资金净流入 Top 榜、净流出 Top 榜、涨跌幅榜与领涨龙头代码；`days=2-10` 时对流入/流出榜板块回补 N 日主力净流入历史、累计净额与趋势定性。响应携带 `sector_taxonomy` 口径标签（eastmoney_industry/ths_industry/sina_industry）：东财主源不可用自动降级同花顺口径并 `data_status=partial`，days>1 且历史不可用时显式 `history_unavailable`，不静默切口径。
+  10. `get_sector_kline`: 东财行业板块指数日K序列（主源为完整 OHLCV+成交额：板块 MA5/10/20/60、5/20/60 日区间涨幅、20/60 日高低点、最新/前一日成交额与量比 `amount_ratio_1d`；主源不可用自动兜底收盘序列+主力净额口径。支持 BK 代码或中文板块名，直供个股 L4 行业基准、daily-review 资金延续 V 项与板块强度证据）。名称解析优先级为 静态别名→全表精确同名→联想(行业优先)→唯一子串，歧义时返回 `sector_candidates` 候选；全链路失败显式 `source_unavailable` + 逐源失败台账，不返回空壳。
+  11. `get_basket_index`: 以腾讯前复权日K构造等权篮子指数（日度再平衡口径，披露成分覆盖度与失败清单）——东财板块指数不可用时的合规代理序列（如保险 BK0474、银行 BK0475 等大票行业），也可用于主线篮子相对强度对照；`series_type=equal_weight_constructed`，构造序列只能用于方向性对照（使用边界见公共研究契约）。
   12. `get_longhubang_detail`: 全市场日度龙虎榜总览或个股前 5 大买卖席位穿透（自动识别机构专用、北向深/沪股通与游资营业部）；机构专用净额按席位合并买卖两榜并附逐席位明细；`date_str` 支持 YYYYMMDD 或 YYYY-MM-DD（自动归一化）。
-  13. `get_company_quality`: 核心财务指标、商誉与未来限售解禁筛查；审计、质押、监管和诉讼等未覆盖项明确返回 `N/A`/待核验。
+  13. `get_company_quality`: 核心财务指标、商誉与未来限售解禁筛查；审计、质押、监管和诉讼等未覆盖项明确返回 `N/A`/待核验。财务/解禁/资产负债三段查询独立容错：单段失败或无记录仅降级该段（解禁为空返回显式说明），整体保持 `partial`，不因单段故障整体不可用。
   14. `get_preopen_context`: 盘前推演标准化证据包（指数 K 线与 ATR14、情绪总分、连板天梯与广度红盘率）。
   15. `get_close_review_context`: 收盘复盘标准化证据包（收盘指数、情绪指标、广度、主力资金流向榜与领跑封板质量）。
   16. `get_rotation_context`: 5 日板块轮动标准化证据包（主力资金流动矩阵、指数 5 日基准走势与情绪序列）。
@@ -45,8 +45,22 @@ marketgraph-mcp/
   20. `evaluate_prediction`: 对齐预测与收盘实际快照，计算 Brier、方向命中、板块 Top3 与点位触碰。
   21. `render_report`: 将 Artifact 渲染为 Markdown，或将完整报告数据渲染为 PNG 长图。
 - **失败不伪造**：关键上游不可用时返回 `partial` 或 `unavailable`，不会以零值生成市场情绪结论。
-- **频控自愈**：同一数据主机全局最小请求间隔（0.5s）+ 连接类失败自动退避重试；同主机连续 3 次失败触发断路器熔断 10 分钟并快速失败，冷却结束自动半开探测；收盘定格的历史数据（龙虎榜、板块资金流历史、历史情绪等）缓存 24 小时，当日盘中数据缓存 3 分钟——从源头避免触发东财 IP 级频控。
+- **频控自愈与镜像兜底**：同一数据主机全局最小请求间隔（0.5s）+ 连接类失败自动退避重试；同主机连续 3 次失败触发断路器熔断 10 分钟并快速失败，冷却结束自动半开探测；push2/push2his 系主域被 IP 级限流时自动切换镜像域名（23/48.push2[his]、push2delay）；收盘定格的历史数据（龙虎榜、板块资金流历史、历史情绪等）缓存 24 小时，当日盘中数据缓存 3 分钟——从源头避免触发东财 IP 级频控。
+- **口径可追溯**：多源兜底不静默——资金流响应携带 `sector_taxonomy` 口径标签，K线失败带逐源台账，东财 datacenter 的 `result:null`（无记录/频控双义）逐段判空降级。
 - **安全边界**：仅访问预设的 HTTPS 数据主机，并限制单次响应大小；服务端不执行外部命令，Artifact 与报告只写入受控用户状态目录，快照不可覆盖，输出文件名经过白名单校验。
+
+## 🕒 数据口径与采集时点 (盘后源切换矩阵)
+
+东财 push2 系网关盘后偶发限流/抖动时，多源兜底会切换口径；所有切换均显式标注（`sector_taxonomy` / `data_status` / `history_unavailable` / `source_unavailable`），调用方据此选择采集时点——跨时点对比前必须核对口径一致。
+
+| 接口 | 盘中 / 收盘后即刻 | 东财主源抖动时（兜底口径） |
+|---|---|---|
+| `get_sector_fund_flow` (days≥2) | `eastmoney_industry`，history/cum/trend 可用 | 可能切 `ths_industry`：板块名变为同花顺体系（如 传媒↔文化传媒），`data_status=partial` + `history_unavailable=true` |
+| `get_market_sentiment` (历史 date) | `ok`，两市成交额来自东财指数日K | 仅当 push2his 主域与镜像全部失效才 `partial`（成交额缺失，不以零值伪装） |
+| `get_sector_kline` | 完整 OHLCV+成交额 | 同花顺原生日K兜底（note 提示日更可能滞后，核对 `latest_date`）或等权篮子代理（`partial`） |
+| `get_company_quality` | `partial`（三段独立容错，覆盖项完整） | 同左（单段失败仅降级该段，不整体不可用） |
+
+使用守则：复盘「资金延续」请在东财主源窗口采集（响应含 `sector_taxonomy=eastmoney_industry`）；盘后重采若见 `ths_industry` 或 `history_unavailable`，沿用已采集的 Handoff/Artifact 快照而非重算。
 
 ## 🚀 命令行直接调试
 无需启动 MCP 宿主，直接使用 `--test` 命令行参数进行免配置验证：

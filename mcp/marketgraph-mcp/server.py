@@ -3132,7 +3132,7 @@ def fetch_stock_diagnostic_context(
 # -----------------------------------------------------------------------------
 SERVER_INFO = {
     "name": "marketgraph-data",
-    "version": "2.1.0",
+    "version": "2.2.0",
 }
 
 def _dispatch_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:

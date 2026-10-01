@@ -1,5 +1,27 @@
 # CHANGELOG (更新日志)
 
+## [v8.1.1] - 2026-10-01
+
+### 🛠️ MCP 数据服务排雷修复与多源口径显式化 (Hotfix for #1 #2 #3)
+
+- **公司质量层恢复可用 (`get_company_quality`, fixes #2)**：
+  - 东财 datacenter 对「无记录」与「频控」均返回 `{"success": false, "result": null}`，原解析链在键存在而值为 None 时抛 `NoneType.get`，导致该工具对全部 A 股标的稳定不可用；
+  - `result`/`result.data` 显式判空；财务/解禁/资产负债三段查询独立容错——单段失败降级 N/A + `warnings`，整体保持 `partial`；空解禁记录返回显式说明而非整体不可用；
+  - 解禁查询改 `FREE_DATE` 降序，修复历史解禁超过 pageSize 时漏报未来解禁的假阴性；
+  - `stock-analysis` L8 公司质量层重新进入 `get_stock_diagnostic_context` 证据包。
+- **板块传参体系修正 (`get_sector_limit_quality` / `get_sector_kline`, fixes #3)**：
+  - 真因: 东财 clist 单页上限 100 行而行业板块 `total≈496` 且按当日涨跌幅排序——原「行业板块表」实为当日涨幅前 100 的子集，成员随行情随机缺席（半导体/银行报错而保险可用）；改为按 `total` 全量翻页聚合，主域限流自动切换镜像域名（23/48.push2[his]、push2delay）；
+  - `STATIC_SECTOR_MAP` 大面积串号全表修正（电池→一般零售、煤炭→工程建设、通信设备→银行、钢铁→农林牧渔、白酒→电力等 37 码逐一经 suggest 网关核验），`THS_SECTOR_MAP`/`STATIC_SECTOR_BASKETS` 同步修正键位；无法核实的概念词别名删除，交由动态解析；
+  - 无效板块报错回传 `available_industry_boards` 全量可用清单；schema 示例改为实测可用值（'保险'/'农产品加工'/'BK1036'）；
+  - 名称解析优先级重排（静态别名→全表精确同名→联想行业优先→唯一子串），歧义名返回 `sector_candidates` 候选清单，`传媒` 不再错配。
+- **多源口径显式化 (`get_sector_fund_flow` / `get_market_sentiment` / `get_sector_kline`, fixes #1)**：
+  - 资金流三来源（东财/同花顺/新浪）全部打 `sector_taxonomy` 口径标签；兜底源 `data_status` 降为 `partial` 并列 `unavailable_sources`；days>1 时兜底显式 `history_unavailable` + 原因，杜绝盘后静默切口径导致复盘「资金延续」结论不可复现；
+  - `get_sector_kline` 全链路失败显式 `source_unavailable` + 逐源失败台账，不再返回全 None 空壳；同花顺K线兜底注明日更滞后风险；
+  - 历史情绪两市成交额唯一来源 push2his 加镜像通道（`em_kline_get`），盘后 `ok→partial` 概率大幅降低。
+- **文档与测试**：
+  - MCP README 新增「数据口径与采集时点矩阵」（盘后源切换对照与采集守则）；
+  - MCP 单测 61→74 全绿；版本联动 version.json / registry.json / plugin.json / SERVER_INFO（MCP 组件 2.1.0→2.2.0）。
+
 ## [v8.1.0] - 2026-09-28
 
 ### 🛡️ 实战策略深水区风控重构 (Tactical Risk & Capital Allocation Engine)

@@ -5,7 +5,7 @@
 > **规范边界**：本文是 Tool、Artifact、Router 与 Evaluator 的工程实施主计划；具体机器字段以 `contracts/artifacts/*.schema.json` 和 `registry.json` 为准，研究纪律以 `contracts/common-research-contract.md` 为准。
 > **与 UI 文档关系**：`UI_MODEL_SEPARATION_DESIGN.md` 只定义交互层如何消费本计划产出的 Artifact，不重复定义 Artifact 业务语义。
 
-## 当前实施状态（v7.5.0）
+## 当前实施状态（v8.1.1）
 
 | 能力 | 状态 | 当前证据 / 下一缺口 |
 |---|---|---|
@@ -13,7 +13,7 @@
 | PREOPEN / AUCTION 不可变分离 | 已完成 | `eval_tracker.py` 按 `market_phase` 与 revision 管理 |
 | Handoff / Thesis / 评估持久化 | 已完成 | 已有独立脚本和统一 CLI 兼容入口 |
 | 通用 Artifact Schema 与存储 | 已完成（P0） | 8 类 Schema、7 组 fixture、不可变快照存储与统一 CLI 已接入注册表和安装器；个股 Artifact 已补齐 L1–L8 证据结构 |
-| 确定性计算工具化 | 已完成（首批） | `tools/calculations/` 已覆盖市场、板块、个股与评估的 21 个纯函数；后续只扩展口径，不回填模型手算 |
+| 确定性计算工具化 | 已完成 | `tools/calculations/__init__.py` 现导出市场、板块、个股与评估共 47 个纯函数；后续只扩展口径，不回填模型手算，函数数量以该模块导出为准 |
 | Agent 研究工具 | 已完成 | 4 个上下文聚合工具及 `save_artifact`、`load_artifact`、`evaluate_prediction`、`render_report` 已接入，MarketGraph 共 21 个工具 |
 | Skill 主文件压缩 | 已完成（v7.4.0） | 4 个专业 Skill 已拆出 Tool Recipes，主文件保留路由、判断与输出契约 |
 | UI 工程 | 接口层已完成；宿主 UI Deferred | 已提供 12 类事件 Schema、可执行路由器与端到端测试；独立 Web/桌面界面不在当前版本范围 |
@@ -62,6 +62,7 @@ Evaluator  = 衡量预测质量和模型校准
 
 ```text
 contracts/artifacts/
+  base.schema.json
   evidence.schema.json
   prediction.schema.json
   auction.schema.json
@@ -203,15 +204,17 @@ get_stock_diagnostic_context
 
 ## 阶段 5：压缩 Skill 主文件
 
-目标行数：
+目标行数（重构前基线 → 阶段 5 目标 → 当前实测）：
 
-| Skill | 当前规模 | 目标规模 |
-|---|---:|---:|
-| `market-prediction` | 449 行 | 100–140 行 |
-| `daily-review` | 335 行 | 100–130 行 |
-| `sector-rotation` | 247 行 | 90–120 行 |
-| `stock-analysis` | 247 行 | 120–160 行 |
-| `stock-research-router` | 52 行 | 50–80 行 |
+| Skill | 重构前基线 | 阶段 5 目标 | 当前规模（v8.1.1） |
+|---|---:|---:|---:|
+| `market-prediction` | 449 行 | 100–140 行 | 177 行 |
+| `daily-review` | 335 行 | 100–130 行 | 131 行 |
+| `sector-rotation` | 247 行 | 90–120 行 | 146 行 |
+| `stock-analysis` | 247 行 | 120–160 行 | 100 行 |
+| `stock-research-router` | 52 行 | 50–80 行 | 84 行 |
+
+> 说明：目标行数为阶段 5 规划时的设定值；「当前规模」为 v8.1.1 实测行数（`wc -l .agents/skills/*/SKILL.md`），仅作参考，不作为验收硬指标。
 
 主文件只保留：适用场景、工具顺序、关键禁止事项、硬门槛、降级规则、输出字段和 Artifact 交接。
 
@@ -258,6 +261,8 @@ calculate_metrics
 evaluate_prediction
 render_report
 ```
+
+> 现状（v8.1.1）：`save_artifact`、`load_artifact`、`evaluate_prediction`、`render_report` 已作为 MCP 工具暴露；`calculate_metrics` 目前经 `scripts/calculate.py` 统一 CLI 提供，尚未单独暴露为 MCP 工具。
 
 CLI 作为人工、CI 和故障排查入口；MCP 作为 Agent 入口。
 

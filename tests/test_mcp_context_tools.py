@@ -119,21 +119,72 @@ class MCPContextToolsTest(unittest.TestCase):
             self.assertTrue(any("二八分化" in c for c in res["conflicts"]))
 
     def test_rotation_context_aggregation(self):
-        """测试 get_rotation_context 聚合资金、指数与广度趋势。"""
-        mock_fund = {"source": "P3_Eastmoney_Sector_Fund_Flow", "data_status": "ok", "date": "2026-09-10"}
+        """测试 get_rotation_context 聚合资金、指数、广度趋势与主线板块量价（5 区块契约）。"""
+        mock_fund = {
+            "source": "P3_Eastmoney_Sector_Fund_Flow", "data_status": "ok", "date": "2026-09-10",
+            "top_inflow_sectors": [
+                {"rank": 1, "name": "半导体", "code": "BK1036", "change_pct": "+2.1%"},
+                {"rank": 2, "name": "通信设备", "code": "BK0448", "change_pct": "+1.6%"},
+            ],
+        }
+        mock_idx = {
+            "source": "P3_Tencent_Index_KLine", "data_status": "ok", "latest_date": "2026-09-10",
+            "indices": {"SHCI": {"name": "上证指数", "change_pct": "+0.5%"}},
+        }
+        mock_breadth = {"source": "P3_Eastmoney_Market_Breadth", "data_status": "ok", "red_ratio": "58.0%"}
+        mock_sector_kline = {
+            "source": "P3_Eastmoney_Sector_KLine", "data_status": "ok", "sector_name": "半导体",
+            "sector_code": "BK1036", "valid_bars": 120, "recent_5d_return": "+6.20%",
+            "recent_20d_return": "+12.40%", "recent_60d_return": "+25.10%",
+            "ma5": 1010.0, "ma10": 990.0, "ma20": 960.0, "ma60": 900.0, "latest_close": 1030.0,
+            "avg_amount_5d_billion": 480.0,
+        }
+
+        with patch.object(SERVER, "fetch_sector_fund_flow", return_value=mock_fund), \
+             patch.object(SERVER, "fetch_index_kline", return_value=mock_idx), \
+             patch.object(SERVER, "fetch_market_breadth", return_value=mock_breadth), \
+             patch.object(SERVER, "fetch_sector_kline", return_value=mock_sector_kline):
+
+            res = SERVER.fetch_rotation_context(days=5, sector_count=10)
+            self.assertEqual(res["data_status"], "ok")
+            self.assertEqual(res["source"], "P3_MarketGraph_Rotation")
+            for section in ("sector_fund_flows", "index_trend", "breadth_trend",
+                            "dominant_sectors_kline", "coverage_audit"):
+                self.assertIn(section, res["payload"])
+            self.assertEqual(res["missing"], [])
+            dominant = res["payload"]["dominant_sectors_kline"]
+            self.assertEqual(len(dominant["sectors"]), 2)
+            self.assertEqual(dominant["sectors"][0]["ma_alignment"].split(":")[0], "bullish_alignment")
+            audit = res["payload"]["coverage_audit"]
+            self.assertEqual(audit["section_coverage_pct"], 100.0)
+            self.assertEqual(audit["score_gate"], "enabled")
+            self.assertAlmostEqual(sum(audit["planned_weights"]), 1.0, places=5)
+
+    def test_rotation_context_weight_monotonic_and_gate(self):
+        """测试轮动权重按近期不低于远期生成，且分块覆盖率不足时关闭量化分。"""
+        weights = SERVER._rotation_weights(5)
+        self.assertEqual(len(weights), 5)
+        self.assertTrue(all(weights[i] <= weights[i + 1] for i in range(4)))
+        self.assertAlmostEqual(sum(weights), 1.0, places=5)
+
+        mock_fund = {
+            "source": "P3_Eastmoney_Sector_Fund_Flow", "data_status": "ok", "date": "2026-09-10",
+            "top_inflow_sectors": [{"rank": 1, "name": "半导体", "code": "BK1036"}],
+        }
         mock_idx = {"source": "P3_Tencent_Index_KLine", "data_status": "ok", "latest_date": "2026-09-10"}
         mock_breadth = {"source": "P3_Eastmoney_Market_Breadth", "data_status": "ok"}
 
         with patch.object(SERVER, "fetch_sector_fund_flow", return_value=mock_fund), \
              patch.object(SERVER, "fetch_index_kline", return_value=mock_idx), \
-             patch.object(SERVER, "fetch_market_breadth", return_value=mock_breadth):
+             patch.object(SERVER, "fetch_market_breadth", return_value=mock_breadth), \
+             patch.object(SERVER, "fetch_sector_kline", side_effect=RuntimeError("blocked")):
 
             res = SERVER.fetch_rotation_context(days=5, sector_count=10)
-            self.assertEqual(res["data_status"], "ok")
-            self.assertEqual(res["source"], "P3_MarketGraph_Rotation")
-            self.assertIn("sector_fund_flows", res["payload"])
-            self.assertIn("index_trend", res["payload"])
-            self.assertIn("breadth_trend", res["payload"])
+            audit = res["payload"]["coverage_audit"]
+            self.assertEqual(audit["section_coverage_pct"], 75.0)
+            self.assertFalse(audit["mainline_block_present"])
+            self.assertEqual(audit["score_gate"], "disabled_qualitative_only")
+            self.assertIn("dominant_sectors_kline", res["missing"])
 
     def test_stock_diagnostic_context_aggregation(self):
         """测试 get_stock_diagnostic_context 聚合个股八层诊断所需数据。"""

@@ -32,11 +32,13 @@ from .sector import (
     calculate_ladder_health,
     calculate_leader_core_divergence,
     calculate_lifecycle_state,
+    calculate_rotation_migration,
     calculate_rotation_state,
     calculate_sector_cannibalization,
     calculate_sector_exhaustion,
     calculate_sector_ranking,
     map_capital_seesaw_matrix,
+    map_exhaustion_to_lifecycle,
     resolve_rotation_timeframe,
     validate_sector_capacity,
 )

@@ -1,5 +1,39 @@
 # CHANGELOG (更新日志)
 
+## [v8.1.2] - 2026-10-03
+
+### 🔍 板块轮动分析逻辑交易员视角审计修复 (Rotation Logic Audit Fixes)
+
+- **消除静默乐观结论 (`assess_rotation_effectiveness`)**：
+  - 历史版本为四个入参设置偏乐观默认值（`1 / 8.0 / 3 / 1.0`），恰好落在 `mainline_focused` 判定区间内，漏传参时会静默输出「主线聚焦 / 有效 / 低风险」的假阳性结论；现改为**任一输入缺失即返回 `N/A` + `unavailable`** 并列出 `missing`，公式版本 `rotation-effectiveness-v1 → v2`。
+- **修复吸血/轮动分类误判 (`calculate_sector_cannibalization`)**：
+  - 分类规则改为按语义严重度自上而下互斥有序判定，新增 `concentrated_mainline`（缩量 + 强主线 + 轻微失血，最健康形态），使历史不可达的 `broad_retreat` 死分支恢复可达；`sector-cannibalization-v1 → v2`。
+- **修复超级主线容量 OR 后门 (`validate_sector_capacity`)**：
+  - `mega_mainline` 由「份额 ≥4% **或** 绝对额 ≥350 亿」改为「份额 ≥4% **且** 绝对额达标」，杜绝放量市里 1.75% 份额靠绝对额混入超级主线；
+  - 新增可选 `market_amount_baseline_yi`，按 `baseline / 10000` 同比缩放绝对额门槛（默认 180 亿标准额），输出 `threshold_basis` 披露口径；`sector-capacity-v1 → v2`。
+- **补齐轮动状态机证据 (`calculate_rotation_state`)**：
+  - State 2「畏高切低」新增 `low_position_inflow` 入参与 `high_to_low_status`（`confirmed` / `failed` / `unverified`），区分「切低成功」与「切低失败后直接退潮」；`rotation-state-rules-v1 → v2`。
+- **结论证据级别显式化 (`map_capital_seesaw_matrix`)**：
+  - 跷跷板矩阵明确标注为**规则推演而非证据**：默认 `evidence_status=unverified_rule_only`，仅当传入对手板块实测表现（`counterpart_change_pct` / `counterpart_net_flow_yi`）才标 `verified` 并附实测证据；新增 `matched_keywords` 便于审计命中；`capital-seesaw-matrix-v1 → v2`。
+- **SEI 阈值披露与一致性校验**：
+  - `calculate_sector_exhaustion` 输出 `components` 三项子分并标注 `calibration_status=uncalibrated`，明确权重 (40/30/30) 与阈值 (30/60/80) 未经历史样本校准；
+  - 新增 `map_exhaustion_to_lifecycle`，校验 SEI 分档与生命周期是否自洽（如 SEI=55 不得同时标注「高位分歧」），`consistent=false` 时输出 `conflict_note`。
+- **新增资金迁移矩阵 (`calculate_rotation_migration`)**：
+  - 接收 T-4 至 T 逐日净流入排行，输出 `migration_matrix` / `persistence_ratio`，区分 `sustained_sectors`（持续流入的真主线）与 `one_day_spike_sectors`（单日爆量脉冲），回答「这几天是持续流入还是某天一次性爆量」。
+- **MCP 轮动上下文补齐承诺字段 (`get_rotation_context`)**：
+  - 补齐历史缺失的 `dominant_sectors_kline`（主线板块 5/20/60 日区间涨幅与均线排列）与 `coverage_audit`（计划权重 + 分块覆盖 + 量化分门槛），payload 固定 5 区块；
+  - 量化分门槛改为「分块覆盖率 ≥70% **且** 主线块在位」，缺失主线块时即便其余三块齐全（75%）也强制 `disabled_qualitative_only`。
+- **战术结论纳入评估台账 (`eval_tracker.py`)**：
+  - `record-daily` 新增 `--rotation-type` / `--divergence-type`；新增 `reconcile-tactics` 回填次日实际结果（`confirmed` / `failed` / `unverifiable`）与 `report-tactics` 输出历史命中率，使「电风扇预警 / 中军背离」等判断可被证伪；
+  - `record-daily` 改为**合并写入**：同一交易日的情绪分（daily-review）与战术结论（sector-rotation）来自不同 Skill 批次，不再互相清空对方字段。
+- **计算健壮性**：
+  - `calculate_5d_sentiment_score` 新增权重单调性校验，拒绝「远期权重高于近期」的反向权重；
+  - `calculate_sector_ranking` 修复 `score=None` 板块排序哨兵，缺失评分板块稳定排至末位。
+- **文档与测试**：
+  - `sector-rotation` SKILL.md 与 `tool-recipes.md` 同步新增函数配方、覆盖率门槛与台账命令；`get_rotation_context` 入参更正为 `days` / `sector_count`；
+  - 新增 `tests/test_sector_rotation_fixes.py`（25 例）与 `eval_tracker` 战术台账用例，全量 301 项单元测试全绿；
+  - 版本联动 version.json / registry.json / plugin.json / SERVER_INFO（MCP 组件 2.2.0→2.3.0）。
+
 ## [v8.1.1] - 2026-10-01
 
 ### 🛠️ MCP 数据服务排雷修复与多源口径显式化 (Hotfix for #1 #2 #3)

@@ -14,6 +14,11 @@ def calculate_5d_sentiment_score(daily_scores, weights=None, input_snapshot_id=N
         raise ValueError("weights 每项必须在 0–1 之间")
     if abs(sum(weights) - 1.0) > 1e-9:
         raise ValueError("weights 合计必须为 1")
+    if any(weights[index] > weights[index + 1] for index in range(len(weights) - 1)):
+        raise ValueError(
+            "weights 必须按 T-4 至 T 非递减排列（近期权重不得低于远期权重），"
+            "否则会得出「远期主导」的反向结论；请检查权重顺序"
+        )
     available = []
     missing = []
     for index, (score, weight) in enumerate(zip(daily_scores, weights)):
@@ -158,7 +163,15 @@ def calculate_sector_exhaustion(price_volume_divergence=None, relay_risk=None, c
     score = price_volume_divergence + relay_risk + capital_spillover
     state = "healthy" if score <= 30 else "divergence" if score <= 60 else "exhausted" if score <= 80 else "retreat"
     return result(round(score, 4), "sector-exhaustion-v2" if derived else "sector-exhaustion-v1", input_snapshot_id, state=state,
-                  derivation="objective" if derived else "direct", derived_components=derived)
+                  derivation="objective" if derived else "direct", derived_components=derived,
+                  components={
+                      "price_volume_divergence": round(price_volume_divergence, 4),
+                      "relay_risk": round(relay_risk, 4),
+                      "capital_spillover": round(capital_spillover, 4),
+                  },
+                  calibration_status="uncalibrated",
+                  calibration_note="子项权重 (40/30/30) 与分档阈值 (30/60/80) 为经验设定，未经历史样本校准；"
+                                   "请结合 eval_tracker 主线状态台账累积 >=30 日后复核，报告不得将其表述为已验证阈值。")
 
 
 def calculate_ladder_health(ladder_distribution, input_snapshot_id=None):
@@ -211,7 +224,16 @@ def calculate_ladder_health(ladder_distribution, input_snapshot_id=None):
 def calculate_sector_cannibalization(leader_sector_turnover_share=None, market_amount_ratio=None,
                                      outflow_sectors_loss_rate=None, input_snapshot_id=None,
                                      outflow_sectors=None, flow_to_leader=None):
-    """量化存量吸血、增量共生、电风扇轮动与普跌退潮，并输出失血板块。"""
+    """量化存量吸血、增量共生、主线聚焦、电风扇轮动与普跌退潮，并输出失血板块。
+
+    分类按语义严重度自上而下判定（互斥且有序，修复历史误判与死分支）：
+    - broad_retreat         普跌退潮：失血严重 (loss_rate >= 2.0)、缩量且无强主线承接 (leader_share < 8)；
+    - siphon_extreme        存量吸血极化：缩量 + 强主线 + 明显失血；
+    - concentrated_mainline 缩量主线聚焦：缩量 + 强主线 + 失血轻微（最健康形态）；
+    - balanced_growth       增量共生：量能放大且无明显失血；
+    - diffuse_rotation      电风扇扩散：缩量、无强主线且无明显失血；
+    - transitional          过渡分歧：其余组合（如放量但明显失血）。
+    """
     values = {
         "leader_sector_turnover_share": leader_sector_turnover_share,
         "market_amount_ratio": market_amount_ratio,
@@ -219,7 +241,7 @@ def calculate_sector_cannibalization(leader_sector_turnover_share=None, market_a
     }
     missing = [name for name, value in values.items() if value is None]
     if missing:
-        return result("N/A", "sector-cannibalization-v1", input_snapshot_id, missing, "unavailable")
+        return result("N/A", "sector-cannibalization-v2", input_snapshot_id, missing, "unavailable")
     require_range("leader_sector_turnover_share", leader_sector_turnover_share, 0, 100)
     require_range("market_amount_ratio", market_amount_ratio, 0, 10)
     require_range("outflow_sectors_loss_rate", outflow_sectors_loss_rate, 0, 100)
@@ -230,16 +252,18 @@ def calculate_sector_cannibalization(leader_sector_turnover_share=None, market_a
     contraction_score = clamp((1.05 - amount_ratio) / 0.25 * 30.0, 0, 30)
     loss_score = clamp(loss_rate / 3.0 * 20.0, 0, 20)
     siphon_index = round(share_score + contraction_score + loss_score, 4)
-    if amount_ratio <= 1.05 and leader_share >= 8 and loss_rate > 1.5:
+    if loss_rate >= 2.0 and leader_share < 8.0 and amount_ratio < 1.0:
+        market_dynamic = "broad_retreat"
+    elif amount_ratio <= 1.05 and leader_share >= 8.0 and loss_rate > 1.5:
         market_dynamic = "siphon_extreme"
+    elif amount_ratio <= 1.05 and leader_share >= 8.0:
+        market_dynamic = "concentrated_mainline"
     elif amount_ratio > 1.05 and loss_rate <= 1.5:
         market_dynamic = "balanced_growth"
-    elif amount_ratio <= 1.05 and leader_share < 8 and loss_rate <= 1.5:
+    elif amount_ratio <= 1.05 and loss_rate <= 1.5:
         market_dynamic = "diffuse_rotation"
-    elif loss_rate >= 2.0 and amount_ratio < 1.0:
-        market_dynamic = "broad_retreat"
     else:
-        market_dynamic = "diffuse_rotation"
+        market_dynamic = "transitional"
     affected = []
     redirected = None
     if isinstance(outflow_sectors, list):
@@ -264,13 +288,25 @@ def calculate_sector_cannibalization(leader_sector_turnover_share=None, market_a
         "market_amount_ratio": amount_ratio,
         "outflow_sectors_loss_rate": loss_rate,
     }
-    return result(payload, "sector-cannibalization-v1", input_snapshot_id,
+    return result(payload, "sector-cannibalization-v2", input_snapshot_id,
                   siphon_index=siphon_index, market_dynamic=market_dynamic,
                   affected_sectors=affected, redirected_flow_ratio=redirected)
 
 
 def calculate_rotation_state(core_share=None, positive_days=None, limit_up_count=None, defensive_flow=False,
-                             high_level_selloff=False, input_snapshot_id=None):
+                             high_level_selloff=False, low_position_inflow=None, input_snapshot_id=None):
+    """按 4 状态转移规则判定资金轮动状态。
+
+    - state_1 主线主升：核心板块成交占比 >= 8% 且连续 >= 3 日阳线；
+    - state_2 畏高切低/补涨：高位股杀跌但资金未转向防御；
+    - state_3 避险防御：高位杀跌且资金流向防御红利；
+    - state_4 冰点衰退：涨停 < 20 家且高位股杀跌。
+
+    `low_position_inflow`（可选布尔）用于补足 state_2 缺失的证据：历史实现仅凭
+    `high_level_selloff` 即判定「畏高切低」，无法区分「切低成功」与「切低失败后直接退潮」。
+    传入 True 记为 confirmed、False 记为 failed、缺省为 unverified。
+    该字段只补充证据状态，不改变 state 枚举，保证既有消费方兼容。
+    """
     if limit_up_count is not None and limit_up_count < 20 and high_level_selloff:
         state, rule = "state_4", "ice_point"
     elif defensive_flow and high_level_selloff:
@@ -280,8 +316,15 @@ def calculate_rotation_state(core_share=None, positive_days=None, limit_up_count
     elif core_share is not None and positive_days is not None and core_share >= 8 and positive_days >= 3:
         state, rule = "state_1", "mainline_advance"
     else:
-        return result("N/A", "rotation-state-rules-v1", input_snapshot_id, ["decisive_rotation_evidence"], "unavailable")
-    return result(state, "rotation-state-rules-v1", input_snapshot_id, matched_rule=rule)
+        return result("N/A", "rotation-state-rules-v2", input_snapshot_id, ["decisive_rotation_evidence"], "unavailable")
+    high_to_low_status = None
+    if state == "state_2":
+        if low_position_inflow is None:
+            high_to_low_status = "unverified"
+        else:
+            high_to_low_status = "confirmed" if bool(low_position_inflow) else "failed"
+    return result(state, "rotation-state-rules-v2", input_snapshot_id, matched_rule=rule,
+                  high_to_low_status=high_to_low_status)
 
 
 def calculate_sector_ranking(sectors, weights=None, input_snapshot_id=None):
@@ -299,7 +342,7 @@ def calculate_sector_ranking(sectors, weights=None, input_snapshot_id=None):
         total_weight = sum(weight for _, _, weight in available)
         score = sum(value * weight for _, value, weight in available) / total_weight
         ranked.append({"id": item.get("id", "N/A"), "score": round(score, 4), "missing": sorted(set(weights) - {name for name, _, _ in available})})
-    ranked.sort(key=lambda item: (-1 if item["score"] is None else -item["score"], str(item["id"])))
+    ranked.sort(key=lambda item: (item["score"] is None, -(item["score"] or 0.0), str(item["id"])))
     return result(ranked, "sector-ranking-v1", input_snapshot_id)
 
 
@@ -323,10 +366,10 @@ def calculate_lifecycle_state(current_state, capital_continuity=None, accepted=F
 
 
 def assess_rotation_effectiveness(
-    active_sectors_count=1,
-    leader_turnover_share=8.0,
-    limit_up_clusters=3,
-    market_amount_ratio=1.0,
+    active_sectors_count=None,
+    leader_turnover_share=None,
+    limit_up_clusters=None,
+    market_amount_ratio=None,
     input_snapshot_id=None,
 ):
     """
@@ -334,21 +377,36 @@ def assess_rotation_effectiveness(
     规则遵循 A 股存量博弈盘口：
     - 电风扇无效轮动 (electric_fan):
       * 活跃异动板块过多 (active_sectors_count >= 4) 且领涨板块成交占比偏低 (leader_turnover_share < 6.0)；
-      * 或领涨板块涨停家数孤木难支 (limit_up_clusters <= 2) 且成交额占比不足 6.0；
-      * 输出 validity: "ineffective"，提示严禁追高日内脉冲。
+      * 或领涨板块涨停家数孤木难支 (limit_up_clusters <= 2) 且成交额占比不足 6.0 且两市量能未放大；
+      * 输出 is_effective=False，提示严禁追高日内脉冲。
     - 主线聚焦有效轮动 (mainline_focused):
       * 领涨板块成交占比高 (leader_turnover_share >= 8.0) 且涨停梯队完整 (limit_up_clusters >= 3)；
-      * 输出 validity: "effective"，支持做主线分歧低吸与接力。
+      * 或成交占比 >= 10.0 且涨停梯队 >= 2；
+      * 输出 is_effective=True，支持做主线分歧低吸与接力。
     - 过渡分歧态 (transitional):
       * 其余中性态。
+
+    重要：本函数**不设乐观默认值**。任一输入缺失即返回 N/A 并列出 missing。
+    历史版本曾为四个参数设置偏乐观的默认值（1 / 8.0 / 3 / 1.0），恰好落在
+    mainline_focused 判定区间内，导致漏传参时静默输出「主线聚焦 / 有效 / 低风险」
+    的假阳性结论；现已移除，缺失输入一律返回 unavailable。
     """
+    raw = {
+        "active_sectors_count": active_sectors_count,
+        "leader_turnover_share": leader_turnover_share,
+        "limit_up_clusters": limit_up_clusters,
+        "market_amount_ratio": market_amount_ratio,
+    }
+    missing = [name for name, value in raw.items() if value is None]
+    if missing:
+        return result("N/A", "rotation-effectiveness-v2", input_snapshot_id, missing, "unavailable")
     try:
-        sec_cnt = int(active_sectors_count) if active_sectors_count is not None else 1
-        ldr_share = float(leader_turnover_share) if leader_turnover_share is not None else 8.0
-        lim_cnt = int(limit_up_clusters) if limit_up_clusters is not None else 3
-        mkt_ratio = float(market_amount_ratio) if market_amount_ratio is not None else 1.0
+        sec_cnt = int(active_sectors_count)
+        ldr_share = float(leader_turnover_share)
+        lim_cnt = int(limit_up_clusters)
+        mkt_ratio = float(market_amount_ratio)
     except (TypeError, ValueError):
-        return result("N/A", "rotation-effectiveness-v1", input_snapshot_id, ["numeric_parameters"], "unavailable")
+        return result("N/A", "rotation-effectiveness-v2", input_snapshot_id, ["numeric_parameters"], "unavailable")
 
     require_range("active_sectors_count", sec_cnt, 0, 100)
     require_range("leader_turnover_share", ldr_share, 0, 100)
@@ -386,7 +444,7 @@ def assess_rotation_effectiveness(
             "market_amount_ratio": round(mkt_ratio, 2),
         },
     }
-    return result(value, "rotation-effectiveness-v1", input_snapshot_id)
+    return result(value, "rotation-effectiveness-v2", input_snapshot_id)
 
 
 def calculate_leader_core_divergence(
@@ -490,30 +548,68 @@ def resolve_rotation_timeframe(
     return result(value, "rotation-timeframe-v1", input_snapshot_id)
 
 
+REFERENCE_MARKET_AMOUNT_YI = 10000.0
+MEGA_AMOUNT_YI = 350.0
+STANDARD_AMOUNT_YI = 180.0
+
+
 def validate_sector_capacity(
-    sector_amount_yi=0.0,
-    market_total_amount_yi=10000.0,
+    sector_amount_yi=None,
+    market_total_amount_yi=None,
+    market_amount_baseline_yi=None,
     input_snapshot_id=None,
 ):
     """
     判定板块资金容量，杜绝小微题材伪装主线。
     - sector_amount_yi: 板块日成交额(亿元)
     - market_total_amount_yi: 两市总成交额(亿元)
-    """
-    try:
-        sec_amt = float(sector_amount_yi) if sector_amount_yi is not None else 0.0
-        mkt_amt = float(market_total_amount_yi) if market_total_amount_yi is not None else 10000.0
-    except (TypeError, ValueError):
-        return result("N/A", "sector-capacity-v1", input_snapshot_id, ["numeric_parameters"], "unavailable")
+    - market_amount_baseline_yi: 可选，两市成交额基准（如近 20 日成交额中位数，亿元）。
+      提供后按 baseline / 10000 同比缩放绝对额门槛，避免固定 350/180 亿阈值在放量市
+      失去区分度；未提供时按固定参考基准计算，并在输出中标注 threshold_basis。
 
-    mkt_amt = max(mkt_amt, 1.0)
+    判定规则（修复历史 OR 后门）：
+    - mega_mainline 需**同时**满足「份额达标 (>=4%)」与「绝对容量达标 (>= 标准额门槛)」，
+      杜绝「放量市里 1.75% 份额靠 350 亿绝对值混入超级主线」；
+    - standard_mainline 只需份额或绝对额之一达标；
+    - 其余为 micro_niche。
+    """
+    raw = {"sector_amount_yi": sector_amount_yi, "market_total_amount_yi": market_total_amount_yi}
+    missing = [name for name, value in raw.items() if value is None]
+    if missing:
+        return result("N/A", "sector-capacity-v2", input_snapshot_id, missing, "unavailable")
+    try:
+        sec_amt = float(sector_amount_yi)
+        mkt_amt = max(float(market_total_amount_yi), 1.0)
+    except (TypeError, ValueError):
+        return result("N/A", "sector-capacity-v2", input_snapshot_id, ["numeric_parameters"], "unavailable")
+
+    if market_amount_baseline_yi is None:
+        threshold_scale = 1.0
+        threshold_basis = "fixed_reference_10000yi"
+    else:
+        try:
+            baseline = float(market_amount_baseline_yi)
+        except (TypeError, ValueError):
+            return result("N/A", "sector-capacity-v2", input_snapshot_id, ["market_amount_baseline_yi"], "unavailable")
+        if baseline <= 0:
+            return result("N/A", "sector-capacity-v2", input_snapshot_id, ["market_amount_baseline_yi"], "unavailable")
+        threshold_scale = baseline / REFERENCE_MARKET_AMOUNT_YI
+        threshold_basis = f"normalized_to_baseline_{round(baseline, 2)}yi"
+
+    mega_amount_threshold = MEGA_AMOUNT_YI * threshold_scale
+    standard_amount_threshold = STANDARD_AMOUNT_YI * threshold_scale
     amount_share = (sec_amt / mkt_amt) * 100.0
 
-    if amount_share >= 4.0 or sec_amt >= 350.0:
+    share_mega = amount_share >= 4.0
+    share_standard = amount_share >= 2.0
+    amount_mega = sec_amt >= mega_amount_threshold
+    amount_standard = sec_amt >= standard_amount_threshold
+
+    if share_mega and amount_standard:
         capacity_type = "mega_mainline"
         tradable_scale = "超级大容量主线，支持百亿中军趋势重仓配置与机构大资金进出"
         is_mainline = True
-    elif amount_share >= 2.0 or sec_amt >= 180.0:
+    elif share_standard or amount_standard:
         capacity_type = "standard_mainline"
         tradable_scale = "标准主力题材，支持龙头接力与容量中军波段配置"
         is_mainline = True
@@ -529,18 +625,30 @@ def validate_sector_capacity(
         "market_total_amount_yi": round(mkt_amt, 2),
         "tradable_scale": tradable_scale,
         "is_mainline_eligible": is_mainline,
+        "mega_amount_threshold_yi": round(mega_amount_threshold, 2),
+        "standard_amount_threshold_yi": round(standard_amount_threshold, 2),
+        "amount_mega_by_absolute": amount_mega,
+        "threshold_basis": threshold_basis,
     }
-    return result(value, "sector-capacity-v1", input_snapshot_id)
+    return result(value, "sector-capacity-v2", input_snapshot_id)
 
 
 def map_capital_seesaw_matrix(
     current_mainline="",
     current_lifecycle="divergence",
+    counterpart_change_pct=None,
+    counterpart_net_flow_yi=None,
     input_snapshot_id=None,
 ):
     """
     A 股存量博弈资金跷跷板（Seesaw Effect）对立外溢矩阵。
     当主线分歧退潮时，推演最可能的对立防御或补涨承接板块。
+
+    边界说明：本矩阵是**基于关键词的规则推演，不是证据**。默认只输出「最可能」的
+    对流承接板块，报告侧不得表述为已发生事实。仅当显式传入对手板块当日实际表现
+    （`counterpart_change_pct` / `counterpart_net_flow_yi`）时，才标记
+    `evidence_status=verified` 并附实测证据；否则标记 `unverified_rule_only`。
+    `matched_keywords` 用于披露本次命中的关键词，便于审计映射是否合理。
     """
     mainline_str = str(current_mainline).lower()
     lifecycle = str(current_lifecycle).lower()
@@ -595,9 +703,12 @@ def map_capital_seesaw_matrix(
     ]
 
     matched_pair = None
+    matched_keywords = []
     for keywords, config in seesaw_rules:
-        if any(k in mainline_str for k in keywords):
+        hits = [keyword for keyword in keywords if keyword in mainline_str]
+        if hits:
             matched_pair = config
+            matched_keywords = hits
             break
 
     if not matched_pair:
@@ -606,6 +717,7 @@ def map_capital_seesaw_matrix(
             "logic": "当前主线出现分歧，资金外溢通常流向低估值防御属性板块或全市场低位滞涨板块。",
             "alternative": "次日全市场无序电风扇轮动",
         }
+        matched_keywords = []
 
     is_active_outflow = lifecycle in ("divergence", "exhausted", "retreat", "declining", "fade")
     tactical_instruction = (
@@ -613,6 +725,16 @@ def map_capital_seesaw_matrix(
         if is_active_outflow
         else f"主线当前处健康主升阶段，资金虹吸聚集，对立板块暂时承压，保持聚焦核心主线龙头。"
     )
+
+    if counterpart_change_pct is None and counterpart_net_flow_yi is None:
+        evidence_status = "unverified_rule_only"
+        counterpart_evidence = None
+    else:
+        evidence_status = "verified"
+        counterpart_evidence = {
+            "change_pct": counterpart_change_pct,
+            "net_flow_yi": counterpart_net_flow_yi,
+        }
 
     value = {
         "current_mainline": str(current_mainline),
@@ -622,8 +744,168 @@ def map_capital_seesaw_matrix(
         "rotation_logic": matched_pair["logic"],
         "secondary_target": matched_pair["alternative"],
         "tactical_instruction": tactical_instruction,
+        "matched_keywords": matched_keywords,
+        "evidence_status": evidence_status,
+        "counterpart_evidence": counterpart_evidence,
+        "evidence_note": (
+            "对手板块表现已核验，可作为外溢承接的实测依据。"
+            if evidence_status == "verified"
+            else "尚未核验对手板块当日表现，本结论仅为规则推演，报告不得表述为已发生事实。"
+        ),
     }
-    return result(value, "capital-seesaw-matrix-v1", input_snapshot_id)
+    return result(value, "capital-seesaw-matrix-v2", input_snapshot_id)
+
+
+def calculate_rotation_migration(daily_rankings=None, top_n=5, input_snapshot_id=None):
+    """构建板块资金净流入排名的逐日迁移矩阵，区分「持续流入」与「单日爆量」。
+
+    历史缺口：`get_sector_fund_flow` 只返回区间累计净额排名，无法回答「这几天是持续
+    流入还是某一天一次性爆量」。本函数接收逐日排名序列，输出可审计的迁移矩阵。
+
+    - daily_rankings: 按 T-4 至 T 排列的数组，每项为该日净流入排行（高到低）；
+      元素可为板块名字符串，或 {"name": ...} 对象；缺失日传 null。
+      要求至少 3 个非空日，与 5 日轮动的覆盖率门槛一致。
+    - top_n: 定义「进入前列」的名次门槛，默认 5。
+
+    输出：
+    - migration_matrix: 每个板块的逐日名次（缺失日为 null）；
+    - persistence_ratio: 板块进入前 top_n 的天数 / 有效观测天数；
+    - sustained_sectors: 持续度 >= 0.6 的板块（真正的资金主线）；
+    - one_day_spike_sectors: 持续度 <= 0.2 却出现在最新一日前 top_n 的板块（疑似单日脉冲）；
+    - entrants_vs_first_day / exits_vs_first_day: 相对首个观测日的新进入 / 掉出名单。
+    """
+    if not isinstance(daily_rankings, (list, tuple)):
+        return result("N/A", "rotation-migration-v1", input_snapshot_id, ["daily_rankings"], "unavailable")
+    if isinstance(top_n, bool) or not isinstance(top_n, int) or top_n < 1:
+        return result("N/A", "rotation-migration-v1", input_snapshot_id, ["top_n"], "unavailable")
+
+    normalized = []
+    for index, day in enumerate(daily_rankings):
+        if day is None:
+            normalized.append([])
+            continue
+        if not isinstance(day, (list, tuple)):
+            raise ValueError(f"daily_rankings[{index}] 必须为数组或 null")
+        names = []
+        for item in day:
+            if isinstance(item, str):
+                names.append(item)
+            elif isinstance(item, dict):
+                name = item.get("name") or item.get("id")
+                if name is None:
+                    raise ValueError(f"daily_rankings[{index}] 对象元素必须包含 name 或 id")
+                names.append(str(name))
+            else:
+                raise ValueError(f"daily_rankings[{index}] 元素必须为字符串或对象")
+        normalized.append(names)
+
+    observed_days = [day for day in normalized if day]
+    if len(observed_days) < 3:
+        return result("N/A", "rotation-migration-v1", input_snapshot_id,
+                      ["observed_days>=3"], "unavailable",
+                      days_observed=len(observed_days))
+
+    migration_matrix = {}
+    for day_index, names in enumerate(normalized):
+        for position, name in enumerate(names, start=1):
+            migration_matrix.setdefault(name, [None] * len(normalized))[day_index] = position
+
+    top_n_sets = [set(day[:top_n]) for day in normalized if day]
+    first_entry = top_n_sets[0]
+    last_entry = top_n_sets[-1]
+
+    persistence_ratio = {}
+    for name, ranks in migration_matrix.items():
+        in_top = sum(1 for rank in ranks if rank is not None and rank <= top_n)
+        persistence_ratio[name] = round(in_top / len(observed_days), 4)
+
+    sustained_sectors = sorted(
+        (name for name, ratio in persistence_ratio.items() if ratio >= 0.6),
+        key=lambda name: (-persistence_ratio[name], name),
+    )
+    one_day_spike_sectors = sorted(
+        (name for name, ratio in persistence_ratio.items() if ratio <= 0.2 and name in last_entry),
+        key=lambda name: (persistence_ratio[name], name),
+    )
+
+    value = {
+        "days_observed": len(observed_days),
+        "top_n": top_n,
+        "migration_matrix": migration_matrix,
+        "persistence_ratio": persistence_ratio,
+        "sustained_sectors": sustained_sectors,
+        "one_day_spike_sectors": one_day_spike_sectors,
+        "entrants_vs_first_day": sorted(last_entry - first_entry),
+        "exits_vs_first_day": sorted(first_entry - last_entry),
+    }
+    return result(value, "rotation-migration-v1", input_snapshot_id)
+
+
+EXHAUSTION_BANDS = (
+    (0, 30, "动能充沛", ("启动期", "强化期"), "动能充沛，可持有核心仓位并等待分歧低吸。"),
+    (31, 60, "良性分歧", ("强化期", "加速期", "高位分歧"), "良性分歧，降低追高频率，以均线防守滚动操作。"),
+    (61, 80, "严重衰竭", ("高位分歧", "弱化期", "退潮期"), "动能严重衰竭，高低切已确立，逢反弹减仓。"),
+    (81, 100, "全面退潮", ("退潮期",), "全面退潮踩踏，仓位清零，严禁接飞刀。"),
+)
+
+
+def map_exhaustion_to_lifecycle(sei=None, lifecycle_state=None, input_snapshot_id=None):
+    """把主线衰竭指数 (SEI) 分档与板块生命周期对齐，消除两套体系的口径冲突。
+
+    历史缺口：SEI 分档（0-30/31-60/61-80/81-100）与生命周期（启动/强化/加速/分歧/退潮）
+    是两套独立体系，报告可能同时出现「SEI=55 良性分歧」与「高位分歧」，自相矛盾。
+
+    - 传入 sei：返回所属分档、该分档允许的生命周期集合与战法提示；
+    - 传入 lifecycle_state：返回该生命周期可能对应的 SEI 分档集合；
+    - 同时传入：额外输出 consistent 一致性校验，不一致时给出 conflict_note。
+    """
+    if sei is None and lifecycle_state is None:
+        return result("N/A", "exhaustion-lifecycle-map-v1", input_snapshot_id,
+                      ["sei_or_lifecycle_state"], "unavailable")
+
+    lifecycle = str(lifecycle_state) if lifecycle_state is not None else None
+    band_info = None
+    if sei is not None:
+        require_range("sei", sei, 0, 100)
+        for lower, upper, label, allowed, guidance in EXHAUSTION_BANDS:
+            if lower <= float(sei) <= upper:
+                band_info = {
+                    "band": f"{lower}-{upper}",
+                    "band_label": label,
+                    "allowed_lifecycles": list(allowed),
+                    "guidance": guidance,
+                }
+                break
+
+    if band_info is None:
+        candidate_bands = [
+            {"band": f"{lower}-{upper}", "band_label": label}
+            for lower, upper, label, _allowed, _guidance in EXHAUSTION_BANDS
+            if lifecycle in _allowed
+        ]
+        return result({
+            "lifecycle_state": lifecycle,
+            "candidate_sei_bands": candidate_bands,
+        }, "exhaustion-lifecycle-map-v1", input_snapshot_id)
+
+    consistent = None
+    if lifecycle is not None:
+        consistent = lifecycle in band_info["allowed_lifecycles"]
+    payload = {
+        "sei": round(float(sei), 2),
+        "lifecycle_state": lifecycle,
+        "band": band_info["band"],
+        "band_label": band_info["band_label"],
+        "allowed_lifecycles": band_info["allowed_lifecycles"],
+        "consistent": consistent,
+        "guidance": band_info["guidance"],
+    }
+    if consistent is False:
+        payload["conflict_note"] = (
+            f"SEI {round(float(sei), 2)} 属于「{band_info['band_label']}」档，"
+            f"与生命周期「{lifecycle}」不自洽；报告需披露该冲突并以证据更充分的一方为准。"
+        )
+    return result(payload, "exhaustion-lifecycle-map-v1", input_snapshot_id)
 
 
 

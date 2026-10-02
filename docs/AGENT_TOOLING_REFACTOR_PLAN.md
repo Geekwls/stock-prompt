@@ -5,7 +5,7 @@
 > **规范边界**：本文是 Tool、Artifact、Router 与 Evaluator 的工程实施主计划；具体机器字段以 `contracts/artifacts/*.schema.json` 和 `registry.json` 为准，研究纪律以 `contracts/common-research-contract.md` 为准。
 > **与 UI 文档关系**：`UI_MODEL_SEPARATION_DESIGN.md` 只定义交互层如何消费本计划产出的 Artifact，不重复定义 Artifact 业务语义。
 
-## 当前实施状态（v8.1.1）
+## 当前实施状态（v8.1.2）
 
 | 能力 | 状态 | 当前证据 / 下一缺口 |
 |---|---|---|
@@ -206,15 +206,15 @@ get_stock_diagnostic_context
 
 目标行数（重构前基线 → 阶段 5 目标 → 当前实测）：
 
-| Skill | 重构前基线 | 阶段 5 目标 | 当前规模（v8.1.1） |
+| Skill | 重构前基线 | 阶段 5 目标 | 当前规模（v8.1.2） |
 |---|---:|---:|---:|
 | `market-prediction` | 449 行 | 100–140 行 | 177 行 |
 | `daily-review` | 335 行 | 100–130 行 | 131 行 |
-| `sector-rotation` | 247 行 | 90–120 行 | 146 行 |
+| `sector-rotation` | 247 行 | 90–120 行 | 158 行 |
 | `stock-analysis` | 247 行 | 120–160 行 | 100 行 |
 | `stock-research-router` | 52 行 | 50–80 行 | 84 行 |
 
-> 说明：目标行数为阶段 5 规划时的设定值；「当前规模」为 v8.1.1 实测行数（`wc -l .agents/skills/*/SKILL.md`），仅作参考，不作为验收硬指标。
+> 说明：目标行数为阶段 5 规划时的设定值；「当前规模」为 v8.1.2 实测行数（`wc -l .agents/skills/*/SKILL.md`），仅作参考，不作为验收硬指标。
 
 主文件只保留：适用场景、工具顺序、关键禁止事项、硬门槛、降级规则、输出字段和 Artifact 交接。
 
@@ -262,7 +262,7 @@ evaluate_prediction
 render_report
 ```
 
-> 现状（v8.1.1）：`save_artifact`、`load_artifact`、`evaluate_prediction`、`render_report` 已作为 MCP 工具暴露；`calculate_metrics` 目前经 `scripts/calculate.py` 统一 CLI 提供，尚未单独暴露为 MCP 工具。
+> 现状（v8.1.2）：`save_artifact`、`load_artifact`、`evaluate_prediction`、`render_report` 已作为 MCP 工具暴露；`calculate_metrics` 目前经 `scripts/calculate.py` 统一 CLI 提供，尚未单独暴露为 MCP 工具。
 
 CLI 作为人工、CI 和故障排查入口；MCP 作为 Agent 入口。
 

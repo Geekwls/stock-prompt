@@ -44,8 +44,8 @@ description: >-
 ## 二、数据获取与多周期覆盖率审计
 
 1. **时间锚定与周期适配**：以最近已收盘交易日（T日 15:00 完场数据）为锚点，以 T-4 至 T 日为主观察面，并由 `resolve_rotation_timeframe` 自适应扩展或收敛观察周期。
-2. **工具调用路由**：优先调用 MCP `get_rotation_context` 获取 5 日指数K线、行业资金流、情绪序列与主线量价；未挂载 MCP 时平滑降级为定向搜索。
-3. **覆盖率门槛**：计划权重为 T日 40%、T-1日 30%、T-2日 20%、T-3与T-4各 5%。覆盖天数不足 3 日或有效权重低于 70% 时，强制禁用 5 日量化分，仅输出定性观察。
+2. **工具调用路由**：优先调用 MCP `get_rotation_context`（入参 `days` / `sector_count`）获取指数走势、行业资金流、广度序列与主线板块量价；未挂载 MCP 时平滑降级为定向搜索。
+3. **覆盖率门槛与量化分开关**：计划权重为 T日 40%、T-1日 30%、T-2日 20%、T-3与T-4各 5%。覆盖天数不足 3 日或有效权重低于 70% 时，强制禁用 5 日量化分，仅输出定性观察。此外，`coverage_audit.score_gate` 为 `disabled_qualitative_only` 时（分块覆盖率 <70%，**或缺失 `dominant_sectors_kline` 主线板块量价块**）同样不得输出精确量化分——即便其余三块齐全（75%）也不例外，避免在无主线证据下给出轮动评分。
 
 ---
 
@@ -62,6 +62,7 @@ description: >-
 ### 2. 电风扇无效轮动过滤器 (`assess_rotation_effectiveness`)
 - 输入日内异动板块数、领涨板块成交额占比与涨停聚集度；
 - 输出 `rotation_type`: `mainline_focused`（主线聚焦）/ `electric_fan`（电风扇乱窜）/ `transitional`（过渡分歧）。
+- **严禁缺参推断**：四个入参（`active_sectors_count` / `leader_turnover_share` / `limit_up_clusters` / `market_amount_ratio`）缺任一即返回 `N/A` 与 `unavailable`，报告须标注数据不足，**不得**凭默认值给出「主线聚焦 / 有效」结论。
 
 ### 3. 中军 vs 龙头背离审计 (`calculate_leader_core_divergence`)
 - 判定 `healthy_resonance`（健康共振）、`core_desertion`（中军出货诱多）、`leader_collapse`（龙头溃退掩护）。
@@ -69,14 +70,24 @@ description: >-
 ### 4. 主线衰竭与背离指数 (Sector Exhaustion Index, SEI: 0–100 分)
 - 调用 `calculate_sector_exhaustion`（支持 auto_derive=True 客观推导）：
   - 0–30分【动能充沛】；31–60分【良性分歧】；61–80分【动能严重衰竭/高低切确立】；81–100分【全面退潮踩踏】。
+  - 输出 `components` 三项子分，并标注 `calibration_status=uncalibrated`：子项权重 (40/30/30) 与分档阈值 (30/60/80) 为经验设定、未经历史样本校准，报告不得表述为已验证阈值；累积 ≥30 日后用 `eval_tracker` 主线状态台账复核。
+- 调用 `map_exhaustion_to_lifecycle` 校验 SEI 分档与生命周期是否自洽（如 SEI=55 对应「良性分歧」，不得同时标注「高位分歧」）；`consistent=false` 时报告须披露 `conflict_note` 并以证据更充分的一方为准。
 
 ### 5. 板块成交容量门槛审计 (`validate_sector_capacity`)
-- 量化板块日成交额及占全市场总成交额比例；
-- $\ge 4.0\%$ 或 $\ge 350$ 亿判定为 `mega_mainline`（超级主线，支持百亿中军趋势重仓）；
-- $< 1.5\%$ 或 $< 100$ 亿判定为 `micro_niche`（微型游击题材），强制剥夺主线中军评级，标注仅适宜轻仓快进快出。
+- 量化板块日成交额及占全市场总成交额比例；可选传入 `market_amount_baseline_yi`（两市成交额基准），按 `baseline / 10000` 同比缩放绝对额门槛，避免放量市固定阈值失去区分度；
+- `mega_mainline`（超级主线，支持百亿中军趋势重仓）需**同时**满足份额 $\ge 4.0\%$ 与绝对额达标（默认 $\ge 180$ 亿，随基准缩放）——修复历史「份额或绝对额任一达标」的 OR 后门；
+- 份额 $\ge 2.0\%$ 或绝对额达标判定为 `standard_mainline`（标准主力题材）；其余为 `micro_niche`（微型游击题材），强制剥夺主线中军评级，标注仅适宜轻仓快进快出。
 
 ### 6. 资金跷跷板对立外溢矩阵 (`map_capital_seesaw_matrix`)
 - 当主线进入加速赶顶或分歧退潮时，自动推演 A 股典型资金跷跷板（科技 vs 防御红利、资源 vs 新能源、超短 vs 大盘中字头），锁定外溢承接蓄水池。
+- **本矩阵是基于关键词的规则推演，不是证据**：默认输出 `evidence_status=unverified_rule_only`，报告不得表述为已发生事实；仅当传入对手板块当日实测表现（`counterpart_change_pct` / `counterpart_net_flow_yi`）时才标记 `verified` 并附实测证据。`matched_keywords` 用于披露命中的关键词便于审计。
+
+### 7. 板块资金迁移矩阵 (`calculate_rotation_migration`)
+- 接收 T-4 至 T 逐日净流入排行，输出 `migration_matrix` 与 `persistence_ratio`，区分 `sustained_sectors`（持续流入的真正资金主线）与 `one_day_spike_sectors`（疑似单日爆量脉冲）；需 ≥3 个非空日，与覆盖率门槛一致。
+
+### 8. 资金轮动 4 种状态转移矩阵 (`calculate_rotation_state`)
+- State 1 主线主升 / State 2 畏高切低 / State 3 避险防御 / State 4 冰点衰退；
+- State 2 额外输出 `high_to_low_status`：传入 `low_position_inflow=True` 记 `confirmed`、`False` 记 `failed`、缺省为 `unverified`，用于区分「切低成功」与「切低失败后直接退潮」。
 
 ---
 
@@ -144,3 +155,4 @@ description: >-
 
 1. **交接摘要落盘与标准 Artifact**：调用 `python scripts/handoff_store.py write --stdin`（自动双写 rotation Artifact）。
 2. **可选战报长图**：用户要求生成卡片时，调用 `python scripts/generate_report_card.py --type rotation --json report.json`。
+3. **战术结论评估台账（可选持久化）**：为让结论可被次日证伪，收盘复盘后执行 `python scripts/eval_tracker.py record-daily --date <T> --rotation-type <类型> --divergence-type <类型>` 落盘当日结论，次日用 `reconcile-tactics` 回填 `confirmed/failed/unverifiable`，再用 `report-tactics` 输出历史命中率（`unverifiable` 不计入分母；可判定样本 <20 时仅供观察）。台账不可用时标注 `evaluation_status=emitted_only`，不影响专业分析完成。

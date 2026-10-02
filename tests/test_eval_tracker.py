@@ -398,6 +398,108 @@ class DailyScoresLedgerTest(unittest.TestCase):
             self.assertIn("70 -> P71", output)
             self.assertIn("样本 7 日 < 60 日", output)
 
+def _daily_namespace(date, daily, **overrides):
+    """构造 cmd_record_daily 所需的最小 Namespace，便于战术台账测试。"""
+    base = dict(
+        date=date, up_ratio=None, premium=None, promotion=None, break_rate=None,
+        volume_dev=None, sentiment_total=None, capital_continuity=None,
+        opportunity=60.0, top_sector="", daily_ledger=daily,
+    )
+    base.update(overrides)
+    return argparse.Namespace(**base)
+
+
+class TacticLedgerTest(unittest.TestCase):
+    def test_record_daily_persists_tactic_types(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            daily = str(Path(temporary) / "daily_scores.jsonl")
+            with redirect_stdout(io.StringIO()):
+                TRACKER.cmd_record_daily(_daily_namespace(
+                    "2026-09-28", daily,
+                    rotation_type="electric_fan", divergence_type="core_desertion",
+                ))
+            rec = json.loads(Path(daily).read_text(encoding="utf-8").splitlines()[0])
+            self.assertEqual(rec["rotation_type"], "electric_fan")
+            self.assertEqual(rec["divergence_type"], "core_desertion")
+
+    def test_reconcile_tactics_backfills_outcomes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            daily = str(Path(temporary) / "daily_scores.jsonl")
+            with redirect_stdout(io.StringIO()):
+                TRACKER.cmd_record_daily(_daily_namespace(
+                    "2026-09-28", daily,
+                    rotation_type="electric_fan", divergence_type="core_desertion",
+                ))
+                TRACKER.cmd_reconcile_tactics(argparse.Namespace(
+                    date="2026-09-28", rotation_outcome="confirmed",
+                    divergence_outcome="failed", note="次日主线延续", daily_ledger=daily,
+                ))
+            rec = TRACKER.load_daily_ledger(daily)[0]
+            self.assertEqual(rec["rotation_outcome"], "confirmed")
+            self.assertEqual(rec["divergence_outcome"], "failed")
+            self.assertEqual(rec["tactic_outcome_note"], "次日主线延续")
+            self.assertIn("tactic_reconciled_at", rec)
+
+    def test_reconcile_requires_recorded_conclusion(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            daily = str(Path(temporary) / "daily_scores.jsonl")
+            with redirect_stdout(io.StringIO()):
+                TRACKER.cmd_record_daily(_daily_namespace("2026-09-28", daily))
+            with self.assertRaises(SystemExit):
+                TRACKER.cmd_reconcile_tactics(argparse.Namespace(
+                    date="2026-09-28", rotation_outcome="confirmed",
+                    divergence_outcome=None, note="", daily_ledger=daily,
+                ))
+
+    def test_report_tactics_hit_rate_excludes_unverifiable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            daily = str(Path(temporary) / "daily_scores.jsonl")
+            with redirect_stdout(io.StringIO()):
+                for i, (rot, outcome) in enumerate([
+                    ("electric_fan", "confirmed"),
+                    ("electric_fan", "failed"),
+                    ("mainline_focused", "confirmed"),
+                    ("mainline_focused", "unverifiable"),
+                ]):
+                    day = f"2026-09-{20 + i:02d}"
+                    TRACKER.cmd_record_daily(_daily_namespace(day, daily, rotation_type=rot))
+                    TRACKER.cmd_reconcile_tactics(argparse.Namespace(
+                        date=day, rotation_outcome=outcome, divergence_outcome=None,
+                        note="", daily_ledger=daily,
+                    ))
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                TRACKER.cmd_report_tactics(argparse.Namespace(window=60, daily_ledger=daily))
+            output = buffer.getvalue()
+            # electric_fan 命中 1/2 = 50%，mainline_focused 命中 1/1 = 100%（unverifiable 不入分母）
+            self.assertIn("electric_fan", output)
+            self.assertIn("命中 1 / 2 (50.0%)", output)
+            self.assertIn("mainline_focused", output)
+            self.assertIn("[unverifiable 1]", output)
+            self.assertIn("合计命中率: 2 / 3", output)
+
+
+    def test_record_daily_merges_across_skills(self):
+        """daily-review 落情绪分后，sector-rotation 追加战术结论不得清空情绪分。"""
+        with tempfile.TemporaryDirectory() as temporary:
+            daily = str(Path(temporary) / "daily_scores.jsonl")
+            with redirect_stdout(io.StringIO()):
+                TRACKER.cmd_record_daily(_daily_namespace(
+                    "2026-09-28", daily, up_ratio=55.0, sentiment_total=68.0,
+                    mainline_sector="半导体", mainline_state="强化", sei=42.0,
+                ))
+                TRACKER.cmd_record_daily(_daily_namespace(
+                    "2026-09-28", daily,
+                    rotation_type="mainline_focused", divergence_type="healthy_resonance",
+                ))
+            rec = TRACKER.load_daily_ledger(daily)[0]
+            self.assertEqual(rec["up_ratio"], 55.0)
+            self.assertEqual(rec["sentiment_total"], 68.0)
+            self.assertEqual(rec["mainline_sector"], "半导体")
+            self.assertEqual(rec["sei"], 42.0)
+            self.assertEqual(rec["rotation_type"], "mainline_focused")
+            self.assertEqual(rec["divergence_type"], "healthy_resonance")
+
 
 if __name__ == "__main__":
     unittest.main()

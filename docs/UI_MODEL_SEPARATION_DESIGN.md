@@ -192,7 +192,7 @@ evaluate_prediction
 render_report
 ```
 
-> 现状（v8.1.1）：`calculate_metrics` 经 `scripts/calculate.py` 统一 CLI 提供，尚未单独暴露为 MCP 工具；其余 8 项已可作为 Agent 直接调用的 MCP 工具。
+> 现状（v8.1.2）：`calculate_metrics` 经 `scripts/calculate.py` 统一 CLI 提供，尚未单独暴露为 MCP 工具；其余 8 项已可作为 Agent 直接调用的 MCP 工具。
 
 工具结果必须带：
 

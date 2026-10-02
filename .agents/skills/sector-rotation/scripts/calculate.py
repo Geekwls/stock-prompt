@@ -21,6 +21,7 @@ EXPLICIT_OPERATIONS = {
     "classify_stock_archetype",
     "filter_intraday_impulse",
     "map_capital_seesaw_matrix",
+    "map_exhaustion_to_lifecycle",
     "reconcile_watchlist_triggers",
     "resolve_rotation_timeframe",
     "resolve_stock_data_mode",

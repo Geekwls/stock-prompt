@@ -2942,11 +2942,55 @@ def fetch_close_review_context(
     return _make_context_envelope("Close_Review", payload, missing, conflicts, data_date)
 
 
+ROTATION_WEIGHT_PLAN_5D = (0.05, 0.05, 0.20, 0.30, 0.40)
+
+
+def _rotation_weights(days: int) -> List[float]:
+    """按 T-days+1 至 T 生成归一化的近期加权权重（近期权重不低于远期）。"""
+    if days <= len(ROTATION_WEIGHT_PLAN_5D):
+        base = list(ROTATION_WEIGHT_PLAN_5D[-days:])
+    else:
+        step = (ROTATION_WEIGHT_PLAN_5D[-1] - ROTATION_WEIGHT_PLAN_5D[0]) / (days - 1)
+        base = [ROTATION_WEIGHT_PLAN_5D[0] + step * index for index in range(days)]
+    total = sum(base)
+    return [round(weight / total, 6) for weight in base]
+
+
+def _describe_ma_alignment(kline_res: Dict[str, Any]) -> str:
+    """根据均线与最新收盘价的相对位置描述板块多周期趋势级别。"""
+    close = kline_res.get("latest_close")
+    ma5 = kline_res.get("ma5")
+    ma20 = kline_res.get("ma20")
+    ma60 = kline_res.get("ma60")
+    if close is None or ma20 is None:
+        return "N/A"
+    above_5 = ma5 is not None and close >= ma5
+    above_20 = close >= ma20
+    above_60 = ma60 is not None and close >= ma60
+    if above_5 and above_20 and above_60:
+        return "bullish_alignment: 收盘价站上 5/20/60 日均线，多周期趋势向上"
+    if above_20 and above_60:
+        return "above_ma20_ma60: 收盘价站上 20/60 日均线，中期趋势未破"
+    if above_20:
+        return "above_ma20_only: 仅站上 20 日均线，趋势待确认"
+    if not above_20 and not above_60:
+        return "below_ma20_ma60: 跌破 20/60 日均线，中期趋势走弱"
+    return "mixed: 均线排列分歧，需结合量能确认"
+
+
 def fetch_rotation_context(
     days: int = 5,
     sector_count: int = 10,
 ) -> Dict[str, Any]:
-    """聚合 A 股 5 日板块轮动标准化证据包：近 N 日资金流向、核心指数走势对比与广度情绪走势"""
+    """聚合 A 股 N 日板块轮动标准化证据包。
+
+    payload 固定包含 5 个板块：
+    - sector_fund_flows      行业主力净流入/净流出与涨幅榜（东财行业口径）
+    - index_trend            核心宽基指数走势对比
+    - breadth_trend          市场广度 / 红盘率序列
+    - dominant_sectors_kline 核心主线板块 5/20/60 日区间涨幅与均线排列（逐板块聚合）
+    - coverage_audit         计划权重、分块覆盖与量化评分门槛判定
+    """
     missing: List[str] = []
     conflicts: List[str] = []
     payload: Dict[str, Any] = {}
@@ -2981,6 +3025,75 @@ def fetch_rotation_context(
             missing.append("breadth_trend")
     except Exception as exc:
         missing.append(f"breadth_trend({exc})")
+
+    # 核心主线板块量价结构：取净流入前列板块，逐板块补 5/20/60 日区间涨幅与均线排列
+    dominant_sectors: List[Dict[str, Any]] = []
+    dominant_failed: List[str] = []
+    fund_payload = payload.get("sector_fund_flows") or {}
+    leader_names = [
+        item.get("name")
+        for item in (fund_payload.get("top_inflow_sectors") or [])
+        if isinstance(item, dict) and item.get("name")
+    ][: min(sector_count, 5)]
+    for name in leader_names:
+        try:
+            kline_res = fetch_sector_kline(name, count=max(60, days))
+        except Exception:
+            dominant_failed.append(name)
+            continue
+        if not isinstance(kline_res, dict) or kline_res.get("error") or kline_res.get("data_status") == "unavailable":
+            dominant_failed.append(name)
+            continue
+        dominant_sectors.append({
+            "name": kline_res.get("sector_name") or name,
+            "code": kline_res.get("sector_code"),
+            "data_status": kline_res.get("data_status"),
+            "valid_bars": kline_res.get("valid_bars"),
+            "recent_5d_return": kline_res.get("recent_5d_return"),
+            "recent_20d_return": kline_res.get("recent_20d_return"),
+            "recent_60d_return": kline_res.get("recent_60d_return"),
+            "ma5": kline_res.get("ma5"),
+            "ma10": kline_res.get("ma10"),
+            "ma20": kline_res.get("ma20"),
+            "ma60": kline_res.get("ma60"),
+            "latest_close": kline_res.get("latest_close"),
+            "avg_amount_5d_billion": kline_res.get("avg_amount_5d_billion"),
+            "ma_alignment": _describe_ma_alignment(kline_res),
+        })
+    if dominant_sectors:
+        payload["dominant_sectors_kline"] = {
+            "sectors": dominant_sectors,
+            "failed_sectors": dominant_failed,
+            "note": "均线排列由 ma5/ma10/ma20/ma60 与最新收盘价推导，用于判定多周期趋势级别；口径为东财行业板块指数。",
+        }
+    else:
+        missing.append("dominant_sectors_kline")
+
+    # 覆盖率审计：计划权重 + 分块覆盖 + 量化评分门槛
+    planned_sections = ("sector_fund_flows", "index_trend", "breadth_trend", "dominant_sectors_kline")
+    available_sections = [name for name in planned_sections if name in payload]
+    section_coverage = len(available_sections) / len(planned_sections) * 100.0
+    # 量化门槛：分块覆盖率 >= 70% 且核心主线板块量价块（dominant_sectors_kline）在位。
+    # 缺少主线块时，即便其余三块齐全（75%）也不得输出精确量化分，避免在无主线证据下给出轮动评分。
+    mainline_ready = "dominant_sectors_kline" in payload
+    score_ready = section_coverage >= 70.0 and mainline_ready
+    if score_ready:
+        gate_note = "分块覆盖率 >= 70% 且主线板块量价块在位，可输出 5 日量化分。"
+    elif not mainline_ready:
+        gate_note = "缺少 dominant_sectors_kline 主线板块量价块，按公共契约禁止输出 5 日精确量化分，仅输出定性观察与待补清单。"
+    else:
+        gate_note = "分块覆盖率 < 70%，按公共契约禁止输出 5 日精确量化分，仅输出定性观察与待补清单。"
+    payload["coverage_audit"] = {
+        "planned_days": days,
+        "planned_weights": _rotation_weights(days),
+        "weight_order": f"T-{days - 1} 至 T（近期权重不低于远期，合计归一化为 1）",
+        "sections_planned": list(planned_sections),
+        "sections_available": available_sections,
+        "section_coverage_pct": round(section_coverage, 2),
+        "mainline_block_present": mainline_ready,
+        "score_gate": "enabled" if score_ready else "disabled_qualitative_only",
+        "gate_note": gate_note,
+    }
 
     return _make_context_envelope("Rotation", payload, missing, conflicts, data_date)
 
@@ -3144,7 +3257,7 @@ def fetch_stock_diagnostic_context(
 # -----------------------------------------------------------------------------
 SERVER_INFO = {
     "name": "marketgraph-data",
-    "version": "2.2.0",
+    "version": "2.3.0",
 }
 
 def _dispatch_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:

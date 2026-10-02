@@ -59,6 +59,9 @@ MAINLINE_STATE_ALIASES = {
     "启动期": "启动", "强化期": "强化", "加速期": "加速", "分歧期": "分歧",
     "衰竭期": "退潮", "弱化期": "弱化", "退潮期": "退潮",
 }
+ROTATION_TACTIC_TYPES = ("mainline_focused", "electric_fan", "transitional")
+DIVERGENCE_TYPES = ("healthy_resonance", "core_desertion", "leader_collapse", "neutral_divergence")
+TACTIC_OUTCOMES = ("confirmed", "failed", "unverifiable")
 
 
 def normalize_mainline_state(value):
@@ -404,18 +407,25 @@ def cmd_record_daily(args):
     mainline_state = normalize_mainline_state(getattr(args, "mainline_state", None))
     mainline_sector = getattr(args, "mainline_sector", "") or ""
     sei = getattr(args, "sei", None)
+    rotation_type = getattr(args, "rotation_type", None)
+    divergence_type = getattr(args, "divergence_type", None)
     if mainline_state and not mainline_sector:
         sys.exit("[ERR] --mainline-state 必须同时提供 --mainline-sector")
     if sei is not None and not mainline_sector:
         sys.exit("[ERR] --sei 必须同时提供 --mainline-sector")
     if sei is not None and not 0 <= sei <= 100:
         sys.exit("[ERR] --sei 必须位于 0-100")
-    if all(v is None for v in metrics.values()) and not mainline_sector:
-        sys.exit("[ERR] 至少提供一项评分指标 (--up-ratio / --premium / --promotion / --break-rate / --volume-dev / --sentiment-total / --capital-continuity / --opportunity / --mainline-sector)")
+    if all(v is None for v in metrics.values()) and not mainline_sector and not rotation_type and not divergence_type:
+        sys.exit("[ERR] 至少提供一项评分指标 (--up-ratio / --premium / --promotion / --break-rate / --volume-dev / --sentiment-total / --capital-continuity / --opportunity / --mainline-sector / --rotation-type / --divergence-type)")
     for key in ("up_ratio", "promotion", "break_rate", "sentiment_total", "capital_continuity", "opportunity"):
         if metrics[key] is not None and not 0 <= metrics[key] <= 100:
             sys.exit(f"[ERR] --{key.replace('_', '-')} 必须位于 0-100")
-    rec = {"type": "daily_review", "date": args.date, "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")}
+    # 合并写入：同一交易日的情绪分（daily-review 落盘）与战术结论（sector-rotation 落盘）
+    # 往往来自不同 Skill 的不同批次，若整条覆盖会互相清空对方字段。此处以已有记录为基底，
+    # 仅用本次显式提供的字段覆盖，缺省字段保留原值（同日期重复写仍满足后写覆盖语义）。
+    existing = {item["date"]: item for item in load_daily_ledger(args.daily_ledger)}.get(args.date, {})
+    rec = dict(existing)
+    rec.update({"type": "daily_review", "date": args.date, "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")})
     rec.update(record_metadata(args, DAILY_FORMULA_VERSION))
     rec.update({k: round(v, 2) for k, v in metrics.items() if v is not None})
     if mainline_sector:
@@ -426,6 +436,10 @@ def cmd_record_daily(args):
             rec["sei"] = round(sei, 2)
     if args.top_sector:
         rec["top_sector"] = args.top_sector
+    if rotation_type:
+        rec["rotation_type"] = rotation_type
+    if divergence_type:
+        rec["divergence_type"] = divergence_type
     append_record(args.daily_ledger, rec)
     print(f"[OK] 已记录 {args.date} 每日评分 -> {args.daily_ledger}")
     dual_write_artifact("daily_score", rec)
@@ -811,6 +825,97 @@ def cmd_misses(args):
     return 0
 
 
+def _tactic_hit_rate(records, signal_key, outcome_key):
+    """统计某类战术结论的命中率；unverifiable 单独计数，不计入分母。"""
+    buckets = {}
+    for rec in records:
+        signal = rec.get(signal_key)
+        outcome = rec.get(outcome_key)
+        if not signal or outcome not in TACTIC_OUTCOMES:
+            continue
+        entry = buckets.setdefault(signal, {"confirmed": 0, "failed": 0, "unverifiable": 0})
+        entry[outcome] += 1
+    return buckets
+
+
+def _format_tactic_buckets(title, buckets):
+    print(f"{title}:")
+    if not buckets:
+        print("  无已核验样本（需先 record-daily 落盘结论，再用 reconcile-tactics 回填次日结果）")
+        return
+    total_confirmed = 0
+    total_decided = 0
+    for signal in sorted(buckets):
+        entry = buckets[signal]
+        decided = entry["confirmed"] + entry["failed"]
+        total_confirmed += entry["confirmed"]
+        total_decided += decided
+        unverified = f"  [unverifiable {entry['unverifiable']}]" if entry["unverifiable"] else ""
+        if decided:
+            rate = entry["confirmed"] / decided * 100
+            print(f"  {signal:<20} 命中 {entry['confirmed']} / {decided} ({rate:.1f}%){unverified}")
+        else:
+            print(f"  {signal:<20} 暂无可判定样本{unverified}")
+    if total_decided:
+        print(f"  合计命中率: {total_confirmed} / {total_decided} ({total_confirmed / total_decided * 100:.1f}%)")
+    else:
+        print("  合计：暂无可判定样本")
+
+
+def cmd_reconcile_tactics(args):
+    """回填战术结论的次日实际结果，使电风扇预警 / 中军背离等判断可被证伪。"""
+    if not args.rotation_outcome and not args.divergence_outcome:
+        sys.exit("[ERR] 至少提供 --rotation-outcome 或 --divergence-outcome")
+    records = {rec["date"]: rec for rec in load_daily_ledger(args.daily_ledger)}
+    target = records.get(args.date)
+    if target is None:
+        sys.exit(f"[ERR] 台账中不存在 {args.date} 的每日记录，无法回填结果；请先 record-daily 落盘当日结论")
+    updated = dict(target)
+    if args.rotation_outcome:
+        if not target.get("rotation_type"):
+            sys.exit(f"[ERR] {args.date} 未记录 --rotation-type，无法回填轮动结论结果")
+        updated["rotation_outcome"] = args.rotation_outcome
+    if args.divergence_outcome:
+        if not target.get("divergence_type"):
+            sys.exit(f"[ERR] {args.date} 未记录 --divergence-type，无法回填背离结论结果")
+        updated["divergence_outcome"] = args.divergence_outcome
+    if args.note:
+        updated["tactic_outcome_note"] = args.note
+    updated["tactic_reconciled_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+    append_record(args.daily_ledger, updated)
+    parts = []
+    if args.rotation_outcome:
+        parts.append(f"rotation={target['rotation_type']}->{args.rotation_outcome}")
+    if args.divergence_outcome:
+        parts.append(f"divergence={target['divergence_type']}->{args.divergence_outcome}")
+    print(f"[OK] 已回填 {args.date} 战术结论结果: {', '.join(parts)} -> {args.daily_ledger}")
+    return 0
+
+
+def cmd_report_tactics(args):
+    """输出轮动有效性 / 中军背离两类战术结论的历史命中率。"""
+    records = load_daily_ledger(args.daily_ledger, getattr(args, "filter_version", None))
+    recent = records[-args.window:] if args.window and args.window > 0 else records
+    print(f"=== 轮动战术结论命中率台账（最近 {len(recent)} 个交易日，累计 {len(records)} 日） ===")
+    if not recent:
+        print("台账为空。每日收盘复盘后 record-daily 落盘结论，次日用 reconcile-tactics 回填结果。")
+        return 0
+    rotation_buckets = _tactic_hit_rate(recent, "rotation_type", "rotation_outcome")
+    divergence_buckets = _tactic_hit_rate(recent, "divergence_type", "divergence_outcome")
+    _format_tactic_buckets("• 轮动有效性 (rotation_type)", rotation_buckets)
+    _format_tactic_buckets("• 中军/龙头背离 (divergence_type)", divergence_buckets)
+    decided = sum(
+        entry["confirmed"] + entry["failed"]
+        for buckets in (rotation_buckets, divergence_buckets)
+        for entry in buckets.values()
+    )
+    if decided < 20:
+        print(f"[NOTE] 可判定样本 {decided} 条 < 20：命中率仅供观察，不足以校准 SKILL 判定阈值；持续每日落盘并回填。")
+    else:
+        print(f"[NOTE] 可判定样本 {decided} 条 >= 20：可用上述命中率校准 SKILL 中 rotation_type / divergence_type 的判定阈值，并披露样本期。")
+    return 0
+
+
 def cmd_report_mainline(args):
     """主线状态机转移台账：把每日状态落盘积累成实际转移频率矩阵"""
     if getattr(args, "all_versions", False):
@@ -1031,6 +1136,10 @@ def main():
                         choices=MAINLINE_STATES + tuple(MAINLINE_STATE_ALIASES),
                         help="主线生命周期状态：启动/强化/加速/分歧/弱化/退潮")
     p_drec.add_argument("--sei", type=float, help="主线衰竭指数 SEI 0-100")
+    p_drec.add_argument("--rotation-type", choices=ROTATION_TACTIC_TYPES,
+                        help="当日轮动有效性判定（来自 assess_rotation_effectiveness）")
+    p_drec.add_argument("--divergence-type", choices=DIVERGENCE_TYPES,
+                        help="当日中军/龙头背离判定（来自 calculate_leader_core_divergence）")
     p_drec.add_argument("--model-version", default=discover_model_version(), help="模型版本，默认读取当前项目版本")
     p_drec.add_argument("--formula-version", default=DAILY_FORMULA_VERSION, help="每日评分公式版本")
     p_drec.add_argument("--source-snapshot", help="关联的来源快照或 Handoff ID")
@@ -1043,6 +1152,18 @@ def main():
     p_drpt.add_argument("--all-versions", action="store_true", help="按模型版本分组展示")
     p_drpt.add_argument("--extremes", action="store_true", help="输出情绪极值及其后续市场表现统计")
     p_drpt.set_defaults(func=cmd_report_daily)
+
+    p_rt = sub.add_parser("reconcile-tactics", help="回填战术结论（轮动有效性/中军背离）的次日实际结果")
+    p_rt.add_argument("--date", required=True, help="结论所在交易日 YYYY-MM-DD")
+    p_rt.add_argument("--rotation-outcome", choices=TACTIC_OUTCOMES, help="轮动结论结果：confirmed/failed/unverifiable")
+    p_rt.add_argument("--divergence-outcome", choices=TACTIC_OUTCOMES, help="背离结论结果：confirmed/failed/unverifiable")
+    p_rt.add_argument("--note", default="", help="观测证据说明")
+    p_rt.set_defaults(func=cmd_reconcile_tactics)
+
+    p_tpt = sub.add_parser("report-tactics", help="输出战术结论历史命中率（轮动有效性/中军背离）")
+    p_tpt.add_argument("--window", type=int, default=60, help="滚动窗口交易日 (默认 60)")
+    p_tpt.add_argument("--filter-version", help="指定统计某个模型版本")
+    p_tpt.set_defaults(func=cmd_report_tactics)
 
     p_migrate = sub.add_parser("migrate", help="为遗留台账补充 legacy 版本元数据；默认只预览")
     p_migrate.add_argument("--target", choices=("all", "prediction", "daily"), default="all")

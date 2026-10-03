@@ -1,7 +1,7 @@
 # 📈 A股量化分析 AI 提示词与 Skill 体系库 (`stock-prompt`)
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Release-v8.1.2-blue.svg" alt="Release v8.1.2" />
+  <img src="https://img.shields.io/badge/Release-v8.1.3-blue.svg" alt="Release v8.1.3" />
   <img src="https://img.shields.io/badge/Tests-CI%20Passing-brightgreen.svg" alt="Tests Passing" />
   <img src="https://img.shields.io/badge/Architecture-5%20Skills%20%2B%2021%20MCP%20Tools-orange.svg" alt="Architecture" />
   <img src="https://img.shields.io/badge/Zero--Config-Built--in%20MarketGraph%20MCP-success.svg" alt="Zero-Config MCP" />
@@ -15,39 +15,45 @@
 
 ---
 
-## ⚡ v8.1.2 核心亮点
+## ⚡ v8.1.3 核心亮点
 
-> v8.1.2 延续“日内实战闭环”主线：盘前谋定、竞价核销、盘中拦截、收盘复盘和跨周轮动共享可审计状态；本版以交易员视角对板块轮动分析逻辑做了系统审计，消除静默乐观结论、修复分类误判与容量门槛后门，并让战术结论首次可被次日行情证伪。
+> v8.1.3 延续“日内实战闭环”主线，并把审计从板块轮动扩展到**全项目**：系统性清除跨模块的乐观默认值、不可达死分支与口径混用，让「缺数据」显式表现为 `N/A / unavailable`，而不是静默给出好看但不可信的结论。
 
-1. **🛡️ 实战风控与资金分配引擎 (v8.1.0)**
+1. **🩺 全项目二次审计修复：乐观默认值 / 死分支 / 口径混用 (v8.1.3)**
+   - **仓位与情绪**：修复 `calculate_tactical_position_budget` 极端亏钱效应扣减的死分支（升序判定导致仓位归零分支不可达）；`filter_intraday_impulse` 与 `calculate_sentiment_opportunity_score` 的关键入参改为必填，缺失即 `N/A`，杜绝无参调用返回「强势确认 / 高分」的假阳性。
+   - **MCP 数据口径**：`ma120/250/500` 除数改用 `min(窗口, 有效根数)` 消除短历史偏差；个股与板块区间涨幅统一 `N-1` 段基准；6 处上下文信封 `data_date` 修正为真实字段并经 `normalize_date` 归一；商誉在净资产缺失/≤0 时返回 `None` 并附说明，资不抵债置高风险；篮子指数移除未复权回退。
+   - **降级诚实性**：新增 `breadth_red_ratio` 修复「二八分化」死分支；`_make_context_envelope` 新增 `core_data_available`，个股诊断在核心数据全失时判 `unavailable` 而非被派生块掩盖为 `partial`；无年线证据时威科夫不再默认「牛市主升」。
+   - **台账与更新器**：`record-daily` 换主线时清理未显式提供的旧主线状态与 SEI；`migrate` 计数覆盖全部补写字段；`version_key` 解析失败返回 `None` 哨兵（修复降级被误判为升级）；`save_cache` 补 `fsync`。
+   - **测试诚实性**：修复一处 mock 注入生产端不存在字段导致的**测试假阳性**，并补齐信封可用性、广度解析、威科夫阶段、轮动权重、台账迁移等回归用例，全量 **312** 项单元测试全绿。
+2. **🛡️ 实战风控与资金分配引擎 (v8.1.0)**
    - 将全市场情绪分、Market Regime、二八割裂度与大面率直接映射为**次日全局最大仓位上限与单票风控配额**，并在《次日实战候选作战池》上方强制显示仓位预算卡与现金安全垫底线。
    - 覆盖极端大面与流动性踩踏防爆雷（跌停封单金额 + 日内大面率）、板块成交容量门槛（`mega_mainline` 需份额 ≥4% **且** 绝对额达标）、资金跷跷板外溢矩阵、个股阶梯动态移动止盈，以及逆势加仓摊平一票否决。
-2. **🔍 板块轮动逻辑审计修复 (v8.1.2)**
+3. **🔍 板块轮动逻辑审计修复 (v8.1.2)**
    - `assess_rotation_effectiveness` 移除乐观默认值——任一输入缺失即返回 `N/A`，杜绝漏传参时静默输出「主线聚焦 / 有效 / 低风险」的假阳性；`calculate_sector_cannibalization` 分类改为互斥有序并新增 `concentrated_mainline`，历史死分支 `broad_retreat` 恢复可达。
    - `validate_sector_capacity` 修复「份额或绝对额任一达标」的 OR 后门并支持成交额基准归一化；`calculate_rotation_state` 补齐 State 2「畏高切低」证据状态；`map_capital_seesaw_matrix` 显式区分「规则推演」与「已核验证据」。
    - 新增 `calculate_rotation_migration`（区分持续流入与单日爆量）与 `map_exhaustion_to_lifecycle`（SEI 与生命周期一致性校验）；`get_rotation_context` 补齐承诺的 `dominant_sectors_kline` 与 `coverage_audit` 字段；战术结论经 `eval_tracker.py record-daily / reconcile-tactics / report-tactics` 纳入评估台账，可被次日行情证伪。
-3. **🔧 MCP 数据源排雷与多源口径显式化 (v8.1.1)**
+4. **🔧 MCP 数据源排雷与多源口径显式化 (v8.1.1)**
    - 公司质量层恢复可用（`result` 显式判空、财务/解禁/资产负债三段独立容错、解禁查询降序修复漏报假阴性）；板块传参体系改为按 `total` 全量翻页聚合，`STATIC_SECTOR_MAP` 等 37 个映射逐一核验修正，无效传参回传全量可用板块清单。
    - 资金流三来源全部打 `sector_taxonomy` 口径标签，兜底源 `data_status` 显式降为 `partial` 并列 `unavailable_sources`；`get_sector_kline` 全链路失败显式 `source_unavailable`，杜绝盘后静默切口径导致结论不可复现。
-4. **🔌 内置 21 个结构化数据与研究闭环 MCP 工具 (`marketgraph-mcp`)**
+5. **🔌 内置 21 个结构化数据与研究闭环 MCP 工具 (`marketgraph-mcp`)**
    - 零注册、免 Token；MCP 核心使用 Python 3.10+ 标准库实现，报告卡依赖 Pillow。
    - 直连腾讯证券与东方财富公开网络节点，涵盖 750 日 K 线、周线共振、当日分时、龙虎榜席位、行业资金流及等权篮子容灾；所有输出仍按 P3 公开网关证据记录，显著降低而不能宣称彻底消除幻觉风险。
-5. **🔤 纯中文股票名秒级智能联想解析**
+6. **🔤 纯中文股票名秒级智能联想解析**
    - 无论输入数字代码（`301489`）、带前后缀代码（`sz301489`, `600519.SH`）还是**纯中文股票名称**（如“贵州茅台”、“中际旭创”），底层毫秒级自动解析标准化，彻底告别繁琐代码查找。
-6. **🎯 四类股票生态分型 + 三档数据模式**
+7. **🎯 四类股票生态分型 + 三档数据模式**
    - 自动识别情绪连板、机构趋势、红利价值、事件特型，分别使用不同模块权重；威科夫仅在适用时参与研判。
    - `full / reduced / event` 模式避免用 120 根 K 线一刀切次新与复牌股；降级模式只给条件情景，不给虚假精确分。
-7. **💬 散户友好：首屏「30 秒大白话速览」与持仓场景分流**
+8. **💬 散户友好：首屏「30 秒大白话速览」与持仓场景分流**
    - **结论前置**：研报第一屏直截了当回答 3 句话——*“现在发生了什么 / 为什么这么看 / 什么情况说明判断错了（认赔止损点）”*，大白话决策一目了然。
    - **通俗比喻**：首次出现的威科夫技术黑话强制附带生活化比喻（如 Bias 偏离 ➡️ 像皮筋拉伸；ATR 波动率 ➡️ 股票单日心跳振幅；Spring 弹簧 ➡️ 假摔诱空坑），在八层量化证据纪律不减分毫的前提下，让小白也能轻松读懂。
-8. **🧭 全流程 5 大 Skill 协同编排与程序化交接 (`stock-research-router`)**
+9. **🧭 全流程 5 大 Skill 协同编排与程序化交接 (`stock-research-router`)**
    - 新增总控路由 Skill，自动协调 **盘前推演 ➡️ 盘中竞价 ➡️ 收盘复盘 ➡️ 5日轮动 ➡️ 穿透个股诊断** 的跨时段闭环。
    - 跨技能交接升级为程序化强校验的 `handoff_store.py` 与 Schema 资产，市场与板块结论无缝向下游继承，避免重复分析。
-9. **📊 盘前 ↔ 盘后自校准评估台账 (Brier Loop)**
+10. **📊 盘前 ↔ 盘后自校准评估台账 (Brier Loop)**
    - 盘前推演概率与收盘实际表现自动落盘至 `~/.stock-prompt/eval/predictions.jsonl`，滚动统计方向命中率、Brier Score、主线 Top3 命中率与空间有效率；情绪五项分自动落盘并支持历史滚动 P 分位自校准。
-10. **🛡️ 防漂移测试套件**
+11. **🛡️ 防漂移测试套件**
    - 自动化测试覆盖行情门槛、数据降级审计、Artifact/Schema 合规性、状态隔离、确定性计算、版本防漂移与断路器容灾机制；实时数量以 CI 为准，避免文档计数漂移。
-10. **⚔️ 日内实战闭环与战术门禁**
+12. **⚔️ 日内实战闭环与战术门禁**
    - `daily-review` 审计二八撕裂、假阳线和 10:00 分水岭脉冲，并输出次日候选作战池。
    - `market-prediction` 可按昨日触发器逐条核销 9:25 竞价结果；`reconcile_watchlist_triggers` 只接受可追溯观测证据。
    - `stock-analysis` 对退潮期和加速期后排跟风返回 `entry_allowed=false`、`position_cap=0`；Router 校验事件是否处于对应交易时段。

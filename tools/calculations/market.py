@@ -302,14 +302,18 @@ def calculate_sentiment_opportunity_score(
     ladder_health_score=None,
     leader_premium=None,
     limit_up_count=None,
-    nuclear_count=0,
-    emotion_cycle="ferment",
+    nuclear_count=None,
+    emotion_cycle=None,
     coverage=100.0,
     input_snapshot_id=None,
 ):
     """
     计算 A 股超短情绪与连板妖股机会分 (0–100)。
     独立于大盘指数，专门服务于短线打板、龙头接力与弱市妖股抱团穿越。
+
+    重要：`nuclear_count` 与 `emotion_cycle` **均为必填**。历史版本默认
+    `nuclear_count=0`（无罚分）与 `emotion_cycle="ferment"`（+5 分），漏传时会在
+    未核验核按钮家数与情绪周期的情况下静默抬高机会分；现已移除，缺任一即返回 `N/A`。
     """
     require_range("coverage", coverage)
     if coverage < 70:
@@ -319,6 +323,8 @@ def calculate_sentiment_opportunity_score(
         "ladder_health_score": ladder_health_score,
         "leader_premium": leader_premium,
         "limit_up_count": limit_up_count,
+        "nuclear_count": nuclear_count,
+        "emotion_cycle": emotion_cycle,
     }
     missing = [k for k, v in values.items() if v is None]
     if missing:
@@ -327,7 +333,7 @@ def calculate_sentiment_opportunity_score(
     ladder = float(ladder_health_score)
     leader = float(leader_premium)
     limit_cnt = float(limit_up_count)
-    nuc_cnt = int(nuclear_count) if nuclear_count is not None else 0
+    nuc_cnt = int(nuclear_count)
 
     require_range("ladder_health_score", ladder)
     require_range("leader_premium", leader)
@@ -491,44 +497,62 @@ def calculate_market_divergence_index(
 
 
 def filter_intraday_impulse(
-    current_time="10:05",
-    sector_gain=2.5,
-    is_above_vwap=True,
-    turnover_increasing=True,
-    pullback_broken=False,
+    current_time=None,
+    sector_gain=None,
+    is_above_vwap=None,
+    turnover_increasing=None,
+    pullback_broken=None,
     input_snapshot_id=None,
 ):
     """
     盘中快照模式（09:30–15:00）10:00 分水岭真伪脉冲拦截纯函数。
     - 早盘诱多陷阱 (early_morning_trap): 10:00 前冲高但在回踩时跌破分时黄线 (is_above_vwap=False 或 pullback_broken=True)；
     - 缩量脉冲废票 (volume_exhaustion): 冲高但成交量急剧萎缩，后续无大单承接 (turnover_increasing=False)；
-    - 日内确认强势 (confirmed_intraday_strength): 回踩分时均线站稳不破，且放量持续换手。
+    - 日内确认强势 (confirmed_intraday_strength): 回踩分时均价线站稳不破，且放量持续换手。
+
+    重要：本函数**不设乐观默认值**。10:00 之后缺少 `sector_gain` / `is_above_vwap` 即返回
+    `N/A`；`turnover_increasing` / `pullback_broken` 缺省视为「未知」——未知既不足以确认强势，
+    也不足以判定缩量废票，只能落到中性观察。历史版本默认 `10:05 / 2.5% / 站上均价线 / 放量`，
+    无参调用会直接产出「日内真实强势主线 / is_valid=true」的假阳性结论，现已移除。
     """
+    if current_time is None:
+        return result("N/A", "intraday-impulse-v2", input_snapshot_id, ["current_time_HH:MM"], "unavailable")
     try:
         time_text = str(current_time).strip()
         hour, minute = (int(part) for part in time_text.split(":", 1))
         if not (0 <= hour <= 23 and 0 <= minute <= 59):
             raise ValueError
-        gain = float(sector_gain) if sector_gain is not None else 0.0
-        above_vwap = bool(is_above_vwap)
-        increasing = bool(turnover_increasing)
-        broken = bool(pullback_broken)
     except (TypeError, ValueError):
-        return result("N/A", "intraday-impulse-v1", input_snapshot_id, ["current_time_HH:MM"], "unavailable")
+        return result("N/A", "intraday-impulse-v2", input_snapshot_id, ["current_time_HH:MM"], "unavailable")
+
+    broken = pullback_broken is True
+    below_vwap = is_above_vwap is False
 
     minutes = hour * 60 + minute
-    if minutes < 10 * 60 and not (broken or not above_vwap):
+    if minutes < 10 * 60 and not (broken or below_vwap):
         return result({
             "impulse_quality": "pre_10am_observation", "is_valid": False,
             "gate_status": "pre_threshold", "current_time": time_text,
             "tactical_guidance": "尚未到 10:00 分水岭，仅记录脉冲，不确认强弱或允许追价。",
         }, "intraday-impulse-v2", input_snapshot_id, ["10:00_threshold"], "partial")
 
+    missing = [name for name, value in (("sector_gain", sector_gain), ("is_above_vwap", is_above_vwap)) if value is None]
+    if missing:
+        return result("N/A", "intraday-impulse-v2", input_snapshot_id, missing, "unavailable")
+
+    try:
+        gain = float(sector_gain)
+    except (TypeError, ValueError):
+        return result("N/A", "intraday-impulse-v2", input_snapshot_id, ["sector_gain"], "unavailable")
+    above_vwap = bool(is_above_vwap)
+    increasing = turnover_increasing is True
+    decreasing = turnover_increasing is False
+
     if broken or not above_vwap:
         quality = "early_morning_trap"
         is_valid = False
         guidance = "早盘脉冲拉升后回踩跌破分时均价线（分时黄线），确认为【诱多出货陷阱】；禁止追高，已有持仓反抽果断离场。"
-    elif not increasing and gain >= 2.0:
+    elif decreasing and gain >= 2.0:
         quality = "volume_exhaustion"
         is_valid = False
         guidance = "拉升缺乏成交量持续放大支撑，量能衰竭无承接，判定为【脉冲冲高回落废票】；等待回踩确认，严禁半路追高。"
@@ -539,7 +563,7 @@ def filter_intraday_impulse(
     else:
         quality = "neutral_observation"
         is_valid = False
-        guidance = "分时结构中性，尚需观察 10:00 分水岭换手确认。"
+        guidance = "分时结构中性或量能证据不足（未明确放量），尚需观察换手确认，不得据此追价。"
 
     value = {
         "impulse_quality": quality,
@@ -550,8 +574,8 @@ def filter_intraday_impulse(
         "metrics": {
             "sector_gain": round(gain, 2),
             "is_above_vwap": above_vwap,
-            "turnover_increasing": increasing,
-            "pullback_broken": broken,
+            "turnover_increasing": turnover_increasing,
+            "pullback_broken": pullback_broken,
         },
     }
     return result(value, "intraday-impulse-v2", input_snapshot_id)
@@ -627,11 +651,11 @@ def calculate_tactical_position_budget(
     if div_level in ("severe_divergence", "extreme_polarization", "fake_positive_trap"):
         base_cap = min(base_cap, 30.0)
 
-    # 极端亏钱效应扣减
-    if ext_loss >= 15.0:
-        base_cap = min(base_cap, 20.0)
-    elif ext_loss >= 25.0:
+    # 极端亏钱效应扣减（按严重度降序判定，避免高阈值分支被低阈值分支遮蔽）
+    if ext_loss >= 25.0:
         base_cap = 0.0
+    elif ext_loss >= 15.0:
+        base_cap = min(base_cap, 20.0)
 
     max_position_cap = max(0.0, min(80.0, base_cap))
     single_leader_cap = min(15.0, round(max_position_cap * 0.4, 1)) if max_position_cap > 0 else 0.0

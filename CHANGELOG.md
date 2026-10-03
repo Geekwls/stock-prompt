@@ -1,5 +1,44 @@
 # CHANGELOG (更新日志)
 
+## [v8.1.3] - 2026-10-03
+
+### 🩺 全项目二次审计修复：乐观默认值、死分支与口径混用 (Cross-module Audit Fixes)
+
+- **仓位预算死分支 (`calculate_tactical_position_budget`)**：
+  - 极端亏钱效应扣减原按升序判定（`>=15` 在前、`>=25` 在后），导致 `>=25 → 仓位上限 0` 的分支永不可达，实测 `extreme_loss_ratio=30` 仍返回 `max_position_cap=20`；改为**按严重度降序判定**，`>=25` 直接归零。
+- **盘中脉冲乐观默认 (`filter_intraday_impulse`)**：
+  - 历史签名对 `current_time` / `sector_gain` / `is_above_vwap` 设默认值，无参调用即返回 `confirmed_intraday_strength` / `is_valid=true` 的假阳性；现改为**必填**，缺失时返回 `N/A` + `unavailable` 并列出 `missing`；`turnover_increasing` 采用三态（未知既不足以确认强势也不足以判缩量废票，落中性观察）。
+- **情绪机会分乐观默认 (`calculate_sentiment_opportunity_score`)**：
+  - `nuclear_count` / `emotion_cycle` 原为可选默认值，漏传时静默 +5 分且无罚分；现改为**必填**并纳入 `missing` 检测，缺失即 `N/A`。
+- **均线除数错配 (`fetch_stock_kline`)**：
+  - `ma120/ma250/ma500` 统一改用 `min(窗口, 有效根数)` 除数，消除短历史标的均线被系统性低估的偏差。
+- **区间涨幅 N/N-1 段口径不一致**：
+  - 新增 `_window_return_pct`，`recent_5d_return` / `recent_20d_return` 与板块口径统一为 `closes[-(w+1)]` 基准，消除个股与板块区间涨幅不可比问题。
+- **解析链空指针 (`em_dc_rows`)**：
+  - 东财 `result.data` 在无记录时可能为 `None`，原解析链直接 `.get` 触发 `NoneType` 异常；统一改经 `em_dc_rows()` 安全提取，龙虎榜/板块资金流等 4 处解析受益。
+- **二八分化死分支 (`breadth_red_ratio`)**：
+  - 原实现读取生产中从不存在的 `red_ratio` 键，恒取默认 50%，导致「指数涨但红盘率低」冲突检测永不触发；新增 `breadth_red_ratio()` 解析真实结构（`latest_exact_snapshot.red_rate`，缺失时由涨跌家数现算，均不可得返回 `None` 而非乐观默认）。
+- **`data_date` 键名错配**：
+  - 6 处上下文信封的 `data_date` 由错误的键名（`date` / 自造字段）改为 `normalize_date` 归一化的真实字段（`as_of` / `latest_date` / 指数最新日），消除数据日期回退为「今天」的误导。
+- **商誉口径与资不抵债 (`fetch_company_quality`)**：
+  - 净资产缺失或 ≤0 时 `goodwill_ratio` 返回 `None` 并附 `goodwill_note`，不再用 0 净资产做除数；资不抵债情形风险等级置 `高`。
+- **篮子指数未复权回退 (`get_basket_index`)**：
+  - 移除未复权 `day` 序列回退，无前复权序列的成分股直接计入 `failed` 并说明原因，避免复权口径混算。
+- **个股诊断信封恒判 partial (`_make_context_envelope`)**：
+  - 新增 `core_data_available` 显式信号；个股诊断在**核心真实数据块全部失败**时判 `unavailable` 并追加 `core_data_unavailable`，不再被恒存在的派生块（`data_mode` / `archetype` / `position_context` 等）掩盖为 `partial`。
+- **威科夫宏观阶段乐观默认 (`compute_wyckoff_signals`)**：
+  - 无年线证据（有效 K 线不足 200 根）时不再默认 `STAGE_2_MARKUP_BULLISH`（牛市主升），改为 `STAGE_UNKNOWN_INSUFFICIENT_LONG_TERM` 并输出 `macro_phase_note`。
+- **评估台账口径串线与迁移漏计 (`eval_tracker.py`)**：
+  - `record-daily` 换主线时，若本次未显式提供，清理上一主线的 `mainline_state` / `sei`，杜绝跨主线口径混用；
+  - `migrate` 的 `changed` 计数覆盖 `schema_version` / `model_version` / `formula_version` 全部补写字段，修复「仅缺后两者时静默不落盘」的假阴性。
+- **更新器误报与缓存持久化 (`update_manager.py`)**：
+  - `version_key` 解析失败改返回 `None` 哨兵（原返回空元组 `()`，小于任何非空元组，会把降级误判为升级），调用方任一侧不可解析即保守判定无更新；
+  - `save_cache` 写入后补 `flush` + `fsync`，避免断电/崩溃丢失更新检查缓存。
+- **测试与文档**：
+  - 修复 `test_close_review_context_aggregation_and_conflict` 的**假阳性**——原 mock 注入了生产端不存在的 `red_ratio` 字段，现改用生产真实返回结构（`latest_exact_snapshot`）驱动聚合函数；
+  - 新增 MCP 信封核心数据可用性、`breadth_red_ratio`、威科夫宏观阶段、轮动权重 2–10 日、台账换主线清理与迁移计数等回归用例，全量 **312** 项单元测试全绿；
+  - 版本联动 version.json / registry.json / plugin.json / SERVER_INFO（MCP 组件 2.3.0→2.4.0）。
+
 ## [v8.1.2] - 2026-10-03
 
 ### 🔍 板块轮动分析逻辑交易员视角审计修复 (Rotation Logic Audit Fixes)

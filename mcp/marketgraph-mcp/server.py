@@ -78,9 +78,75 @@ def safe_float(val: Any, default: Optional[float] = 0.0) -> Optional[float]:
         return default
 
 
+def em_dc_rows(payload: Any) -> List[Dict[str, Any]]:
+    """安全提取东财 datacenter 返回的 result.data 行。
+
+    东财对「无记录」与「频控」都会返回 {"result": null}。历史实现
+    `.get("result", {}).get("data", [])` 在 result 键存在而值为 None 时会抛
+    AttributeError，使「未上榜 / 无记录」这一正常分支永远不可达。此处显式判空。
+    """
+    if not isinstance(payload, dict):
+        return []
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        return []
+    data = result.get("data")
+    return [row for row in data if isinstance(row, dict)] if isinstance(data, list) else []
+
+
 # -----------------------------------------------------------------------------
 # 2. 核心量化数据抓取与指标引擎 (腾讯证券 + 东方财富公开网关)
 # -----------------------------------------------------------------------------
+def breadth_red_ratio(breadth: Any) -> Optional[float]:
+    """从市场广度信封中提取最新交易日的红盘率（%）。
+
+    优先取精确全市场快照的 `red_rate`，缺失时由涨跌家数现算，均不可得返回 None。
+    历史实现直接读取生产中从不存在的 `red_ratio` 键，恒取默认 50%，导致
+    「指数涨但红盘率低」的二八分化冲突检测永不触发（死分支）。
+    """
+    if not isinstance(breadth, dict):
+        return None
+    snapshot = breadth.get("latest_exact_snapshot")
+    if isinstance(snapshot, dict):
+        value = safe_float(str(snapshot.get("red_rate", "")).rstrip("%"), None)
+        if value is not None:
+            return value
+        up = safe_float(snapshot.get("up_count"), None)
+        down = safe_float(snapshot.get("down_count"), None)
+        if up is not None and down is not None and (up + down) > 0:
+            return up / (up + down) * 100.0
+    window = breadth.get("days_window")
+    if isinstance(window, list) and window and isinstance(window[-1], dict):
+        return safe_float(str(window[-1].get("red_rate", "")).rstrip("%"), None)
+    return None
+
+
+def normalize_date(value: Any) -> Optional[str]:
+    """把 20261003 / 2026-10-03 / 2026-10-03 14:15:00 / 20261003141500 统一归一为 YYYY-MM-DD。"""
+    if value is None:
+        return None
+    digits = "".join(ch for ch in str(value).strip() if ch.isdigit())
+    if len(digits) < 8 or not 1990 <= int(digits[:4]) <= 2100:
+        return None
+    return f"{digits[:4]}-{digits[4:6]}-{digits[6:8]}"
+
+
+def index_latest_date(index_result: Any) -> Optional[str]:
+    """从 fetch_index_kline 结果取最新交易日（各指数 payload 的 date 最大值）。
+
+    历史实现读取并不存在的顶层 `latest_date`，使上下文信封的 data_date 静默回落为
+    今天，任何历史查询都会被标注为当日数据。
+    """
+    if not isinstance(index_result, dict):
+        return None
+    indices = index_result.get("indices")
+    if not isinstance(indices, dict):
+        return None
+    dates = [normalize_date(item.get("date")) for item in indices.values() if isinstance(item, dict)]
+    dates = [item for item in dates if item]
+    return max(dates) if dates else None
+
+
 def fetch_stock_quote(symbol: str) -> Dict[str, Any]:
     """获取个股实时行情与估值指标"""
     ts_code = normalize_symbol(symbol)
@@ -398,6 +464,7 @@ def compute_wyckoff_signals(
     bias_ma120 = round((latest_close - ma120) / ma120 * 100, 2) if ma120 else None
     bias_ma500 = round((latest_close - ma500) / ma500 * 100, 2) if ma500 else None
 
+    macro_note = None
     if ma250 and ma500:
         if latest_close >= ma250 and ma250 >= ma500 * 0.98 and percentile_3y >= 50.0:
             macro_phase = "STAGE_2_MACRO_MARKUP_BULLISH"  # 站稳年线与两年线之上，3年大级别牛市主升
@@ -424,7 +491,11 @@ def compute_wyckoff_signals(
         else:
             macro_phase = "STAGE_REACCUMULATION_OR_CONSOLIDATION"
     else:
-        macro_phase = "STAGE_1_MACRO_ACCUMULATION" if percentile_3y <= 30.0 else "STAGE_2_MARKUP_BULLISH"
+        # 无年线（有效K线不足 200 根）时，所谓「3年分位」并非真实 3 年窗口，证据不可靠。
+        # 旧实现默认返回 STAGE_2_MARKUP_BULLISH（牛市主升），属乐观默认值：
+        # 在缺少年线/两年线证据时不得断言大级别主升，改为显式标注不可判定。
+        macro_phase = "STAGE_UNKNOWN_INSUFFICIENT_LONG_TERM"
+        macro_note = "有效K线不足 200 根，缺少年线/两年线证据，宏观大周期阶段不可判定"
 
     # 2. 中微观局部交易区间 (Trading Range, 观察近 60 日震荡箱体)
     tr_window = min(60, valid_count)
@@ -478,6 +549,7 @@ def compute_wyckoff_signals(
 
     return {
         "macro_wyckoff_phase": macro_phase,
+        "macro_phase_note": macro_note,
         "percentile_3y": f"{percentile_3y}%",
         "year_price_percentile": f"{year_percentile}%",
         "bias_ma500": f"{bias_ma500:+.2f}%" if bias_ma500 is not None else "N/A",
@@ -506,6 +578,20 @@ def compute_wyckoff_signals(
             + (f"; {weekly_summary_str}" if weekly_summary_str else "")
         ),
     }
+
+
+def _window_return_pct(closes: List[float], window: int) -> Optional[float]:
+    """计算 N 个交易日区间涨幅（收盘 vs window 个交易日前收盘），序列不足时退化为可得区间。
+
+    与 `_sector_return` 采用完全一致的基期口径（`closes[-(w+1)]`），避免个股与板块
+    同名字段相差一个交易日造成跨标的比较的系统性偏差。
+    """
+    n = len(closes)
+    w = min(window, n - 1)
+    if w <= 0:
+        return None
+    base = closes[-(w + 1)]
+    return ((closes[-1] - base) / base * 100) if base > 0 else None
 
 
 def fetch_stock_kline(symbol: str, count: int = 750, compact: bool = True) -> Dict[str, Any]:
@@ -553,11 +639,12 @@ def fetch_stock_kline(symbol: str, count: int = 750, compact: bool = True) -> Di
         lows = [b["low"] for b in bars]
 
         # 计算全周期均线矩阵: MA20 / MA50 / MA120 (半年线) / MA250 (年线) / MA500 (两年线)
+        # 除数必须取 min(窗口, valid_count)：有效K线不足满窗口时用满窗口值作除数会系统性低估均线。
         ma20 = sum(closes[-20:]) / min(20, valid_count) if valid_count >= 5 else closes[-1]
         ma50 = sum(closes[-50:]) / min(50, valid_count) if valid_count >= 10 else closes[-1]
-        ma120 = round(sum(closes[-120:]) / 120.0, 2) if valid_count >= 100 else None
-        ma250 = round(sum(closes[-250:]) / 250.0, 2) if valid_count >= 200 else None
-        ma500 = round(sum(closes[-500:]) / 500.0, 2) if valid_count >= 400 else None
+        ma120 = round(sum(closes[-120:]) / min(120, valid_count), 2) if valid_count >= 100 else None
+        ma250 = round(sum(closes[-250:]) / min(250, valid_count), 2) if valid_count >= 200 else None
+        ma500 = round(sum(closes[-500:]) / min(500, valid_count), 2) if valid_count >= 400 else None
 
         latest_close = closes[-1]
         bias_ma20 = (latest_close - ma20) / ma20 * 100 if ma20 else 0.0
@@ -599,6 +686,8 @@ def fetch_stock_kline(symbol: str, count: int = 750, compact: bool = True) -> Di
             high_year, low_year, high_3y, low_3y, weekly_analysis
         )
 
+        ret_5d = _window_return_pct(closes, 5)
+        ret_20d = _window_return_pct(closes, 20)
         res = {
             "source": "P3_Tencent_QFQ_KLine",
             "data_status": "ok",
@@ -628,8 +717,8 @@ def fetch_stock_kline(symbol: str, count: int = 750, compact: bool = True) -> Di
             "high_3y": high_3y,
             "low_3y": low_3y,
             "percentile_3y": wyckoff_signals["percentile_3y"],
-            "recent_5d_return": f"{((closes[-1] - closes[-min(5, valid_count)]) / closes[-min(5, valid_count)] * 100):+.2f}%",
-            "recent_20d_return": f"{((closes[-1] - closes[-min(20, valid_count)]) / closes[-min(20, valid_count)] * 100):+.2f}%",
+            "recent_5d_return": f"{ret_5d:+.2f}%" if ret_5d is not None else "N/A",
+            "recent_20d_return": f"{ret_20d:+.2f}%" if ret_20d is not None else "N/A",
             "volume_ratio_20d": volume_ratio_20d,
             "volume_percentile_120d": volume_percentile_120d,
             "weekly_timeframe": weekly_analysis,
@@ -1831,7 +1920,12 @@ def fetch_basket_index(stocks: List[str], count: int = 20) -> Dict[str, Any]:
         try:
             url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={ts_code},day,,,{count + 1},qfq"
             data = json.loads(http_get(url, timeout=5)).get("data", {}).get(ts_code, {})
-            bars = data.get("qfqday") or data.get("day") or []
+            bars = data.get("qfqday") or []
+            if not bars:
+                # 与 fetch_stock_kline 的前复权硬门槛保持一致：缺失前复权序列即判失败，
+                # 不得静默回退未复权 day 序列，否则同一篮子内会混用两种复权口径污染相对强度。
+                failed.append(f"{raw}(无前复权序列)")
+                continue
             closes = {str(r[0]): float(r[2]) for r in bars[-(count + 1):] if len(r) >= 3}
             if len(closes) >= 2:
                 series_by_stock[ts_code] = closes
@@ -2302,11 +2396,11 @@ def fetch_longhubang_detail(symbol: Optional[str] = None, date_str: Optional[str
                     "client": "WEB",
                 })
             )
-            buy_rows = json.loads(http_get(buy_url, timeout=4)).get("result", {}).get("data", []) or []
+            buy_rows = em_dc_rows(json.loads(http_get(buy_url, timeout=4)))
 
-            sell_rows = json.loads(http_get(sell_url, timeout=4)).get("result", {}).get("data", []) or []
+            sell_rows = em_dc_rows(json.loads(http_get(sell_url, timeout=4)))
 
-            sum_rows = json.loads(http_get(summary_url, timeout=4)).get("result", {}).get("data", []) or []
+            sum_rows = em_dc_rows(json.loads(http_get(summary_url, timeout=4)))
 
             if not buy_rows and not sell_rows and not sum_rows:
                 return {
@@ -2394,7 +2488,7 @@ def fetch_longhubang_detail(symbol: Optional[str] = None, date_str: Optional[str
                 params["filter"] = filter_expr
 
             url = "https://datacenter-web.eastmoney.com/api/data/v1/get?" + urllib.parse.urlencode(params)
-            data_rows = json.loads(http_get(url, timeout=4)).get("result", {}).get("data", []) or []
+            data_rows = em_dc_rows(json.loads(http_get(url, timeout=4)))
 
             stocks = []
             for r in data_rows:
@@ -2536,15 +2630,28 @@ def fetch_company_quality(symbol: str) -> Dict[str, Any]:
 
         if b0:
             goodwill_yuan = safe_float(b0.get("GOODWILL"), 0.0)
-            total_equity_yuan = safe_float(b0.get("TOTAL_EQUITY"), 1.0)
-            goodwill_ratio = round((goodwill_yuan / total_equity_yuan) * 100.0, 2) if total_equity_yuan > 0 else 0.0
+            total_equity_yuan = safe_float(b0.get("TOTAL_EQUITY"), None)
+            # 净资产缺失时不得默认 1.0（会把商誉占比放大成天文数字并误报高风险）；
+            # 净资产为负（资不抵债）时商誉占比无经济意义，须显式提示偿债风险而非置 0 掩盖。
+            if total_equity_yuan is None:
+                goodwill_ratio = None
+                goodwill_note = "净资产字段缺失，商誉占比未计算"
+            elif total_equity_yuan <= 0:
+                goodwill_ratio = None
+                goodwill_note = "净资产为负（资不抵债），商誉占比不适用，需单独评估偿债与退市风险"
+            else:
+                goodwill_ratio = round((goodwill_yuan / total_equity_yuan) * 100.0, 2)
+                goodwill_note = None
             balance_and_goodwill = {
                 "goodwill_million": f"{round(goodwill_yuan / 10000.0, 2)} 万元",
-                "goodwill_to_equity_ratio": f"{goodwill_ratio:.2f}%",
+                "goodwill_to_equity_ratio": f"{goodwill_ratio:.2f}%" if goodwill_ratio is not None else "N/A",
                 "inventory_million": f"{round(safe_float(b0.get('INVENTORY'), 0.0) / 10000.0, 2)} 万元",
             }
+            if goodwill_note:
+                balance_and_goodwill["goodwill_ratio_note"] = goodwill_note
         else:
             goodwill_ratio = None
+            goodwill_note = None
             balance_and_goodwill = {
                 "goodwill_million": "N/A",
                 "goodwill_to_equity_ratio": "N/A",
@@ -2586,6 +2693,10 @@ def fetch_company_quality(symbol: str) -> Dict[str, Any]:
             if goodwill_ratio > 30:
                 risk_level = "高"
                 risk_reasons.append(f"商誉占净资产比例过高 ({goodwill_ratio}%)")
+        elif goodwill_note:
+            if "资不抵债" in goodwill_note:
+                risk_level = "高"
+            risk_reasons.append(goodwill_note)
         else:
             risk_reasons.append("资产负债数据缺失，商誉筛查未执行")
         if not risk_reasons:
@@ -2746,18 +2857,28 @@ def _make_context_envelope(
     conflicts: Optional[List[str]] = None,
     data_date: Optional[str] = None,
     source: Optional[str] = None,
+    core_data_available: Optional[bool] = None,
 ) -> Dict[str, Any]:
-    """标准化上下文证据信封，保证统一输出与优雅降级"""
+    """标准化上下文证据信封，保证统一输出与优雅降级。
+
+    core_data_available 用于显式声明「核心真实数据块」是否有任意一块可用：
+    - 传 False 时强制 data_status=unavailable，避免恒真存在的合成字段（如
+      data_mode/archetype/position_context 等派生块）掩盖全量数据降级，
+      让消费方正确识别「无真实数据」而非误判 partial。
+    - 传 None 时回退到「payload 非空即 partial」的启发式，保持其它上下文行为不变。
+    """
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S +08:00")
     today_date = date.today().strftime("%Y-%m-%d")
     total_expected = len(payload) + len(missing)
-    if not missing:
+    if core_data_available is False:
+        status = "unavailable"
+    elif not missing:
         status = "ok"
     elif payload and len(payload) > 0:
         status = "partial"
     else:
         status = "unavailable"
-    return {
+    envelope = {
         "source": source or f"P3_MarketGraph_{context_name}",
         "source_family": "MarketGraph_Aggregator",
         "independence_group": "MarketGraph_Context",
@@ -2768,6 +2889,9 @@ def _make_context_envelope(
         "missing": missing,
         "conflicts": conflicts or [],
     }
+    if core_data_available is not None:
+        envelope["core_data_available"] = core_data_available
+    return envelope
 
 
 def fetch_preopen_context(
@@ -2786,7 +2910,7 @@ def fetch_preopen_context(
         idx_res = fetch_index_kline(idx_keys, count=20)
         if isinstance(idx_res, dict) and idx_res.get("data_status") != "unavailable" and not idx_res.get("error"):
             payload["indices"] = idx_res.get("indices", {})
-            data_date = idx_res.get("latest_date")
+            data_date = index_latest_date(idx_res)
         else:
             missing.append("indices")
     except Exception as exc:
@@ -2856,7 +2980,7 @@ def fetch_close_review_context(
         idx_res = fetch_index_kline(["SHCI", "SZCI", "CYB", "CSIALL", "HS300"], count=2)
         if isinstance(idx_res, dict) and idx_res.get("data_status") != "unavailable" and not idx_res.get("error"):
             payload["indices"] = idx_res.get("indices", {})
-            data_date = idx_res.get("latest_date")
+            data_date = index_latest_date(idx_res)
         else:
             missing.append("indices")
     except Exception as exc:
@@ -2928,16 +3052,13 @@ def fetch_close_review_context(
     sh_info = indices_data.get("SHCI", {}) or indices_data.get("sh000001", {})
     breadth_data = payload.get("breadth", {})
     if sh_info and breadth_data:
-        try:
-            sh_chg = safe_float(str(sh_info.get("change_pct", "0")).rstrip("%"), 0.0)
-            red_ratio = safe_float(str(breadth_data.get("red_ratio", "50%")).rstrip("%"), 50.0)
-            if sh_chg is not None and red_ratio is not None:
-                if sh_chg > 0.6 and red_ratio < 40.0:
-                    conflicts.append("指数明显上涨但全市场红盘率不足40%，呈现典型权重推升二八分化")
-                elif sh_chg < -0.6 and red_ratio > 60.0:
-                    conflicts.append("指数明显下跌但红盘率超60%，呈现权重拖累中小题材活跃")
-        except Exception:
-            pass
+        sh_chg = safe_float(str(sh_info.get("change_pct", "")).rstrip("%"), None)
+        red_ratio = breadth_red_ratio(breadth_data)
+        if sh_chg is not None and red_ratio is not None:
+            if sh_chg > 0.6 and red_ratio < 40.0:
+                conflicts.append("指数明显上涨但全市场红盘率不足40%，呈现典型权重推升二八分化")
+            elif sh_chg < -0.6 and red_ratio > 60.0:
+                conflicts.append("指数明显下跌但红盘率超60%，呈现权重拖累中小题材活跃")
 
     return _make_context_envelope("Close_Review", payload, missing, conflicts, data_date)
 
@@ -2946,7 +3067,12 @@ ROTATION_WEIGHT_PLAN_5D = (0.05, 0.05, 0.20, 0.30, 0.40)
 
 
 def _rotation_weights(days: int) -> List[float]:
-    """按 T-days+1 至 T 生成归一化的近期加权权重（近期权重不低于远期）。"""
+    """按 T-days+1 至 T 生成归一化的近期加权权重（近期权重不低于远期）。
+
+    days<=5 直接截取 5 日基准计划的后 days 段；days>5（调用方允许 2..10）则以 5 日计划
+    的首尾权重 (0.05, 0.40) 为端点做线性内插，保证单调递增与归一化。该分支可达，
+    并非死代码，由 test_rotation_context_weight_monotonic_and_gate 的 2..10 用例覆盖。
+    """
     if days <= len(ROTATION_WEIGHT_PLAN_5D):
         base = list(ROTATION_WEIGHT_PLAN_5D[-days:])
     else:
@@ -3000,7 +3126,6 @@ def fetch_rotation_context(
         fund_res = fetch_sector_fund_flow(count=sector_count, days=days)
         if isinstance(fund_res, dict) and fund_res.get("data_status") != "unavailable" and not fund_res.get("error"):
             payload["sector_fund_flows"] = fund_res
-            data_date = fund_res.get("date")
         else:
             missing.append("sector_fund_flows")
     except Exception as exc:
@@ -3010,8 +3135,8 @@ def fetch_rotation_context(
         idx_res = fetch_index_kline(["SHCI", "CYB", "CSIALL"], count=days)
         if isinstance(idx_res, dict) and idx_res.get("data_status") != "unavailable" and not idx_res.get("error"):
             payload["index_trend"] = idx_res.get("indices", {})
-            if not data_date:
-                data_date = idx_res.get("latest_date")
+            # 交易日期一律以指数K线的真实最新交易日为准；资金流信封只带采集 timestamp，不能当交易日。
+            data_date = data_date or index_latest_date(idx_res)
         else:
             missing.append("index_trend")
     except Exception as exc:
@@ -3115,7 +3240,7 @@ def fetch_stock_diagnostic_context(
         quote_res = fetch_stock_quote(symbol)
         if isinstance(quote_res, dict) and quote_res.get("data_status") != "unavailable" and not quote_res.get("error"):
             payload["quote"] = quote_res
-            data_date = quote_res.get("date")
+            data_date = normalize_date(quote_res.get("as_of"))
         else:
             missing.append("quote")
     except Exception as exc:
@@ -3126,7 +3251,7 @@ def fetch_stock_diagnostic_context(
         if isinstance(kline_res, dict) and kline_res.get("data_status") != "unavailable" and not kline_res.get("error"):
             payload["kline_structure"] = kline_res
             if not data_date:
-                data_date = kline_res.get("latest_kline_date")
+                data_date = normalize_date(kline_res.get("latest_date"))
         else:
             missing.append("kline_structure")
     except Exception as exc:
@@ -3249,7 +3374,21 @@ def fetch_stock_diagnostic_context(
         "reason": "当前公开 MCP 未提供可审计筹码峰/获利盘分布；不得估算或用换手率替代",
     }
 
-    return _make_context_envelope("Stock_Diagnostic", payload, missing, conflicts, data_date)
+    # 核心真实数据块是否至少有一块可用。longhubang 恒有占位 dict（status=none/unavailable），
+    # 不计入核心判定，避免「无龙虎榜」被误当作有数据。派生块（data_mode/archetype/
+    # position_context 等）恒存在，因此不能作为可用性依据。
+    core_data_keys = (
+        "quote", "kline_structure", "company_quality",
+        "timeline", "benchmark_kline", "sector_kline",
+    )
+    core_data_available = any(key in payload for key in core_data_keys)
+    if not core_data_available:
+        missing.append("core_data_unavailable")
+
+    return _make_context_envelope(
+        "Stock_Diagnostic", payload, missing, conflicts, data_date,
+        core_data_available=core_data_available,
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -3257,7 +3396,7 @@ def fetch_stock_diagnostic_context(
 # -----------------------------------------------------------------------------
 SERVER_INFO = {
     "name": "marketgraph-data",
-    "version": "2.3.0",
+    "version": "2.4.0",
 }
 
 def _dispatch_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:

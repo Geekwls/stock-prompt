@@ -2,7 +2,7 @@
 
 > **目标**：以 4 个专业研究 Skill 和 1 个轻量编排 Router，形成具备 **时段感知路由 ➡️ 程序化交接 ➡️ 盘前盘后自校准 ➡️ 板块标的深度穿透** 的研究闭环。Router 只做分流和交接，不代替专业分析。
 
-## 实施状态（v8.1.2）
+## 实施状态（v8.1.3）
 
 - 已完成：单一 `registry.json`、版本一致性检查、21 个 MCP 工具清单对齐（17 个数据/上下文工具 + 4 个研究闭环工具）。
 - 已完成：Handoff Schema、原子存储 CLI、台账版本隔离和 legacy 迁移。
@@ -13,6 +13,7 @@
 - 已完成（v8.1.0）：实战风控与资金分配引擎——次日全局仓位总控、极端大面防爆雷、板块成交容量门槛、资金跷跷板矩阵、阶梯动态止盈与逆势加仓硬拦截，均以 `tools/calculations/` 纯函数落地。
 - 已完成（v8.1.1）：MCP 多源数据口径显式化与数据源排雷——公司质量层恢复可用、板块按 `total` 全量分页与 37 个映射修正，资金流 / 情绪 / 板块 K 线口径标签与降级台账。
 - 已完成（v8.1.2）：板块轮动逻辑交易员视角审计修复——`assess_rotation_effectiveness` 移除乐观默认值、`calculate_sector_cannibalization` 分类互斥有序、`validate_sector_capacity` 修复 OR 后门并支持基准归一化、`calculate_rotation_state` 补齐 State 2 证据、`map_capital_seesaw_matrix` 区分规则推演与实测证据；新增 `calculate_rotation_migration` 与 `map_exhaustion_to_lifecycle`，`get_rotation_context` 补齐 5 区块承诺字段，战术结论经 `eval_tracker.py` 台账化并可被次日证伪。
+- 已完成（v8.1.3）：全项目二次审计修复——`tools/calculations/` 消除仓位预算死分支与盘中脉冲/情绪机会分乐观默认；MCP 服务端修正均线除数、区间涨幅 `N-1` 段口径、`data_date` 键名、商誉口径与篮子复权回退，新增 `breadth_red_ratio` 修复二八分化死分支、`core_data_available` 使个股诊断核心数据全失时判 `unavailable`、无年线证据时威科夫不再默认牛市主升；`eval_tracker.py` 换主线清理旧状态与迁移计数修正；`update_manager.py` 版本哨兵与缓存 `fsync`；修复一处测试假阳性并补齐回归用例（全量 312 项全绿）。
 - 兼容演进：MCP v2 信封保留旧顶层字段；传输/缓存和报告卡公共组件已从入口拆出，业务工具与四类排版继续按测试覆盖逐步细分。
 - 下一阶段工程主计划以 [Agent 工具化与 Skill 解耦实施计划](AGENT_TOOLING_REFACTOR_PLAN.md) 为准；未来 UI/宿主交互边界见 [UI 交互与模型推理分层设计](UI_MODEL_SEPARATION_DESIGN.md)。本 Roadmap 只保留产品级里程碑，不重复定义机器契约。
 

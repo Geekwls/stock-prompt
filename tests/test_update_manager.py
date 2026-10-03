@@ -28,7 +28,20 @@ class UpdateManagerTest(unittest.TestCase):
     def test_semantic_version_comparison(self):
         self.assertGreater(UPDATER.version_key("v7.5.0"), UPDATER.version_key("7.4.9"))
         self.assertEqual(UPDATER.version_key("7.4"), UPDATER.version_key("7.4.0"))
-        self.assertEqual(UPDATER.version_key("invalid"), ())
+        # 不可解析的版本返回 None 哨兵（而非空元组，避免降级被误判为升级）
+        self.assertIsNone(UPDATER.version_key("invalid"))
+        self.assertIsNone(UPDATER.version_key("unknown"))
+        self.assertIsNone(UPDATER.version_key(""))
+        self.assertIsNone(UPDATER.version_key(None))
+
+    def test_unparseable_local_version_does_not_falsely_report_update(self):
+        """本地版本不可解析时，远端更低版本不得被误报为「有新版本」。"""
+        remote = json.dumps({"latest": "1.0.0", "channel": "stable"}).encode()
+        with patch.object(UPDATER, "runtime_metadata",
+                          return_value={"version": "unknown", "repo": "o/r", "channel": "stable"}), \
+             patch.object(UPDATER, "fetch_bytes", return_value=remote):
+            info = UPDATER.check_update(force=True)
+        self.assertFalse(info["update_available"])
 
     def test_check_uses_daily_cache(self):
         current_major = UPDATER.version_key(UPDATER.runtime_metadata()["version"])[0]

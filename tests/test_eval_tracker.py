@@ -500,6 +500,92 @@ class TacticLedgerTest(unittest.TestCase):
             self.assertEqual(rec["rotation_type"], "mainline_focused")
             self.assertEqual(rec["divergence_type"], "healthy_resonance")
 
+    def test_record_daily_clears_stale_state_on_mainline_switch(self):
+        """换主线且未显式提供新状态时，旧主线的 mainline_state/sei 必须清理，避免口径串线。"""
+        with tempfile.TemporaryDirectory() as temporary:
+            daily = str(Path(temporary) / "daily_scores.jsonl")
+            with redirect_stdout(io.StringIO()):
+                TRACKER.cmd_record_daily(_daily_namespace(
+                    "2026-09-28", daily, mainline_sector="半导体",
+                    mainline_state="强化", sei=42.0,
+                ))
+                TRACKER.cmd_record_daily(_daily_namespace(
+                    "2026-09-28", daily, mainline_sector="通信设备",
+                ))
+            rec = TRACKER.load_daily_ledger(daily)[0]
+            self.assertEqual(rec["mainline_sector"], "通信设备")
+            self.assertNotIn("mainline_state", rec)
+            self.assertNotIn("sei", rec)
+
+    def test_record_daily_keeps_explicit_state_on_mainline_switch(self):
+        """换主线并显式提供新状态时，应写入新主线的 mainline_state/sei。"""
+        with tempfile.TemporaryDirectory() as temporary:
+            daily = str(Path(temporary) / "daily_scores.jsonl")
+            with redirect_stdout(io.StringIO()):
+                TRACKER.cmd_record_daily(_daily_namespace(
+                    "2026-09-28", daily, mainline_sector="半导体",
+                    mainline_state="强化", sei=42.0,
+                ))
+                TRACKER.cmd_record_daily(_daily_namespace(
+                    "2026-09-28", daily, mainline_sector="通信设备",
+                    mainline_state="启动", sei=61.0,
+                ))
+            rec = TRACKER.load_daily_ledger(daily)[0]
+            self.assertEqual(rec["mainline_sector"], "通信设备")
+            self.assertEqual(rec["mainline_state"], "启动")
+            self.assertEqual(rec["sei"], 61.0)
+
+    def test_record_daily_keeps_state_when_mainline_unchanged(self):
+        """主线未变时，追加其它批次字段不得清空既有 mainline_state/sei。"""
+        with tempfile.TemporaryDirectory() as temporary:
+            daily = str(Path(temporary) / "daily_scores.jsonl")
+            with redirect_stdout(io.StringIO()):
+                TRACKER.cmd_record_daily(_daily_namespace(
+                    "2026-09-28", daily, mainline_sector="半导体",
+                    mainline_state="强化", sei=42.0,
+                ))
+                TRACKER.cmd_record_daily(_daily_namespace(
+                    "2026-09-28", daily, mainline_sector="半导体",
+                    rotation_type="mainline_focused",
+                ))
+            rec = TRACKER.load_daily_ledger(daily)[0]
+            self.assertEqual(rec["mainline_state"], "强化")
+            self.assertEqual(rec["sei"], 42.0)
+            self.assertEqual(rec["rotation_type"], "mainline_focused")
+
+
+class MigrateLedgerTest(unittest.TestCase):
+    def test_migrate_counts_and_writes_all_backfilled_fields(self):
+        """migrate 须把 model_version / formula_version 的补写也计入 changed 并落盘。"""
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "predictions.jsonl"
+            # 仅有 schema_version，缺 model_version / formula_version
+            path.write_text(
+                json.dumps({"type": "prediction", "date": "2026-09-01", "schema_version": "v1"}) + "\n",
+                encoding="utf-8",
+            )
+            with redirect_stdout(io.StringIO()) as out:
+                changed = TRACKER.migrate_ledger(str(path))
+            self.assertEqual(changed, 2)
+            self.assertIn("MIGRATE", out.getvalue())
+            rec = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+            self.assertEqual(rec["model_version"], "legacy")
+            self.assertEqual(rec["formula_version"], "legacy")
+
+    def test_migrate_reports_noop_when_all_fields_present(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "predictions.jsonl"
+            path.write_text(
+                json.dumps({"type": "prediction", "date": "2026-09-01",
+                            "schema_version": "v1", "model_version": "v1",
+                            "formula_version": "v1"}) + "\n",
+                encoding="utf-8",
+            )
+            with redirect_stdout(io.StringIO()) as out:
+                changed = TRACKER.migrate_ledger(str(path))
+            self.assertEqual(changed, 0)
+            self.assertIn("无需迁移", out.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

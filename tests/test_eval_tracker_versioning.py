@@ -62,7 +62,11 @@ class EvalTrackerVersioningTest(unittest.TestCase):
             TRACKER.migrate_ledger.dry_run = False
             with redirect_stdout(StringIO()):
                 changed = TRACKER.migrate_ledger(str(path))
-            self.assertEqual(changed, 1)
-            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["model_version"], "legacy")
+            # 该记录同时缺 schema_version / model_version / formula_version，三者都应计入 changed
+            self.assertEqual(changed, 3)
+            migrated = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(migrated["schema_version"], "legacy")
+            self.assertEqual(migrated["model_version"], "legacy")
+            self.assertEqual(migrated["formula_version"], "legacy")
             self.assertEqual(len(list(Path(temporary).glob("daily.jsonl.bak-*"))), 1)
 

@@ -63,9 +63,14 @@ class MCPContextToolsTest(unittest.TestCase):
             "ladder_distribution": {"4连板": 2, "3连板": 3},
             "highest_tier_stocks": [{"code": "600108", "name": "亚盛集团", "lbc": 4}],
         }
+        # 与生产 fetch_market_breadth 的真实返回结构对齐：红盘率位于 latest_exact_snapshot.red_rate
         mock_breadth = {
-            "source": "P3_Eastmoney_Market_Breadth", "data_status": "ok",
-            "red_ratio": "62.5%", "up_count": 3200, "down_count": 1800,
+            "source": "P3_Public_Financial_Gateways", "data_status": "ok",
+            "latest_exact_snapshot": {
+                "date": "2026-09-10", "up_count": 3200, "down_count": 1800,
+                "flat_count": 120, "total_stocks": 5120, "red_rate": "62.50%",
+            },
+            "days_window": [{"date": "2026-09-10", "red_rate": "62.50%"}],
         }
         mock_quality = {"source": "P3_Eastmoney_Sector_Limit_Quality", "data_status": "ok", "seal_quality_score": 85.0}
 
@@ -96,7 +101,17 @@ class MCPContextToolsTest(unittest.TestCase):
             "indices": {"SHCI": {"name": "上证指数", "change_pct": "0.85%"}},
         }
         mock_sent = {"source": "P3_Eastmoney_Market_Sentiment", "data_status": "ok", "date": "2026-09-10"}
-        mock_breadth = {"source": "P3_Eastmoney_Market_Breadth", "data_status": "ok", "red_ratio": "35.0%"}
+        # 红盘率 34% < 40% 且沪指 +0.85% > 0.6%，应触发「二八分化」冲突。
+        # 结构与生产 fetch_market_breadth 一致（latest_exact_snapshot.red_rate），
+        # 避免历史 mock 注入生产中不存在的 red_ratio 字段造成假阳性。
+        mock_breadth = {
+            "source": "P3_Public_Financial_Gateways", "data_status": "ok",
+            "latest_exact_snapshot": {
+                "date": "2026-09-10", "up_count": 1394, "down_count": 2706,
+                "flat_count": 100, "total_stocks": 4200, "red_rate": "33.19%",
+            },
+            "days_window": [{"date": "2026-09-10", "red_rate": "33.19%"}],
+        }
         mock_fund = {
             "source": "P3_Eastmoney_Sector_Fund_Flow", "data_status": "ok",
             "rankings": [{"sector_name": "半导体", "net_inflow_million": 1200.0}],
@@ -131,7 +146,14 @@ class MCPContextToolsTest(unittest.TestCase):
             "source": "P3_Tencent_Index_KLine", "data_status": "ok", "latest_date": "2026-09-10",
             "indices": {"SHCI": {"name": "上证指数", "change_pct": "+0.5%"}},
         }
-        mock_breadth = {"source": "P3_Eastmoney_Market_Breadth", "data_status": "ok", "red_ratio": "58.0%"}
+        mock_breadth = {
+            "source": "P3_Public_Financial_Gateways", "data_status": "ok",
+            "latest_exact_snapshot": {
+                "date": "2026-09-10", "up_count": 2980, "down_count": 2040,
+                "flat_count": 80, "total_stocks": 5100, "red_rate": "58.43%",
+            },
+            "days_window": [{"date": "2026-09-10", "red_rate": "58.43%"}],
+        }
         mock_sector_kline = {
             "source": "P3_Eastmoney_Sector_KLine", "data_status": "ok", "sector_name": "半导体",
             "sector_code": "BK1036", "valid_bars": 120, "recent_5d_return": "+6.20%",
@@ -167,12 +189,26 @@ class MCPContextToolsTest(unittest.TestCase):
         self.assertTrue(all(weights[i] <= weights[i + 1] for i in range(4)))
         self.assertAlmostEqual(sum(weights), 1.0, places=5)
 
+        # days>5（调用方允许 2..10）走线性内插分支，须同样满足单调递增与归一化
+        for days in range(2, 11):
+            ramp = SERVER._rotation_weights(days)
+            self.assertEqual(len(ramp), days)
+            self.assertTrue(all(ramp[i] <= ramp[i + 1] for i in range(days - 1)),
+                            f"days={days} 权重非单调递增: {ramp}")
+            self.assertAlmostEqual(sum(ramp), 1.0, places=5, msg=f"days={days} 未归一化")
+
         mock_fund = {
             "source": "P3_Eastmoney_Sector_Fund_Flow", "data_status": "ok", "date": "2026-09-10",
             "top_inflow_sectors": [{"rank": 1, "name": "半导体", "code": "BK1036"}],
         }
         mock_idx = {"source": "P3_Tencent_Index_KLine", "data_status": "ok", "latest_date": "2026-09-10"}
-        mock_breadth = {"source": "P3_Eastmoney_Market_Breadth", "data_status": "ok"}
+        mock_breadth = {
+            "source": "P3_Public_Financial_Gateways", "data_status": "ok",
+            "latest_exact_snapshot": {"date": "2026-09-10", "up_count": 2500,
+                                      "down_count": 2500, "flat_count": 100,
+                                      "total_stocks": 5100, "red_rate": "49.02%"},
+            "days_window": [{"date": "2026-09-10", "red_rate": "49.02%"}],
+        }
 
         with patch.object(SERVER, "fetch_sector_fund_flow", return_value=mock_fund), \
              patch.object(SERVER, "fetch_index_kline", return_value=mock_idx), \
@@ -225,6 +261,97 @@ class MCPContextToolsTest(unittest.TestCase):
             self.assertEqual(res["payload"]["selected_model"]["value"]["model_selected"], "institutional-trend-v1")
             self.assertEqual(res["payload"]["position_context"]["value"]["scenario"], "entry_observation_plan")
             self.assertEqual(res["payload"]["wyckoff_applicability"]["value"]["applicability"], "applicable")
+
+    def test_stock_diagnostic_all_core_failure_returns_unavailable(self):
+        """核心真实数据块全部失败时，信封须判 unavailable 而非被合成块掩盖成 partial。"""
+        with patch.object(SERVER, "fetch_stock_quote", side_effect=RuntimeError("down")), \
+             patch.object(SERVER, "fetch_stock_kline", side_effect=RuntimeError("down")), \
+             patch.object(SERVER, "fetch_company_quality", side_effect=RuntimeError("down")), \
+             patch.object(SERVER, "fetch_stock_timeline", side_effect=RuntimeError("down")), \
+             patch.object(SERVER, "fetch_longhubang_detail", return_value={"error": "down"}), \
+             patch.object(SERVER, "fetch_index_kline", side_effect=RuntimeError("down")), \
+             patch.object(SERVER, "fetch_sector_kline", side_effect=RuntimeError("down")):
+
+            res = SERVER.fetch_stock_diagnostic_context("300308", sector="通信设备")
+
+            self.assertEqual(res["data_status"], "unavailable")
+            self.assertIs(res["core_data_available"], False)
+            self.assertIn("core_data_unavailable", res["missing"])
+            # 合成/派生块仍保留，供消费方直接读取，但不得因此抬高数据状态
+            for derived in ("data_mode", "archetype", "wyckoff_applicability",
+                            "position_context", "seat_evidence", "chip_structure"):
+                self.assertIn(derived, res["payload"])
+            for core in ("quote", "kline_structure", "company_quality",
+                         "timeline", "benchmark_kline", "sector_kline"):
+                self.assertNotIn(core, res["payload"])
+
+    def test_envelope_core_data_available_forces_unavailable(self):
+        """_make_context_envelope 在 core_data_available=False 时强制 unavailable。"""
+        env = SERVER._make_context_envelope(
+            "Stock_Diagnostic", {"synthetic": 1}, ["quote"],
+            core_data_available=False,
+        )
+        self.assertEqual(env["data_status"], "unavailable")
+        self.assertIs(env["core_data_available"], False)
+
+        # 未显式传入时不引入该字段，保持其它上下文行为不变
+        env2 = SERVER._make_context_envelope("Preopen", {"a": 1}, ["b"])
+        self.assertEqual(env2["data_status"], "partial")
+        self.assertNotIn("core_data_available", env2)
+
+    def test_breadth_red_ratio_reads_production_shape(self):
+        """breadth_red_ratio 须能解析生产真实结构，缺失 red_rate 时由涨跌家数现算。"""
+        # 1. 精确快照 red_rate 优先
+        self.assertAlmostEqual(
+            SERVER.breadth_red_ratio({"latest_exact_snapshot": {"red_rate": "33.19%"}}),
+            33.19, places=2,
+        )
+        # 2. red_rate 缺失时由 up/down 现算
+        self.assertAlmostEqual(
+            SERVER.breadth_red_ratio({"latest_exact_snapshot": {"up_count": 1400, "down_count": 2600}}),
+            35.0, places=4,
+        )
+        # 3. 只有历史窗口时取最后一日的 red_rate
+        self.assertAlmostEqual(
+            SERVER.breadth_red_ratio({"days_window": [{"red_rate": "55.00%"}]}),
+            55.0, places=2,
+        )
+        # 4. 无法解析返回 None（而非乐观默认 50%）
+        self.assertIsNone(SERVER.breadth_red_ratio({"data_status": "ok"}))
+        self.assertIsNone(SERVER.breadth_red_ratio(None))
+
+    def test_wyckoff_macro_phase_requires_long_term_evidence(self):
+        """无年线证据（有效K线不足 200 根）时不得默认断言牛市主升。"""
+        bars = []
+        price = 10.0
+        for _ in range(30):
+            price += 0.1
+            bars.append({"open": price - 0.05, "high": price + 0.1,
+                         "low": price - 0.1, "close": price, "volume": 10000.0})
+        sig = SERVER.compute_wyckoff_signals(
+            bars, ma20=11.0, ma50=10.0, ma120=None, ma250=None, ma500=None,
+            atr14=0.3, latest_close=price, bias_ma20=2.0,
+            high_year=price, low_year=8.0, high_3y=price, low_3y=8.0,
+        )
+        self.assertEqual(sig["macro_wyckoff_phase"], "STAGE_UNKNOWN_INSUFFICIENT_LONG_TERM")
+        self.assertIsNotNone(sig["macro_phase_note"])
+        self.assertNotIn("MARKUP_BULLISH", sig["macro_wyckoff_phase"])
+
+    def test_wyckoff_macro_phase_uses_year_line_when_available(self):
+        """有年线/两年线证据时正常判定，macro_phase_note 保持为空。"""
+        bars = []
+        price = 10.0
+        for _ in range(30):
+            price += 0.1
+            bars.append({"open": price - 0.05, "high": price + 0.1,
+                         "low": price - 0.1, "close": price, "volume": 10000.0})
+        sig = SERVER.compute_wyckoff_signals(
+            bars, ma20=11.0, ma50=10.0, ma120=9.5, ma250=9.0, ma500=8.5,
+            atr14=0.3, latest_close=price, bias_ma20=2.0,
+            high_year=price, low_year=8.0, high_3y=price, low_3y=8.0,
+        )
+        self.assertIsNone(sig["macro_phase_note"])
+        self.assertNotEqual(sig["macro_wyckoff_phase"], "STAGE_UNKNOWN_INSUFFICIENT_LONG_TERM")
 
     def test_partial_failure_graceful_degradation(self):
         """测试子数据源部分故障时标记 partial 且记录 missing 列表。"""

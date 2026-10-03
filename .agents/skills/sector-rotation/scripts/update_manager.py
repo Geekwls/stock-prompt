@@ -53,11 +53,21 @@ def runtime_metadata(root=ROOT):
 
 
 def version_key(value):
+    """把版本号归一为可比较的整数元组；无法解析（unknown/空/非语义化）时返回 None。
+
+    历史实现在解析失败时返回空元组 ()，而 () 小于任何非空元组，导致本地版本读取失败
+    （退化为 'unknown'）时，任意远端版本都会被误判为「有新版本」，甚至把降级当升级。
+    返回 None 并让调用方显式守卫，可在任一侧不可解析时保守地不宣称有更新。
+    """
     text = str(value).strip().lstrip("v").split("-", 1)[0]
+    if not text:
+        return None
     try:
         parts = tuple(int(part) for part in text.split("."))
     except ValueError:
-        return ()
+        return None
+    if not parts:
+        return None
     return parts + (0,) * (3 - len(parts))
 
 
@@ -77,7 +87,10 @@ def save_cache(payload):
     path = cache_path()
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    with open(temporary, "w", encoding="utf-8") as stream:
+        stream.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
     os.chmod(temporary, 0o600)
     os.replace(temporary, path)
 
@@ -115,11 +128,14 @@ def check_update(force=False, max_age_hours=24):
     try:
         remote = json.loads(fetch_bytes(remote_version_url(local["repo"])).decode("utf-8"))
         latest = str(remote.get("latest") or remote.get("tag_name") or "unknown").lstrip("v")
+        local_key = version_key(local["version"])
+        latest_key = version_key(latest)
         result = {
             "checked_at": now.isoformat(timespec="seconds"),
             "local_version": local["version"],
             "latest_version": latest,
-            "update_available": bool(version_key(latest) and version_key(latest) > version_key(local["version"])),
+            # 任一侧版本不可解析（None）时保守地不宣称有更新，避免误报/误判降级为升级
+            "update_available": bool(local_key and latest_key and latest_key > local_key),
             "release_url": remote.get("release_url") or remote.get("html_url") or f"https://github.com/{local['repo']}/releases/tag/v{latest}",
             "channel": remote.get("channel") or local["channel"],
             "status": "ok",

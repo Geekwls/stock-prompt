@@ -429,6 +429,12 @@ def cmd_record_daily(args):
     rec.update(record_metadata(args, DAILY_FORMULA_VERSION))
     rec.update({k: round(v, 2) for k, v in metrics.items() if v is not None})
     if mainline_sector:
+        previous_sector = existing.get("mainline_sector")
+        if previous_sector and previous_sector != mainline_sector:
+            # 换主线：上一主线的状态与 SEI 不再适用于新主线。若本次未显式提供，必须清理，
+            # 否则会把旧主线的 mainline_state / sei 挂到新主线上，造成跨主线口径混用。
+            rec.pop("mainline_state", None)
+            rec.pop("sei", None)
         rec["mainline_sector"] = mainline_sector
         if mainline_state:
             rec["mainline_state"] = mainline_state
@@ -1005,8 +1011,10 @@ def migrate_ledger(path):
                 changed += 1
             if "model_version" not in rec:
                 rec["model_version"] = "legacy"
+                changed += 1
             if "formula_version" not in rec:
                 rec["formula_version"] = "legacy"
+                changed += 1
             output.append(json.dumps(rec, ensure_ascii=False) + "\n")
     if not changed:
         print(f"[OK] 无需迁移: {path}")

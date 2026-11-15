@@ -36,6 +36,9 @@ for parent in script_path.parents:
     if (parent / "registry.json").is_file() or (parent / ".stock-prompt-runtime.json").is_file():
         sys.path.insert(0, str(parent))
         break
+# 交易门禁依赖同目录 trading_calendar (scripts 模块)
+if str(script_path.parent) not in sys.path:
+    sys.path.insert(0, str(script_path.parent))
 from tools.calculations.market import calculate_atr_state
 from tools.calculations.metrics import calculate_multiclass_brier
 
@@ -257,6 +260,10 @@ def cmd_record(args):
     if not re.fullmatch(r"S[0-6]", regime_token):
         print(f"[WARN] regime '{args.regime}' 不符合 S0-S6 约定，仍按原样记录")
     phase = getattr(args, "market_phase", "preopen")
+    from trading_calendar import validate_record_date
+    ok, gate_message = validate_record_date(args.date, phase)
+    if not ok:
+        sys.exit(f"[BLOCKED] {gate_message}")
     previous = matching_records(args.ledger, "prediction", args.date, phase)
     if matching_records(args.ledger, "result", args.date):
         sys.exit("[ERR] 当日收盘结果已存在，禁止事后补写或修改盘前预测")
@@ -316,7 +323,18 @@ def dual_write_artifact(kind, record):
         print(f"[WARN] Artifact 双写失败（不影响台账与分析）: {exc}")
 
 
+
+
+def _require_trading_date(date_str, purpose="记录"):
+    """通用门禁：目标日期必须是 A 股交易日 (复用交易日历, 禁止心算日历)。"""
+    from trading_calendar import validate_record_date
+    ok, message = validate_record_date(date_str, "result")
+    if not ok:
+        sys.exit(f"[BLOCKED] {purpose}日期校验失败: {message}")
+
+
 def cmd_result(args):
+    _require_trading_date(args.date, "收盘结果")
     previous = matching_records(args.ledger, "result", args.date)
     if previous and not getattr(args, "revise", False):
         sys.exit("[ERR] 同日收盘结果已存在；如需纠错，请使用 --revise 并填写 --revision-reason")
@@ -437,6 +455,7 @@ def cmd_record_daily(args):
     for key in ("up_ratio", "promotion", "break_rate", "sentiment_total", "capital_continuity", "opportunity"):
         if metrics[key] is not None and not 0 <= metrics[key] <= 100:
             sys.exit(f"[ERR] --{key.replace('_', '-')} 必须位于 0-100")
+    _require_trading_date(args.date, "每日评分")
     # 合并写入：同一交易日的情绪分（daily-review 落盘）与战术结论（sector-rotation 落盘）
     # 往往来自不同 Skill 的不同批次，若整条覆盖会互相清空对方字段。此处以已有记录为基底，
     # 仅用本次显式提供的字段覆盖，缺省字段保留原值（同日期重复写仍满足后写覆盖语义）。

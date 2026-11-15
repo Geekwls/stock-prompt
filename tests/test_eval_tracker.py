@@ -370,9 +370,12 @@ class DailyScoresLedgerTest(unittest.TestCase):
     def test_report_daily_threshold_percentiles(self):
         with tempfile.TemporaryDirectory() as temporary:
             daily = str(Path(temporary) / "daily_scores.jsonl")
-            for i, ratio in enumerate([30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0]):
+            # 7 个连续交易日 (每日评分语义上必须属于交易日, 不得使用周末日期)
+            trading_days = ["2026-08-31", "2026-09-01", "2026-09-02", "2026-09-03",
+                            "2026-09-04", "2026-09-07", "2026-09-08"]
+            for day, ratio in zip(trading_days, [30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0]):
                 record = argparse.Namespace(
-                    date=f"2026-09-{i + 1:02d}", up_ratio=ratio, premium=1.0,
+                    date=day, up_ratio=ratio, premium=1.0,
                     promotion=50.0, break_rate=30.0, volume_dev=0.0,
                     sentiment_total=60.0, capital_continuity=None, opportunity=None,
                     top_sector="", daily_ledger=daily,
@@ -455,13 +458,15 @@ class TacticLedgerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             daily = str(Path(temporary) / "daily_scores.jsonl")
             with redirect_stdout(io.StringIO()):
+                # 4 个连续交易日 (每日评分语义上必须属于交易日, 不得使用周末日期)
+                days = ["2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24"]
                 for i, (rot, outcome) in enumerate([
                     ("electric_fan", "confirmed"),
                     ("electric_fan", "failed"),
                     ("mainline_focused", "confirmed"),
                     ("mainline_focused", "unverifiable"),
                 ]):
-                    day = f"2026-09-{20 + i:02d}"
+                    day = days[i]
                     TRACKER.cmd_record_daily(_daily_namespace(day, daily, rotation_type=rot))
                     TRACKER.cmd_reconcile_tactics(argparse.Namespace(
                         date=day, rotation_outcome=outcome, divergence_outcome=None,

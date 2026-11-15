@@ -9,6 +9,13 @@
 - 报告必须给出 `as_of`，区分盘中快照、收盘数据、公告日期和财务报告期。过期数据可作背景，不得伪装成当前状态。
 - 不同来源、日期或统计口径的数据不得直接拼接计算；存在冲突时并列披露并降低置信度。
 
+## 时间基准纪律 (Date Grounding)
+
+- **禁止心算日期、星期与交易日**：所有日期字段（`as_of`、`trading_date`、目标交易日、相对时间词）必须以系统时钟与交易日历工具的输出为准——优先执行 `python scripts/trading_calendar.py today`（输出日期、星期、前后交易日）；运行环境只提供日期不含星期时，必须先用日历工具确认星期，不得自行推算。
+- 报告中的相对时间词（今天/明天/上周五/近5日）首次出现必须括注绝对日期与星期（如"明天（2026-11-16 星期一）"）。
+- 首屏摘要卡必须输出**时间基准行**（日期 + 星期 + 目标交易日），由日历工具生成，不得手写。
+- 台账与 Artifact 落盘强制交易日一致性校验（`eval record` / `handoff write` 内置门禁）：目标日期必须是有效交易日；盘前/竞价类预测的"未来日期"必须等于日历推算的下一交易日；预测类 Handoff 的 `trading_date` 落在周末/节假日时自动顺延至下一交易日并注明派生来源。校验失败拒绝写入并输出 `[BLOCKED]`，不得静默落盘。
+
 ## MCP 与结构化公开数据协议
 
 当宿主智能体环境已挂载 MCP 金融数据工具（如 `marketgraph-data`）时，执行以下优先路由协议：
@@ -126,6 +133,7 @@ Scored Weight = 实际参与评分的原始权重
 
 ```text
 结论：<一句话，不得超过两句>
+时间基准：<YYYY-MM-DD 星期X ｜ 目标交易日 YYYY-MM-DD 星期X；不适用时写 N/A>
 逻辑状态：<强化/稳定/弱化/证伪/不适用>
 当前位置：<阶段或位置；不适用时写 N/A>
 置信度：<高/中/低/数据不足>
@@ -135,7 +143,7 @@ Scored Weight = 实际参与评分的原始权重
 下一步观察：<一至三项可验证变量>
 ```
 
-同时输出机器可读的 `summary_card`，字段至少包含 `summary`、`logic_health`、`structure_position`、`confidence`、`coverage`、`data_status`、`risk_flags`、`next_actions`。`next_actions` 只能使用当前能力支持的操作，例如 `view_evidence`、`retry_data`、`render_report`、`view_calibration` 或跳转其他专业 Skill。
+同时输出机器可读的 `summary_card`，字段至少包含 `summary`、`time_basis`（日期/星期/目标交易日）、`logic_health`、`structure_position`、`confidence`、`coverage`、`data_status`、`risk_flags`、`next_actions`。`next_actions` 只能使用当前能力支持的操作，例如 `view_evidence`、`retry_data`、`render_report`、`view_calibration` 或跳转其他专业 Skill。
 
 展示规则：首屏只显示摘要卡和各证据层的一句话状态；用户追问或调用 `view_evidence` 后，再展开事实、推断、反证、来源、数据时间和覆盖率。`coverage < 70%` 时 `data_status` 必须为“部分数据”或“数据不足”，只做条件化判断，不得输出精确综合评分。
 

@@ -146,7 +146,7 @@ class MainlineLedgerTest(unittest.TestCase):
             daily = str(Path(temporary) / "daily_scores.jsonl")
             states = [("2026-09-01", "半导体", "启动"), ("2026-09-02", "半导体", "启动"),
                       ("2026-09-03", "半导体", "强化"), ("2026-09-04", "半导体", "分歧"),
-                      ("2026-09-05", "农业", "启动")]
+                      ("2026-09-07", "农业", "启动")]
             for day, sector, state in states:
                 args = argparse.Namespace(
                     date=day, up_ratio=None, premium=None, promotion=None, break_rate=None,

@@ -19,7 +19,8 @@
         "handoff_store.py",
         "artifact_store.py",
         "calculate.py",
-        "update_manager.py"
+        "update_manager.py",
+        "trading_calendar.py"
       ]
     },
     {
@@ -34,7 +35,8 @@
         "handoff_store.py",
         "artifact_store.py",
         "calculate.py",
-        "update_manager.py"
+        "update_manager.py",
+        "trading_calendar.py"
       ]
     },
     {
@@ -48,7 +50,8 @@
         "handoff_store.py",
         "artifact_store.py",
         "calculate.py",
-        "update_manager.py"
+        "update_manager.py",
+        "trading_calendar.py"
       ]
     },
     {
@@ -63,7 +66,8 @@
         "thesis_store.py",
         "artifact_store.py",
         "calculate.py",
-        "update_manager.py"
+        "update_manager.py",
+        "trading_calendar.py"
       ]
     },
     {
@@ -77,7 +81,8 @@
         "thesis_store.py",
         "artifact_store.py",
         "calculate.py",
-        "update_manager.py"
+        "update_manager.py",
+        "trading_calendar.py"
       ]
     }
   ],
@@ -143,6 +148,7 @@
     "thesis_store.py": "scripts/thesis_store.py",
     "artifact_store.py": "scripts/artifact_store.py",
     "calculate.py": "scripts/calculate.py",
-    "update_manager.py": "scripts/update_manager.py"
+    "update_manager.py": "scripts/update_manager.py",
+    "trading_calendar.py": "scripts/trading_calendar.py"
   }
 }

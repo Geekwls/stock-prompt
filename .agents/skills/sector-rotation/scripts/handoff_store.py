@@ -18,6 +18,10 @@ for _parent in Path(__file__).resolve().parents:
             sys.path.insert(0, str(_parent))
         break
 
+# 交易门禁依赖同目录 trading_calendar（scripts 模块），保证任意加载方式均可解析
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 
 SCHEMA_VERSION = "1.0"
 REPORT_TYPES = {"prediction", "daily", "rotation", "stock"}
@@ -168,6 +172,23 @@ def load_json(path=None, from_stdin=False):
 def prepare_handoff(payload, model_version=None):
     prepared = normalize_handoff_aliases(payload)
     trading_date = parse_trading_date(prepared.get("trading_date") or prepared.get("as_of"))
+    if prepared.get("report_type") == "prediction":
+        # 时间基准门禁：预测 trading_date 必须落在 A 股交易日；周末/节假日提前推演
+        # 自动顺延至下一交易日并注明派生来源，显式传入非交易日则拒绝写入。
+        from trading_calendar import is_trading_day, next_trading_day, weekday_cn
+        _, closed, _ = load_calendar(find_calendar())
+        if not is_trading_day(trading_date, closed):
+            if prepared.get("trading_date"):
+                raise ValueError(
+                    f"trading_date {trading_date.isoformat()} 不是 A 股交易日"
+                    f"（{weekday_cn(trading_date)}），请以 scripts/trading_calendar.py 推算目标交易日"
+                )
+            derived = next_trading_day(trading_date, closed)
+            prepared["trading_date_note"] = (
+                f"as_of 为非交易日（{weekday_cn(trading_date)}），"
+                f"预测 trading_date 自动顺延至 {derived.isoformat()}"
+            )
+            trading_date = derived
     prepared.setdefault("schema_version", SCHEMA_VERSION)
     prepared.setdefault("model_version", model_version or discover_model_version())
     prepared.setdefault("created_at", datetime.now().astimezone().isoformat(timespec="seconds"))

@@ -8,10 +8,10 @@
 
 | 指标项 | 统计值 | 说明 |
 |---|---|---|
-| **测试模块数** | 34 个测试模块 | 分布于 `tests/` 目录 |
-| **测试用例总数** | **322 个单元与集成测试** | 涵盖确定性数学计算、实盘战法门禁、MCP 数据网关、并发多线程与动态诊断等 |
-| **测试执行耗时** | ~4.0 秒 | 全量纯 Python 本地快速执行，无需外部网络依赖 |
-| **测试通过率** | **100% (322/322 OK)** | 零失败、零警告、零退化 |
+| **测试模块数** | 35 个测试模块 | 分布于 `tests/` 目录 |
+| **测试用例总数** | **339 个单元与集成测试** | 涵盖确定性数学计算、实盘战法门禁、MCP 数据网关、交易日历门禁与并发多线程等 |
+| **测试执行耗时** | ~4.5 秒 | 全量纯 Python 本地快速执行，无需外部网络依赖 |
+| **测试通过率** | **100% (339/339 OK)** | 零失败、零警告、零退化 |
 | **测试环境要求** | Python 3.10+ | 仅依赖标准库 `unittest` + 可选 `Pillow` (用于战报渲染校验) |
 
 ---
@@ -96,6 +96,7 @@
 | [`test_eval_tracker.py`](../tests/test_eval_tracker.py) | 29 | 预测评估台账：record (盘前记录)、result (收盘对账)、record-daily (情绪与主线记录)、replay (滚动回放)、misses (漏判主线复盘)、report (Brier与命中率报告)、换行缺失保护与安全落盘 |
 | [`test_eval_tracker_versioning.py`](../tests/test_eval_tracker_versioning.py) | 3 | 台账数据 Schema、模型与公式版本自动迁移机制 |
 | [`test_review_insights.py`](../tests/test_review_insights.py) | 13 | 周度/月度复盘洞察摘要生成器与多主线迁移矩阵 |
+| [`test_trading_calendar.py`](../tests/test_trading_calendar.py) | 17 | 交易日历确定性工具与时间门禁：假期与周末判定、交易日窗口推导、落盘时点合法性门禁 |
 | [`test_stock_prompt_cli.py`](../tests/test_stock_prompt_cli.py) | 6 | `scripts/stock_prompt.py` 统一 CLI 子命令转发与调用 |
 | [`test_stock_prompt_home.py`](../tests/test_stock_prompt_home.py) | 3 | 环境变量 `STOCK_PROMPT_HOME` 路径解析与状态目录隔离 |
 
